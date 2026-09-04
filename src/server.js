@@ -92,10 +92,10 @@ async function handleApi(request, response, pathname) {
       if (waitMs > 0) return json(response, 429, { error: `Please wait ${Math.ceil(waitMs / 1_000)} seconds before waking this device again.` });
       wakeRequests.set(wakeId, now);
       try {
-        await sendMagicPacket({ macAddress: device.macAddress, broadcastAddress: device.broadcastAddress, port: config.wolPort });
+        const dispatch = await sendMagicPacket({ macAddress: device.macAddress, broadcastAddress: device.broadcastAddress, ipAddress: device.ipAddress, port: config.wolPort });
         store.markWake(wakeId);
-        store.audit(wakeId, 'sent');
-        return json(response, 200, { message: `Wake packet sent to ${device.name}. This does not confirm that it has powered on.` });
+        store.audit(wakeId, 'sent', `${dispatch.sent}/${dispatch.attempted} Moonlight-compatible UDP datagrams sent`);
+        return json(response, 200, { message: `Wake packet sent to ${device.name} (${dispatch.sent}/${dispatch.attempted} Moonlight-compatible UDP datagrams). This does not confirm that it has powered on.` });
       } catch (error) {
         store.audit(wakeId, 'failed', String(error.message).slice(0, 240));
         return json(response, 502, { error: 'Unable to send the wake packet. Check the host network and device broadcast address.' });
