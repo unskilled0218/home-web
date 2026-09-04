@@ -1,0 +1,13 @@
+services:
+  lan-wol:
+    build: .
+    network_mode: host
+    environment:
+      HOST: 127.0.0.1
+      PORT: 3000
+      DATABASE_PATH: /app/data/wol.db
+      WOL_PORT: 9
+      WAKE_COOLDOWN_SECONDS: 20
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped

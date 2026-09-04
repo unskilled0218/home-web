@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#102a43">
+    <title>LAN Wake</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <header class="hero">
+        <div><p class="eyebrow">SELF-HOSTED · LOCAL LAN</p><h1>Wake your machines.</h1><p class="subtitle">Send a magic packet from this dashboard. Sending confirms dispatch only, not that a computer has powered on.</p></div>
+        <button class="button secondary" id="new-device" type="button">Add device</button>
+      </header>
+      <section class="toolbar" aria-label="Device tools">
+        <label class="search"><span class="sr-only">Search devices</span><input id="search" type="search" placeholder="Search devices or groups"></label>
+        <button class="button" id="wake-selected" type="button" disabled>Wake selected</button>
+      </section>
+      <p class="status" id="status" role="status" aria-live="polite"></p>
+      <section id="devices" class="groups" aria-live="polite"></section>
+    </main>
+    <dialog id="device-dialog">
+      <form id="device-form">
+        <div class="dialog-heading"><h2 id="dialog-title">Add device</h2><button class="icon-button" id="dialog-close" type="button" aria-label="Close">×</button></div>
+        <input id="device-id" type="hidden">
+        <label>Name<input id="name" name="name" maxlength="80" required placeholder="Office PC"></label>
+        <label>MAC address<input id="mac" name="macAddress" required placeholder="AA:BB:CC:DD:EE:FF" pattern="([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}"></label>
+        <label>Broadcast address<input id="broadcast" name="broadcastAddress" required placeholder="192.168.1.255" inputmode="decimal"></label>
+        <label>IP address <span class="optional">optional</span><input id="ip" name="ipAddress" placeholder="192.168.1.42" inputmode="decimal"></label>
+        <label>Group <span class="optional">optional</span><input id="group" name="group" maxlength="80" placeholder="Office"></label>
+        <div class="dialog-actions"><button class="button secondary" value="cancel" type="button" id="cancel">Cancel</button><button class="button" value="default" type="submit">Save device</button></div>
+      </form>
+    </dialog>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
