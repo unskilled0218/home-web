@@ -1,0 +1,16 @@
+services:
+  lan-wol:
+    image: node:24-bookworm-slim
+    network_mode: host
+    working_dir: /app
+    command: node src/server.js
+    environment:
+      HOST: ${HOST:-127.0.0.1}
+      PORT: ${PORT:-3000}
+      DATABASE_PATH: /app/data/wol.db
+      WOL_PORT: ${WOL_PORT:-9}
+      WAKE_COOLDOWN_SECONDS: ${WAKE_COOLDOWN_SECONDS:-20}
+    volumes:
+      - ./:/app:ro
+      - ./data:/app/data
+    restart: unless-stopped

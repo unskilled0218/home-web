@@ -17,10 +17,10 @@ For another device on the LAN to reach the dashboard, set `HOST` to the server's
 
 ## Container deployment
 
-The supplied Compose configuration uses host networking because UDP broadcast packets need to leave through the LAN interface. On Linux, adjust `HOST` in `compose.yaml` to the host's private address before running:
+The supplied `docker-compose.yml` uses the official Node image and host networking because UDP broadcast packets need to leave through the LAN interface. On Linux, set `HOST` to the host's private address before running:
 
 ```sh
-docker compose up -d --build
+HOST=192.168.1.10 docker compose up -d
 ```
 
 Restrict port 3000 at the host firewall to the trusted LAN. If a reverse proxy is used, keep it LAN-only and pass requests directly to the private-bound application. Host networking behaves differently on Docker Desktop; run the service directly on the LAN host there.
