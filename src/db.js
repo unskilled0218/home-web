@@ -27,6 +27,16 @@ export function createStore(databasePath) {
       detail TEXT,
       FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS linkwarden_config (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      base_url TEXT NOT NULL,
+      collection_id INTEGER NOT NULL CHECK (collection_id > 0),
+      key_ciphertext TEXT NOT NULL,
+      key_iv TEXT NOT NULL,
+      key_tag TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
   `);
 
   const mapDevice = (row) => row && ({
@@ -45,8 +55,12 @@ export function createStore(databasePath) {
     update: db.prepare("UPDATE devices SET name = ?, mac_address = ?, broadcast_address = ?, ip_address = ?, group_name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?"),
     remove: db.prepare('DELETE FROM devices WHERE id = ?'),
     markWake: db.prepare('UPDATE devices SET last_wake_requested_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?'),
-    audit: db.prepare('INSERT INTO wake_attempts (device_id, outcome, detail) VALUES (?, ?, ?)')
+    audit: db.prepare('INSERT INTO wake_attempts (device_id, outcome, detail) VALUES (?, ?, ?)'),
+    getLinkwarden: db.prepare('SELECT * FROM linkwarden_config WHERE id = 1'),
+    saveLinkwarden: db.prepare("INSERT INTO linkwarden_config (id, base_url, collection_id, key_ciphertext, key_iv, key_tag) VALUES (1, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET base_url = excluded.base_url, collection_id = excluded.collection_id, key_ciphertext = excluded.key_ciphertext, key_iv = excluded.key_iv, key_tag = excluded.key_tag, updated_at = CURRENT_TIMESTAMP"),
+    removeLinkwarden: db.prepare('DELETE FROM linkwarden_config WHERE id = 1')
   };
+  const mapLinkwarden = (row) => row && ({ baseUrl: row.base_url, collectionId: row.collection_id, encryptedKey: { ciphertext: row.key_ciphertext, iv: row.key_iv, tag: row.key_tag }, updatedAt: row.updated_at });
   return {
     list: () => queries.list.all().map(mapDevice),
     get: (id) => mapDevice(queries.get.get(id)),
@@ -55,6 +69,9 @@ export function createStore(databasePath) {
     remove: (id) => queries.remove.run(id).changes > 0,
     markWake: (id) => queries.markWake.run(id),
     audit: (id, outcome, detail = null) => queries.audit.run(id, outcome, detail),
+    getLinkwarden: () => mapLinkwarden(queries.getLinkwarden.get()),
+    saveLinkwarden: ({ baseUrl, collectionId, encryptedKey }) => queries.saveLinkwarden.run(baseUrl, collectionId, encryptedKey.ciphertext, encryptedKey.iv, encryptedKey.tag),
+    removeLinkwarden: () => queries.removeLinkwarden.run().changes > 0,
     close: () => db.close()
   };
 }

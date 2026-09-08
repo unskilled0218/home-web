@@ -1,10 +1,15 @@
-const state = { devices: [], selected: new Set() };
+const state = { devices: [], selected: new Set(), bookmarks: [], linkwarden: null };
 const devicesElement = document.querySelector('#devices');
 const statusElement = document.querySelector('#status');
 const searchElement = document.querySelector('#search');
 const selectedButton = document.querySelector('#wake-selected');
 const dialog = document.querySelector('#device-dialog');
 const form = document.querySelector('#device-form');
+const bookmarksElement = document.querySelector('#bookmarks');
+const bookmarkStatusElement = document.querySelector('#bookmark-status');
+const linkwardenDialog = document.querySelector('#linkwarden-dialog');
+const linkwardenForm = document.querySelector('#linkwarden-form');
+const linkwardenError = document.querySelector('#linkwarden-error');
 
 function setStatus(message = '', error = false) {
   statusElement.textContent = message;
@@ -54,8 +59,31 @@ function render() {
   }
 }
 
+function renderBookmarks(message = '') {
+  bookmarksElement.replaceChildren();
+  bookmarkStatusElement.textContent = message;
+  if (!state.linkwarden?.configured) { bookmarkStatusElement.textContent = 'Bookmarks are not connected. Open Bookmarks settings to connect Linkwarden.'; return; }
+  if (!state.bookmarks.length) { const empty = document.createElement('p'); empty.className = 'empty'; empty.textContent = 'No valid bookmarks were found in this collection.'; bookmarksElement.append(empty); return; }
+  for (const bookmark of state.bookmarks) {
+    const card = document.createElement('article'); card.className = 'bookmark';
+    const link = document.createElement('a'); link.href = bookmark.url; link.target = '_blank'; link.rel = 'noopener noreferrer'; link.textContent = bookmark.name; card.append(link);
+    if (bookmark.description) { const description = document.createElement('p'); description.textContent = bookmark.description; card.append(description); }
+    if (bookmark.tags?.length) { const tags = document.createElement('p'); tags.className = 'tags'; tags.textContent = bookmark.tags.join(' · '); card.append(tags); }
+    bookmarksElement.append(card);
+  }
+}
+
 async function load() {
   try { state.devices = (await api('/api/devices')).devices; state.selected = new Set([...state.selected].filter((id) => state.devices.some((device) => device.id === id))); render(); } catch (error) { setStatus(error.message, true); }
+}
+
+async function loadBookmarks(refresh = false) {
+  bookmarkStatusElement.textContent = 'Loading bookmarks…';
+  try { const result = await api(`/api/bookmarks${refresh ? '?refresh=1' : ''}`); state.bookmarks = result.bookmarks; renderBookmarks(result.stale ? 'Showing recently cached bookmarks while Linkwarden is unavailable.' : ''); } catch (error) { renderBookmarks(error.message); }
+}
+
+async function loadLinkwarden() {
+  try { state.linkwarden = (await api('/api/linkwarden')).linkwarden; renderBookmarks(); if (state.linkwarden.configured) await loadBookmarks(); } catch (error) { bookmarkStatusElement.textContent = error.message; }
 }
 
 async function wake(device) {
@@ -95,4 +123,31 @@ selectedButton.addEventListener('click', async () => {
   const failed = results.filter((result) => result.status === 'rejected').length;
   state.selected.clear(); render(); setStatus(failed ? `${failed} wake request(s) failed.` : `Wake packets sent to ${devices.length} device(s).`, Boolean(failed));
 });
-load();
+function openLinkwardenForm() {
+  const settings = state.linkwarden;
+  linkwardenForm.reset(); linkwardenError.textContent = '';
+  document.querySelector('#linkwarden-url').value = settings?.baseUrl ?? '';
+  document.querySelector('#linkwarden-collection').value = settings?.collectionId ?? '';
+  document.querySelector('#disconnect-linkwarden').hidden = !settings?.configured;
+  document.querySelector('#linkwarden-help').textContent = settings?.encryptionReady ? 'The API key is encrypted on this server and never shown again. Leave it blank to retain the configured key.' : 'Set a valid server encryption key before connecting Linkwarden.';
+  linkwardenDialog.showModal();
+}
+
+function linkwardenPayload() { return Object.fromEntries(new FormData(linkwardenForm)); }
+
+document.querySelector('#linkwarden-settings').addEventListener('click', openLinkwardenForm);
+document.querySelector('#linkwarden-close').addEventListener('click', () => linkwardenDialog.close());
+document.querySelector('#refresh-bookmarks').addEventListener('click', () => loadBookmarks(true));
+document.querySelector('#test-linkwarden').addEventListener('click', async () => {
+  linkwardenError.textContent = '';
+  try { linkwardenError.textContent = (await api('/api/linkwarden/test', { method: 'POST', body: JSON.stringify(linkwardenPayload()) })).message; } catch (error) { linkwardenError.textContent = error.message; }
+});
+document.querySelector('#disconnect-linkwarden').addEventListener('click', async () => {
+  if (!window.confirm('Disconnect Linkwarden and delete its saved API key?')) return;
+  try { await api('/api/linkwarden', { method: 'DELETE' }); linkwardenDialog.close(); state.bookmarks = []; await loadLinkwarden(); } catch (error) { linkwardenError.textContent = error.message; }
+});
+linkwardenForm.addEventListener('submit', async (event) => {
+  event.preventDefault(); linkwardenError.textContent = '';
+  try { state.linkwarden = (await api('/api/linkwarden', { method: 'PUT', body: JSON.stringify(linkwardenPayload()) })).linkwarden; linkwardenDialog.close(); await loadBookmarks(true); } catch (error) { linkwardenError.textContent = error.message; }
+});
+load(); loadLinkwarden();

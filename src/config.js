@@ -13,5 +13,7 @@ export const config = Object.freeze({
   port: integer(process.env.PORT, 3000, 'PORT'),
   databasePath: path.resolve(process.env.DATABASE_PATH ?? './data/wol.db'),
   wolPort: integer(process.env.WOL_PORT, 9, 'WOL_PORT'),
-  wakeCooldownSeconds: integer(process.env.WAKE_COOLDOWN_SECONDS, 20, 'WAKE_COOLDOWN_SECONDS')
+  wakeCooldownSeconds: integer(process.env.WAKE_COOLDOWN_SECONDS, 20, 'WAKE_COOLDOWN_SECONDS'),
+  linkwardenEncryptionKey: process.env.LINKWARDEN_CONFIG_ENCRYPTION_KEY ?? '',
+  linkwardenCacheSeconds: integer(process.env.LINKWARDEN_CACHE_SECONDS, 60, 'LINKWARDEN_CACHE_SECONDS')
 });

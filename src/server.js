@@ -5,11 +5,14 @@ import { fileURLToPath } from 'node:url';
 import { config } from './config.js';
 import { createStore } from './db.js';
 import { normalizeBroadcastAddress, normalizeMacAddress, isValidIpv4, sendMagicPacket } from './wol.js';
+import { decryptApiKey, encryptApiKey, encryptionKey } from './linkwarden-crypto.js';
+import { createLinkwardenClient, normalizeLinkwardenConfig } from './linkwarden.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const publicRoot = path.join(root, 'public');
 const store = createStore(config.databasePath);
 const wakeRequests = new Map();
+const linkwarden = createLinkwardenClient({ cacheSeconds: config.linkwardenCacheSeconds });
 const MIME_TYPES = { '.css': 'text/css; charset=utf-8', '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml' };
 
 function json(response, status, body) {
@@ -57,6 +60,27 @@ function deviceId(pathname, suffix = '') {
   return match ? Number(match[1]) : null;
 }
 
+function linkwardenStatus() {
+  const saved = store.getLinkwarden();
+  let encryptionReady = false;
+  try { encryptionKey(config.linkwardenEncryptionKey); encryptionReady = true; } catch { /* The optional integration remains disabled until a valid key is supplied. */ }
+  return { configured: Boolean(saved), keyPresent: Boolean(saved), encryptionReady, ...(saved && { baseUrl: saved.baseUrl, collectionId: saved.collectionId, updatedAt: saved.updatedAt }) };
+}
+
+function savedLinkwardenSettings() {
+  const saved = store.getLinkwarden();
+  if (!saved) throw new Error('Linkwarden is not configured.');
+  try { return { baseUrl: saved.baseUrl, collectionId: saved.collectionId, apiKey: decryptApiKey(saved.encryptedKey, config.linkwardenEncryptionKey) }; } catch { throw new Error('Linkwarden credentials cannot be decrypted. Check the encryption secret.'); }
+}
+
+async function requestedLinkwardenSettings(request) {
+  const existing = store.getLinkwarden();
+  const input = await readJson(request);
+  const settings = normalizeLinkwardenConfig(input, existing);
+  if (!settings.apiKey && existing) settings.apiKey = decryptApiKey(existing.encryptedKey, config.linkwardenEncryptionKey);
+  return settings;
+}
+
 async function serveStatic(request, response, pathname) {
   const requested = pathname === '/' ? '/index.html' : pathname;
   const target = path.resolve(publicRoot, `.${requested}`);
@@ -73,11 +97,33 @@ async function handleApi(request, response, pathname) {
   if (request.method !== 'GET' && !sameOrigin(request)) return json(response, 403, { error: 'Request origin is not allowed.' });
   if (request.method === 'GET' && pathname === '/api/health') return json(response, 200, { status: 'ok' });
   if (request.method === 'GET' && pathname === '/api/devices') return json(response, 200, { devices: store.list() });
+  if (request.method === 'GET' && pathname === '/api/linkwarden') return json(response, 200, { linkwarden: linkwardenStatus() });
+  if (request.method === 'GET' && pathname === '/api/bookmarks') {
+    if (!store.getLinkwarden()) return json(response, 200, { configured: false, bookmarks: [] });
+    try {
+      const result = await linkwarden.getBookmarks(savedLinkwardenSettings(), { force: new URL(request.url, 'http://localhost').searchParams.get('refresh') === '1' });
+      return json(response, 200, { configured: true, ...result });
+    } catch { return json(response, 503, { configured: true, error: 'Bookmarks are currently unavailable.' }); }
+  }
 
   const id = deviceId(pathname);
   const wakeId = deviceId(pathname, '/wake');
   try {
     if (request.method === 'POST' && pathname === '/api/devices') return json(response, 201, { device: store.create(validateDevice(await readJson(request))) });
+    if (request.method === 'POST' && pathname === '/api/linkwarden/test') {
+      const settings = await requestedLinkwardenSettings(request);
+      await linkwarden.test(settings);
+      return json(response, 200, { message: 'Linkwarden connection succeeded.' });
+    }
+    if (request.method === 'PUT' && pathname === '/api/linkwarden') {
+      const settings = await requestedLinkwardenSettings(request);
+      store.saveLinkwarden({ baseUrl: settings.baseUrl, collectionId: settings.collectionId, encryptedKey: encryptApiKey(settings.apiKey, config.linkwardenEncryptionKey) });
+      linkwarden.clearCache();
+      return json(response, 200, { linkwarden: linkwardenStatus() });
+    }
+    if (request.method === 'DELETE' && pathname === '/api/linkwarden') {
+      store.removeLinkwarden(); linkwarden.clearCache(); return json(response, 204, {});
+    }
     if (request.method === 'PUT' && id) {
       if (!store.get(id)) return json(response, 404, { error: 'Device not found.' });
       return json(response, 200, { device: store.update(id, validateDevice(await readJson(request))) });

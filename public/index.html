@@ -11,7 +11,7 @@
     <main class="shell">
       <header class="hero">
         <div><p class="eyebrow">SELF-HOSTED · LOCAL LAN</p><h1>Wake your machines.</h1><p class="subtitle">Send a magic packet from this dashboard. Sending confirms dispatch only, not that a computer has powered on.</p></div>
-        <button class="button secondary" id="new-device" type="button">Add device</button>
+        <div class="hero-actions"><button class="button secondary" id="linkwarden-settings" type="button">Bookmarks settings</button><button class="button secondary" id="new-device" type="button">Add device</button></div>
       </header>
       <section class="toolbar" aria-label="Device tools">
         <label class="search"><span class="sr-only">Search devices</span><input id="search" type="search" placeholder="Search devices or groups"></label>
@@ -19,6 +19,11 @@
       </section>
       <p class="status" id="status" role="status" aria-live="polite"></p>
       <section id="devices" class="groups" aria-live="polite"></section>
+      <section class="bookmarks-section" aria-labelledby="bookmarks-title">
+        <div class="section-heading"><div><p class="eyebrow">LINKWARDEN</p><h2 id="bookmarks-title">Bookmarks</h2></div><button class="button secondary" id="refresh-bookmarks" type="button">Refresh</button></div>
+        <p class="bookmark-status" id="bookmark-status" role="status" aria-live="polite"></p>
+        <div class="bookmark-grid" id="bookmarks" aria-live="polite"></div>
+      </section>
     </main>
     <dialog id="device-dialog">
       <form id="device-form">
@@ -30,6 +35,17 @@
         <label>IP address <span class="optional">optional</span><input id="ip" name="ipAddress" placeholder="192.168.1.42" inputmode="decimal"></label>
         <label>Group <span class="optional">optional</span><input id="group" name="group" maxlength="80" placeholder="Office"></label>
         <div class="dialog-actions"><button class="button secondary" value="cancel" type="button" id="cancel">Cancel</button><button class="button" value="default" type="submit">Save device</button></div>
+      </form>
+    </dialog>
+    <dialog id="linkwarden-dialog">
+      <form id="linkwarden-form">
+        <div class="dialog-heading"><h2>Bookmarks settings</h2><button class="icon-button" id="linkwarden-close" type="button" aria-label="Close">×</button></div>
+        <p class="form-help" id="linkwarden-help">Connect a read-only Linkwarden collection. The API key is encrypted on this server and never shown again.</p>
+        <label>Linkwarden URL<input id="linkwarden-url" name="url" type="url" required placeholder="https://links.example.com"></label>
+        <label>Collection ID<input id="linkwarden-collection" name="collectionId" type="number" min="1" step="1" required placeholder="1"></label>
+        <label>API key <span class="optional">leave blank to keep current key</span><input id="linkwarden-key" name="apiKey" type="password" autocomplete="new-password" placeholder="Paste a read-only API key"></label>
+        <p class="dialog-error" id="linkwarden-error" role="alert"></p>
+        <div class="dialog-actions"><button class="button secondary" id="disconnect-linkwarden" type="button">Disconnect</button><button class="button secondary" id="test-linkwarden" type="button">Test connection</button><button class="button" type="submit">Save settings</button></div>
       </form>
     </dialog>
     <script type="module" src="/app.js"></script>

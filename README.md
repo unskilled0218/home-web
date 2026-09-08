@@ -43,3 +43,15 @@ npm test
 ```
 
 The tests validate MAC handling, IPv4 validation, and magic-packet construction. A safe packet-dispatch integration test requires a disposable UDP receiver on the deployment network.
+
+## Linkwarden bookmarks
+
+Bookmarks are optional and do not affect Wake-on-LAN. Before connecting Linkwarden, generate a server-only encryption secret and add it to the environment:
+
+```sh
+openssl rand -base64 32
+```
+
+Set that output as `LINKWARDEN_CONFIG_ENCRYPTION_KEY`, restart the service, then use **Bookmarks settings** in the dashboard to enter the Linkwarden base URL, collection ID, and a least-privilege read-only API key. The key is encrypted in `data/wol.db`; it is never returned to the browser. The dashboard requests only the selected collection through its own local endpoint, caches results for 60 seconds by default, and can refresh explicitly.
+
+The Linkwarden service must be reachable from the dashboard host with valid TLS appropriate to the deployment. Back up the database and encryption secret together. Losing the secret makes saved credentials unrecoverable; changing it requires deliberately decrypting and re-encrypting the saved key while the old secret is available. Use **Disconnect** to delete the saved configuration and encrypted key.
