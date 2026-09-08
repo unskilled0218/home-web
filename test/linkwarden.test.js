@@ -3,9 +3,10 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
+import { DatabaseSync } from 'node:sqlite';
 import { createStore } from '../src/db.js';
 import { decryptApiKey, encryptApiKey, encryptionKey } from '../src/linkwarden-crypto.js';
-import { createLinkwardenClient, normalizeBookmarks, normalizeLinkwardenConfig } from '../src/linkwarden.js';
+import { createLinkwardenClient, normalizeBookmarks, normalizeLinkwardenCredentials } from '../src/linkwarden.js';
 
 const secret = Buffer.alloc(32, 7).toString('base64');
 
@@ -18,25 +19,31 @@ test('encrypts Linkwarden keys with authenticated encryption', () => {
   assert.throws(() => encryptionKey('not-a-secret'), /base64/);
 });
 
-test('stores Linkwarden configuration without plaintext API key fields', () => {
+test('migrates and stores Linkwarden configuration without plaintext access-token fields', () => {
   const directory = mkdtempSync(path.join(tmpdir(), 'lan-wake-'));
-  const store = createStore(path.join(directory, 'wol.db'));
+  const databasePath = path.join(directory, 'wol.db');
+  const legacy = new DatabaseSync(databasePath);
+  legacy.exec('CREATE TABLE linkwarden_config (id INTEGER PRIMARY KEY, base_url TEXT NOT NULL, collection_id INTEGER NOT NULL, key_ciphertext TEXT NOT NULL, key_iv TEXT NOT NULL, key_tag TEXT NOT NULL, created_at TEXT, updated_at TEXT)');
+  legacy.prepare('INSERT INTO linkwarden_config VALUES (1, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)').run('https://links.example.test', 3, 'ciphertext', 'iv', 'tag');
+  legacy.close();
+  const store = createStore(databasePath);
   const encryptedKey = encryptApiKey('secret-api-key', secret);
   try {
-    store.saveLinkwarden({ baseUrl: 'https://links.example.test', collectionId: 3, encryptedKey });
+    assert.equal(store.getLinkwarden().username, null);
+    store.saveLinkwarden({ baseUrl: 'https://links.example.test', username: 'musty', collectionName: 'Reading', collectionId: 3, encryptedAccessToken: encryptedKey });
     const saved = store.getLinkwarden();
-    assert.deepEqual(Object.keys(saved).sort(), ['baseUrl', 'collectionId', 'encryptedKey', 'updatedAt']);
-    assert.equal(saved.encryptedKey.ciphertext.includes('secret-api-key'), false);
+    assert.deepEqual(Object.keys(saved).sort(), ['baseUrl', 'collectionId', 'collectionName', 'encryptedAccessToken', 'updatedAt', 'username']);
+    assert.equal(saved.encryptedAccessToken.ciphertext.includes('secret-api-key'), false);
     assert.equal(store.removeLinkwarden(), true);
     assert.equal(store.getLinkwarden(), undefined);
   } finally { store.close(); rmSync(directory, { recursive: true, force: true }); }
 });
 
-test('validates Linkwarden settings and retains an existing key when omitted', () => {
-  assert.deepEqual(normalizeLinkwardenConfig({ url: 'https://links.example.test/', collectionId: '42', apiKey: ' key ' }), { baseUrl: 'https://links.example.test', collectionId: 42, apiKey: 'key' });
-  assert.equal(normalizeLinkwardenConfig({ url: 'https://links.example.test', collectionId: 1, apiKey: '' }, {}).apiKey, null);
-  assert.throws(() => normalizeLinkwardenConfig({ url: 'file:///tmp', collectionId: 1, apiKey: 'key' }), /http or https/);
-  assert.throws(() => normalizeLinkwardenConfig({ url: 'https://links.example.test', collectionId: 0, apiKey: 'key' }), /positive/);
+test('validates Linkwarden username and access token credentials', () => {
+  assert.deepEqual(normalizeLinkwardenCredentials({ url: 'https://links.example.test/', username: ' musty ', accessToken: ' token ' }), { baseUrl: 'https://links.example.test', username: 'musty', accessToken: 'token' });
+  assert.equal(normalizeLinkwardenCredentials({ url: 'https://links.example.test', username: 'musty', accessToken: '' }, {}).accessToken, null);
+  assert.throws(() => normalizeLinkwardenCredentials({ url: 'file:///tmp', username: 'musty', accessToken: 'token' }), /http or https/);
+  assert.throws(() => normalizeLinkwardenCredentials({ url: 'https://links.example.test', username: '', accessToken: 'token' }), /Username/);
 });
 
 test('normalizes only safe bookmark fields', () => {
@@ -53,14 +60,25 @@ test('uses the collection endpoint, authorization, pagination, and cache fallbac
   const fetchImpl = async (url, options) => {
     requests.push({ url, options });
     if (fail) throw new Error('offline');
-    if (url.endsWith('/bookmarks')) return Response.json({ data: [{ id: 1, name: 'One', url: 'https://one.test' }], next: '?page=2' });
-    return Response.json({ data: [{ id: 2, name: 'Two', url: 'https://two.test' }] });
+    if (url.endsWith('/bookmarks')) return Response.json({ response: [{ id: 1, name: 'One', url: 'https://one.test' }], next: '?page=2' });
+    return Response.json({ response: [{ id: 2, name: 'Two', url: 'https://two.test' }] });
   };
   const client = createLinkwardenClient({ fetchImpl, cacheSeconds: 0 });
-  const settings = { baseUrl: 'https://links.example.test', collectionId: 7, apiKey: 'private-key' };
+  const settings = { baseUrl: 'https://links.example.test', collectionId: 7, accessToken: 'private-token' };
   assert.deepEqual(await client.getBookmarks(settings), { bookmarks: [{ id: 1, name: 'One', url: 'https://one.test/' }, { id: 2, name: 'Two', url: 'https://two.test/' }], stale: false });
   assert.equal(requests[0].url, 'https://links.example.test/api/v1/collections/7/bookmarks');
-  assert.equal(requests[0].options.headers.Authorization, 'Bearer private-key');
+  assert.equal(requests[0].options.headers.Authorization, 'Bearer private-token');
   fail = true;
   assert.deepEqual(await client.getBookmarks(settings, { force: true }), { bookmarks: [{ id: 1, name: 'One', url: 'https://one.test/' }, { id: 2, name: 'Two', url: 'https://two.test/' }], stale: true });
+});
+
+test('lists every valid Linkwarden collection with Bearer authorization', async () => {
+  const requests = [];
+  const client = createLinkwardenClient({ fetchImpl: async (url, options) => {
+    requests.push({ url, options });
+    return Response.json({ response: [{ id: 2, name: ' Reading ' }, { id: 3, name: 'Work' }, { id: 'bad', name: 'Ignored' }] });
+  } });
+  assert.deepEqual(await client.listCollections({ baseUrl: 'https://links.example.test', accessToken: 'private-token' }), [{ id: 2, name: 'Reading' }, { id: 3, name: 'Work' }]);
+  assert.equal(requests[0].url, 'https://links.example.test/api/v1/collections');
+  assert.equal(requests[0].options.headers.Authorization, 'Bearer private-token');
 });

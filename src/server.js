@@ -2,17 +2,19 @@ import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createHash, randomBytes } from 'node:crypto';
 import { config } from './config.js';
 import { createStore } from './db.js';
 import { normalizeBroadcastAddress, normalizeMacAddress, isValidIpv4, sendMagicPacket } from './wol.js';
 import { decryptApiKey, encryptApiKey, encryptionKey } from './linkwarden-crypto.js';
-import { createLinkwardenClient, normalizeLinkwardenConfig } from './linkwarden.js';
+import { createLinkwardenClient, normalizeLinkwardenCredentials } from './linkwarden.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const publicRoot = path.join(root, 'public');
 const store = createStore(config.databasePath);
 const wakeRequests = new Map();
 const linkwarden = createLinkwardenClient({ cacheSeconds: config.linkwardenCacheSeconds });
+const collectionSelections = new Map();
 const MIME_TYPES = { '.css': 'text/css; charset=utf-8', '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml' };
 
 function json(response, status, body) {
@@ -64,20 +66,43 @@ function linkwardenStatus() {
   const saved = store.getLinkwarden();
   let encryptionReady = false;
   try { encryptionKey(config.linkwardenEncryptionKey); encryptionReady = true; } catch { /* The optional integration remains disabled until a valid key is supplied. */ }
-  return { configured: Boolean(saved), keyPresent: Boolean(saved), encryptionReady, ...(saved && { baseUrl: saved.baseUrl, collectionId: saved.collectionId, updatedAt: saved.updatedAt }) };
+  const needsReauthentication = Boolean(saved && (!saved.username || !saved.collectionName));
+  return { configured: Boolean(saved) && !needsReauthentication, accessTokenPresent: Boolean(saved), encryptionReady, needsReauthentication, ...(saved && !needsReauthentication && { baseUrl: saved.baseUrl, username: saved.username, collectionName: saved.collectionName, updatedAt: saved.updatedAt }) };
 }
 
 function savedLinkwardenSettings() {
   const saved = store.getLinkwarden();
   if (!saved) throw new Error('Linkwarden is not configured.');
-  try { return { baseUrl: saved.baseUrl, collectionId: saved.collectionId, apiKey: decryptApiKey(saved.encryptedKey, config.linkwardenEncryptionKey) }; } catch { throw new Error('Linkwarden credentials cannot be decrypted. Check the encryption secret.'); }
+  if (!saved.username || !saved.collectionName) throw new Error('Linkwarden needs re-authentication before bookmarks can be loaded.');
+  try { return { baseUrl: saved.baseUrl, username: saved.username, collectionName: saved.collectionName, collectionId: saved.collectionId, accessToken: decryptApiKey(saved.encryptedAccessToken, config.linkwardenEncryptionKey) }; } catch { throw new Error('Linkwarden credentials cannot be decrypted. Check the encryption secret.'); }
 }
 
-async function requestedLinkwardenSettings(request) {
+function selectionFingerprint(settings) {
+  return createHash('sha256').update(`${settings.baseUrl}\0${settings.username}\0${settings.accessToken}`).digest('base64url');
+}
+
+function storeCollectionSelections(settings, collections) {
+  const now = Date.now();
+  for (const [token, selection] of collectionSelections) if (selection.expiresAt <= now) collectionSelections.delete(token);
+  if (collectionSelections.size > 1_000) collectionSelections.clear();
+  return collections.map((collection) => {
+    const token = randomBytes(24).toString('base64url');
+    collectionSelections.set(token, { ...collection, baseUrl: settings.baseUrl, username: settings.username, fingerprint: selectionFingerprint(settings), expiresAt: now + 5 * 60_000 });
+    return { name: collection.name, selectionToken: token };
+  });
+}
+
+function selectedCollection(input, settings) {
+  const token = typeof input.collectionToken === 'string' ? input.collectionToken : '';
+  const selection = collectionSelections.get(token);
+  if (!selection || selection.expiresAt <= Date.now() || selection.baseUrl !== settings.baseUrl || selection.username !== settings.username || selection.fingerprint !== selectionFingerprint(settings)) throw new Error('Select a collection from the current Linkwarden list.');
+  return selection;
+}
+
+function credentialsFromInput(input) {
   const existing = store.getLinkwarden();
-  const input = await readJson(request);
-  const settings = normalizeLinkwardenConfig(input, existing);
-  if (!settings.apiKey && existing) settings.apiKey = decryptApiKey(existing.encryptedKey, config.linkwardenEncryptionKey);
+  const settings = normalizeLinkwardenCredentials(input, existing);
+  if (!settings.accessToken && existing) settings.accessToken = decryptApiKey(existing.encryptedAccessToken, config.linkwardenEncryptionKey);
   return settings;
 }
 
@@ -110,14 +135,23 @@ async function handleApi(request, response, pathname) {
   const wakeId = deviceId(pathname, '/wake');
   try {
     if (request.method === 'POST' && pathname === '/api/devices') return json(response, 201, { device: store.create(validateDevice(await readJson(request))) });
+    if (request.method === 'POST' && pathname === '/api/linkwarden/collections') {
+      const settings = credentialsFromInput(await readJson(request));
+      const collections = await linkwarden.listCollections(settings);
+      return json(response, 200, { collections: storeCollectionSelections(settings, collections) });
+    }
     if (request.method === 'POST' && pathname === '/api/linkwarden/test') {
-      const settings = await requestedLinkwardenSettings(request);
-      await linkwarden.test(settings);
+      const input = await readJson(request);
+      const settings = credentialsFromInput(input);
+      const collection = selectedCollection(input, settings);
+      await linkwarden.test({ ...settings, collectionId: collection.id });
       return json(response, 200, { message: 'Linkwarden connection succeeded.' });
     }
     if (request.method === 'PUT' && pathname === '/api/linkwarden') {
-      const settings = await requestedLinkwardenSettings(request);
-      store.saveLinkwarden({ baseUrl: settings.baseUrl, collectionId: settings.collectionId, encryptedKey: encryptApiKey(settings.apiKey, config.linkwardenEncryptionKey) });
+      const input = await readJson(request);
+      const settings = credentialsFromInput(input);
+      const collection = selectedCollection(input, settings);
+      store.saveLinkwarden({ ...settings, collectionName: collection.name, collectionId: collection.id, encryptedAccessToken: encryptApiKey(settings.accessToken, config.linkwardenEncryptionKey) });
       linkwarden.clearCache();
       return json(response, 200, { linkwarden: linkwardenStatus() });
     }

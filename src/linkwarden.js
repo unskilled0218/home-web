@@ -1,15 +1,15 @@
 const MAX_RESPONSE_BYTES = 1_000_000;
 
-export function normalizeLinkwardenConfig(input, existing = null) {
+export function normalizeLinkwardenCredentials(input, existing = null) {
   let url;
   try { url = new URL(typeof input.url === 'string' ? input.url.trim() : ''); } catch { throw new Error('Linkwarden URL must be an absolute http or https URL.'); }
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error('Linkwarden URL must be an absolute http or https URL.');
-  const collectionId = Number(input.collectionId);
-  if (!Number.isSafeInteger(collectionId) || collectionId < 1) throw new Error('Collection ID must be a positive integer.');
-  const apiKey = typeof input.apiKey === 'string' ? input.apiKey.trim() : '';
-  if (!apiKey && !existing) throw new Error('An API key is required to connect Linkwarden.');
-  if (apiKey.length > 2_000) throw new Error('API key is too long.');
-  return { baseUrl: url.href.replace(/\/$/, ''), collectionId, apiKey: apiKey || null };
+  const username = typeof input.username === 'string' ? input.username.trim() : '';
+  if (!username || username.length > 120) throw new Error('Username is required and must be at most 120 characters.');
+  const accessToken = typeof input.accessToken === 'string' ? input.accessToken.trim() : '';
+  if (!accessToken && !existing) throw new Error('An access token is required to connect Linkwarden.');
+  if (accessToken.length > 2_000) throw new Error('Access token is too long.');
+  return { baseUrl: url.href.replace(/\/$/, ''), username, accessToken: accessToken || null };
 }
 
 function safeUrl(value) {
@@ -17,7 +17,7 @@ function safeUrl(value) {
 }
 
 export function normalizeBookmarks(payload) {
-  const entries = Array.isArray(payload) ? payload : payload?.data ?? payload?.bookmarks ?? [];
+  const entries = Array.isArray(payload) ? payload : payload?.response ?? payload?.data ?? payload?.bookmarks ?? [];
   if (!Array.isArray(entries)) return [];
   return entries.flatMap((bookmark) => {
     const url = safeUrl(bookmark?.url);
@@ -44,18 +44,20 @@ async function boundedJson(response, limit = MAX_RESPONSE_BYTES) {
 export function createLinkwardenClient({ fetchImpl = fetch, timeoutMs = 8_000, cacheSeconds = 60 } = {}) {
   let cache = null;
   let inFlight = null;
-  const refresh = async ({ baseUrl, collectionId, apiKey }) => {
+  const request = async (url, accessToken) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetchImpl(url, { headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' }, signal: controller.signal });
+      return boundedJson(response);
+    } finally { clearTimeout(timer); }
+  };
+  const refresh = async ({ baseUrl, collectionId, accessToken }) => {
     const origin = new URL(baseUrl).origin;
     let next = new URL(`/api/v1/collections/${collectionId}/bookmarks`, baseUrl).href;
     const bookmarks = [];
     while (next) {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
-      let payload;
-      try {
-        const response = await fetchImpl(next, { headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' }, signal: controller.signal });
-        payload = await boundedJson(response);
-      } finally { clearTimeout(timer); }
+      const payload = await request(next, accessToken);
       bookmarks.push(...normalizeBookmarks(payload));
       const candidate = payload?.next ?? payload?.meta?.next_page_url ?? payload?.links?.next;
       if (!candidate) break;
@@ -68,6 +70,16 @@ export function createLinkwardenClient({ fetchImpl = fetch, timeoutMs = 8_000, c
   };
   return {
     clearCache: () => { cache = null; },
+    async listCollections({ baseUrl, accessToken }) {
+      const payload = await request(new URL('/api/v1/collections', baseUrl).href, accessToken);
+      const entries = payload?.response ?? payload?.data ?? [];
+      if (!Array.isArray(entries)) throw new Error('Linkwarden returned an invalid collection list.');
+      return entries.flatMap((collection) => {
+        const id = Number(collection?.id);
+        const name = typeof collection?.name === 'string' ? collection.name.trim().slice(0, 300) : '';
+        return Number.isSafeInteger(id) && id > 0 && name ? [{ id, name }] : [];
+      });
+    },
     async getBookmarks(settings, { force = false } = {}) {
       const key = `${settings.baseUrl}:${settings.collectionId}`;
       if (!force && cache?.key === key && Date.now() - cache.fetchedAt < cacheSeconds * 1_000) return { bookmarks: cache.bookmarks, stale: false };

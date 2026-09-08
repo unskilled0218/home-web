@@ -1,4 +1,4 @@
-const state = { devices: [], selected: new Set(), bookmarks: [], linkwarden: null };
+const state = { devices: [], selected: new Set(), bookmarks: [], linkwarden: null, collections: [] };
 const devicesElement = document.querySelector('#devices');
 const statusElement = document.querySelector('#status');
 const searchElement = document.querySelector('#search');
@@ -127,17 +127,33 @@ function openLinkwardenForm() {
   const settings = state.linkwarden;
   linkwardenForm.reset(); linkwardenError.textContent = '';
   document.querySelector('#linkwarden-url').value = settings?.baseUrl ?? '';
-  document.querySelector('#linkwarden-collection').value = settings?.collectionId ?? '';
+  document.querySelector('#linkwarden-username').value = settings?.username ?? '';
+  const collectionSelect = document.querySelector('#linkwarden-collection');
+  collectionSelect.disabled = true; collectionSelect.replaceChildren(new Option(settings?.collectionName ? `List collections to select ${settings.collectionName}` : 'List collections first', ''));
   document.querySelector('#disconnect-linkwarden').hidden = !settings?.configured;
-  document.querySelector('#linkwarden-help').textContent = settings?.encryptionReady ? 'The API key is encrypted on this server and never shown again. Leave it blank to retain the configured key.' : 'Set a valid server encryption key before connecting Linkwarden.';
+  document.querySelector('#linkwarden-help').textContent = settings?.encryptionReady ? 'The access token is encrypted on this server and never shown again. Leave it blank to retain the configured token, then list and select a collection.' : 'Set a valid server encryption key before connecting Linkwarden.';
   linkwardenDialog.showModal();
 }
 
 function linkwardenPayload() { return Object.fromEntries(new FormData(linkwardenForm)); }
 
+async function listLinkwardenCollections() {
+  linkwardenError.textContent = '';
+  const select = document.querySelector('#linkwarden-collection');
+  select.disabled = true; select.replaceChildren(new Option('Loading collections…', ''));
+  try {
+    state.collections = (await api('/api/linkwarden/collections', { method: 'POST', body: JSON.stringify(linkwardenPayload()) })).collections;
+    select.replaceChildren(new Option(state.collections.length ? 'Choose a collection' : 'No collections available', ''));
+    for (const collection of state.collections) select.append(new Option(collection.name, collection.selectionToken));
+    select.disabled = state.collections.length === 0;
+    if (!state.collections.length) linkwardenError.textContent = 'No collections are available for this Linkwarden account.';
+  } catch (error) { select.replaceChildren(new Option('List collections first', '')); linkwardenError.textContent = error.message; }
+}
+
 document.querySelector('#linkwarden-settings').addEventListener('click', openLinkwardenForm);
 document.querySelector('#linkwarden-close').addEventListener('click', () => linkwardenDialog.close());
 document.querySelector('#refresh-bookmarks').addEventListener('click', () => loadBookmarks(true));
+document.querySelector('#list-linkwarden-collections').addEventListener('click', listLinkwardenCollections);
 document.querySelector('#test-linkwarden').addEventListener('click', async () => {
   linkwardenError.textContent = '';
   try { linkwardenError.textContent = (await api('/api/linkwarden/test', { method: 'POST', body: JSON.stringify(linkwardenPayload()) })).message; } catch (error) { linkwardenError.textContent = error.message; }

@@ -40,10 +40,11 @@
     <dialog id="linkwarden-dialog">
       <form id="linkwarden-form">
         <div class="dialog-heading"><h2>Bookmarks settings</h2><button class="icon-button" id="linkwarden-close" type="button" aria-label="Close">×</button></div>
-        <p class="form-help" id="linkwarden-help">Connect a read-only Linkwarden collection. The API key is encrypted on this server and never shown again.</p>
+        <p class="form-help" id="linkwarden-help">Sign in with a Linkwarden username and access token, then choose a collection. The token is encrypted on this server and never shown again.</p>
         <label>Linkwarden URL<input id="linkwarden-url" name="url" type="url" required placeholder="https://links.example.com"></label>
-        <label>Collection ID<input id="linkwarden-collection" name="collectionId" type="number" min="1" step="1" required placeholder="1"></label>
-        <label>API key <span class="optional">leave blank to keep current key</span><input id="linkwarden-key" name="apiKey" type="password" autocomplete="new-password" placeholder="Paste a read-only API key"></label>
+        <label>Username<input id="linkwarden-username" name="username" required maxlength="120" autocomplete="username" placeholder="your-linkwarden-username"></label>
+        <label>Access token <span class="optional">leave blank to keep current token</span><input id="linkwarden-token" name="accessToken" type="password" autocomplete="new-password" placeholder="Paste a Linkwarden access token"></label>
+        <div class="collection-picker"><div><label for="linkwarden-collection">Collection</label><select id="linkwarden-collection" name="collectionToken" required disabled><option value="">List collections first</option></select></div><button class="button secondary" id="list-linkwarden-collections" type="button">List collections</button></div>
         <p class="dialog-error" id="linkwarden-error" role="alert"></p>
         <div class="dialog-actions"><button class="button secondary" id="disconnect-linkwarden" type="button">Disconnect</button><button class="button secondary" id="test-linkwarden" type="button">Test connection</button><button class="button" type="submit">Save settings</button></div>
       </form>
