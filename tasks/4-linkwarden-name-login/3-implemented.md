@@ -8,7 +8,8 @@
 - Migrated the singleton configuration record with nullable username and collection-name fields. Existing ID-based rows remain intact and are explicitly marked for re-authentication before bookmark retrieval.
 - Renamed the configuration boundary to access-token terminology while retaining AES-256-GCM encrypted-at-rest credentials. Status responses omit token and encrypted material.
 - Updated documentation, added collection discovery and legacy-migration coverage, and bumped the application version to `0.4.0`.
+- Added a required test-connection step before listing collections. The server issues a short-lived verification token only after authenticated collection access succeeds; collection listing rejects missing, expired, or credential-mismatched verification and the UI resets it whenever credentials change.
 
 ## Verification
 
-`npm test` passes with 13 tests. `node --check src/server.js`, `node --check src/linkwarden.js`, `node --check public/app.js`, and `git diff --check` pass.
+`npm test` passes with 13 tests. `node --check src/server.js`, `node --check src/linkwarden.js`, `node --check public/app.js`, and `git diff --check` pass. The application version is `0.4.1`.

@@ -15,6 +15,7 @@ const store = createStore(config.databasePath);
 const wakeRequests = new Map();
 const linkwarden = createLinkwardenClient({ cacheSeconds: config.linkwardenCacheSeconds });
 const collectionSelections = new Map();
+const connectionVerifications = new Map();
 const MIME_TYPES = { '.css': 'text/css; charset=utf-8', '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml' };
 
 function json(response, status, body) {
@@ -92,6 +93,20 @@ function storeCollectionSelections(settings, collections) {
   });
 }
 
+function storeConnectionVerification(settings) {
+  const now = Date.now();
+  for (const [token, verification] of connectionVerifications) if (verification.expiresAt <= now) connectionVerifications.delete(token);
+  if (connectionVerifications.size > 1_000) connectionVerifications.clear();
+  const token = randomBytes(24).toString('base64url');
+  connectionVerifications.set(token, { fingerprint: selectionFingerprint(settings), expiresAt: now + 5 * 60_000 });
+  return token;
+}
+
+function verifiedConnection(input, settings) {
+  const verification = connectionVerifications.get(typeof input.connectionToken === 'string' ? input.connectionToken : '');
+  if (!verification || verification.expiresAt <= Date.now() || verification.fingerprint !== selectionFingerprint(settings)) throw new Error('Test the Linkwarden connection before listing collections.');
+}
+
 function selectedCollection(input, settings) {
   const token = typeof input.collectionToken === 'string' ? input.collectionToken : '';
   const selection = collectionSelections.get(token);
@@ -136,16 +151,16 @@ async function handleApi(request, response, pathname) {
   try {
     if (request.method === 'POST' && pathname === '/api/devices') return json(response, 201, { device: store.create(validateDevice(await readJson(request))) });
     if (request.method === 'POST' && pathname === '/api/linkwarden/collections') {
-      const settings = credentialsFromInput(await readJson(request));
+      const input = await readJson(request);
+      const settings = credentialsFromInput(input);
+      verifiedConnection(input, settings);
       const collections = await linkwarden.listCollections(settings);
       return json(response, 200, { collections: storeCollectionSelections(settings, collections) });
     }
     if (request.method === 'POST' && pathname === '/api/linkwarden/test') {
-      const input = await readJson(request);
-      const settings = credentialsFromInput(input);
-      const collection = selectedCollection(input, settings);
-      await linkwarden.test({ ...settings, collectionId: collection.id });
-      return json(response, 200, { message: 'Linkwarden connection succeeded.' });
+      const settings = credentialsFromInput(await readJson(request));
+      await linkwarden.listCollections(settings);
+      return json(response, 200, { message: 'Linkwarden connection succeeded. You can now list collections.', connectionToken: storeConnectionVerification(settings) });
     }
     if (request.method === 'PUT' && pathname === '/api/linkwarden') {
       const input = await readJson(request);

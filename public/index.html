@@ -44,7 +44,7 @@
         <label>Linkwarden URL<input id="linkwarden-url" name="url" type="url" required placeholder="https://links.example.com"></label>
         <label>Username<input id="linkwarden-username" name="username" required maxlength="120" autocomplete="username" placeholder="your-linkwarden-username"></label>
         <label>Access token <span class="optional">leave blank to keep current token</span><input id="linkwarden-token" name="accessToken" type="password" autocomplete="new-password" placeholder="Paste a Linkwarden access token"></label>
-        <div class="collection-picker"><div><label for="linkwarden-collection">Collection</label><select id="linkwarden-collection" name="collectionToken" required disabled><option value="">List collections first</option></select></div><button class="button secondary" id="list-linkwarden-collections" type="button">List collections</button></div>
+        <div class="collection-picker"><div><label for="linkwarden-collection">Collection</label><select id="linkwarden-collection" name="collectionToken" required disabled><option value="">Test connection first</option></select></div><button class="button secondary" id="list-linkwarden-collections" type="button" disabled>List collections</button></div>
         <p class="dialog-error" id="linkwarden-error" role="alert"></p>
         <div class="dialog-actions"><button class="button secondary" id="disconnect-linkwarden" type="button">Disconnect</button><button class="button secondary" id="test-linkwarden" type="button">Test connection</button><button class="button" type="submit">Save settings</button></div>
       </form>

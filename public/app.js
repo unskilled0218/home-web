@@ -1,4 +1,4 @@
-const state = { devices: [], selected: new Set(), bookmarks: [], linkwarden: null, collections: [] };
+const state = { devices: [], selected: new Set(), bookmarks: [], linkwarden: null, collections: [], connectionToken: null };
 const devicesElement = document.querySelector('#devices');
 const statusElement = document.querySelector('#status');
 const searchElement = document.querySelector('#search');
@@ -129,13 +129,22 @@ function openLinkwardenForm() {
   document.querySelector('#linkwarden-url').value = settings?.baseUrl ?? '';
   document.querySelector('#linkwarden-username').value = settings?.username ?? '';
   const collectionSelect = document.querySelector('#linkwarden-collection');
-  collectionSelect.disabled = true; collectionSelect.replaceChildren(new Option(settings?.collectionName ? `List collections to select ${settings.collectionName}` : 'List collections first', ''));
+  state.connectionToken = null;
+  collectionSelect.disabled = true; collectionSelect.replaceChildren(new Option('Test connection first', ''));
+  document.querySelector('#list-linkwarden-collections').disabled = true;
   document.querySelector('#disconnect-linkwarden').hidden = !settings?.configured;
   document.querySelector('#linkwarden-help').textContent = settings?.encryptionReady ? 'The access token is encrypted on this server and never shown again. Leave it blank to retain the configured token, then list and select a collection.' : 'Set a valid server encryption key before connecting Linkwarden.';
   linkwardenDialog.showModal();
 }
 
-function linkwardenPayload() { return Object.fromEntries(new FormData(linkwardenForm)); }
+function linkwardenPayload() { return { ...Object.fromEntries(new FormData(linkwardenForm)), ...(state.connectionToken && { connectionToken: state.connectionToken }) }; }
+
+function resetLinkwardenConnection() {
+  state.connectionToken = null;
+  const select = document.querySelector('#linkwarden-collection');
+  select.disabled = true; select.replaceChildren(new Option('Test connection first', ''));
+  document.querySelector('#list-linkwarden-collections').disabled = true;
+}
 
 async function listLinkwardenCollections() {
   linkwardenError.textContent = '';
@@ -147,7 +156,7 @@ async function listLinkwardenCollections() {
     for (const collection of state.collections) select.append(new Option(collection.name, collection.selectionToken));
     select.disabled = state.collections.length === 0;
     if (!state.collections.length) linkwardenError.textContent = 'No collections are available for this Linkwarden account.';
-  } catch (error) { select.replaceChildren(new Option('List collections first', '')); linkwardenError.textContent = error.message; }
+  } catch (error) { resetLinkwardenConnection(); linkwardenError.textContent = error.message; }
 }
 
 document.querySelector('#linkwarden-settings').addEventListener('click', openLinkwardenForm);
@@ -156,8 +165,9 @@ document.querySelector('#refresh-bookmarks').addEventListener('click', () => loa
 document.querySelector('#list-linkwarden-collections').addEventListener('click', listLinkwardenCollections);
 document.querySelector('#test-linkwarden').addEventListener('click', async () => {
   linkwardenError.textContent = '';
-  try { linkwardenError.textContent = (await api('/api/linkwarden/test', { method: 'POST', body: JSON.stringify(linkwardenPayload()) })).message; } catch (error) { linkwardenError.textContent = error.message; }
+  try { const result = await api('/api/linkwarden/test', { method: 'POST', body: JSON.stringify(linkwardenPayload()) }); state.connectionToken = result.connectionToken; document.querySelector('#list-linkwarden-collections').disabled = false; linkwardenError.textContent = result.message; } catch (error) { resetLinkwardenConnection(); linkwardenError.textContent = error.message; }
 });
+for (const selector of ['#linkwarden-url', '#linkwarden-username', '#linkwarden-token']) document.querySelector(selector).addEventListener('input', resetLinkwardenConnection);
 document.querySelector('#disconnect-linkwarden').addEventListener('click', async () => {
   if (!window.confirm('Disconnect Linkwarden and delete its saved API key?')) return;
   try { await api('/api/linkwarden', { method: 'DELETE' }); linkwardenDialog.close(); state.bookmarks = []; await loadLinkwarden(); } catch (error) { linkwardenError.textContent = error.message; }

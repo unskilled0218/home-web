@@ -10,3 +10,4 @@ No blocking findings after implementation review.
 - Selections are bound to normalized URL, username, and access-token fingerprint, expire after five minutes, and are invalidated by changed credentials or stale tokens.
 - Linkwarden collection discovery and bookmark fetches use the verified Bearer-token protocol with bounded response parsing and existing timeout, cache, and pagination-origin protections.
 - Existing configuration records are migrated without destructive changes, but must be re-authenticated before use because their previous API-key schema has no username or collection name.
+- Listing is gated by a short-lived connection-verification token that is bound to the submitted credentials and cleared when any credential field changes, so the required test-then-list interaction cannot be bypassed through the dashboard.
