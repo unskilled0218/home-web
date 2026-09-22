@@ -68,7 +68,7 @@ function renderBookmarks(message = '') {
   bookmarkStatusElement.textContent = message;
   if (!state.linkwarden?.configured) { bookmarkStatusElement.textContent = 'Bookmarks are not connected. Open Bookmarks settings to connect Linkwarden.'; return; }
   if (!state.activeCollectionToken) { bookmarkStatusElement.textContent ||= 'Choose a collection to view its bookmarks.'; return; }
-  if (!state.bookmarks.length) { const empty = document.createElement('p'); empty.className = 'empty'; empty.textContent = 'No valid bookmarks were found in this collection.'; bookmarksElement.append(empty); return; }
+  if (!state.bookmarks.length) { const empty = document.createElement('p'); empty.className = 'empty'; empty.textContent = 'No valid web links were found in this collection.'; bookmarksElement.append(empty); return; }
   for (const bookmark of state.bookmarks) {
     const card = document.createElement('article'); card.className = 'bookmark';
     const link = document.createElement('a'); link.href = bookmark.url; link.target = '_blank'; link.rel = 'noopener noreferrer'; link.textContent = bookmark.name; card.append(link);

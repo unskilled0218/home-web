@@ -36,9 +36,9 @@ test('connects atomically and navigates collections through opaque tokens', asyn
         response.end(JSON.stringify({ response: collectionResponse }));
         return;
       }
-      if (request.url === '/api/v1/collections/2/bookmarks') {
+      if (request.url === '/api/v1/search?collectionId=2') {
         response.writeHead(200, { 'content-type': 'application/json' });
-        response.end('{"response":[{"id":9,"name":"Docs","url":"https://example.test/docs"}]}');
+        response.end('{"data":{"links":[{"id":9,"name":"Docs","url":"https://example.test/docs"}],"nextCursor":null},"success":true,"message":"Success"}');
         return;
       }
       response.writeHead(404); response.end();

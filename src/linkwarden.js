@@ -3,6 +3,7 @@ import https from 'node:https';
 import { Readable } from 'node:stream';
 
 const MAX_RESPONSE_BYTES = 1_000_000;
+const MAX_BOOKMARK_PAGES = 100;
 
 function fetchLinkwarden(url, { headers, signal } = {}, redirects = 0) {
   const parsed = new URL(url);
@@ -41,17 +42,33 @@ function safeUrl(value) {
 }
 
 export function normalizeBookmarks(payload) {
-  const entries = Array.isArray(payload) ? payload : payload?.response ?? payload?.data ?? payload?.bookmarks ?? [];
-  if (!Array.isArray(entries)) return [];
+  let entries;
+  if (Array.isArray(payload)) entries = payload;
+  else if (payload && Object.hasOwn(payload, 'data')) {
+    if (payload.data && !Array.isArray(payload.data) && Object.hasOwn(payload.data, 'links')) entries = payload.data.links;
+    else entries = payload.data;
+  } else if (payload && Object.hasOwn(payload, 'response')) entries = payload.response;
+  else if (payload && Object.hasOwn(payload, 'bookmarks')) entries = payload.bookmarks;
+  if (!Array.isArray(entries)) throw new Error('Linkwarden returned an invalid bookmark list.');
   return entries.flatMap((bookmark) => {
     const url = safeUrl(bookmark?.url);
-    const name = typeof bookmark?.name === 'string' ? bookmark.name.trim().slice(0, 300) : '';
-    if (!url || !name || !Number.isSafeInteger(Number(bookmark.id))) return [];
+    const id = Number(bookmark?.id);
+    const providedName = typeof bookmark?.name === 'string' ? bookmark.name.trim() : '';
+    const name = (providedName || url || '').slice(0, 300);
+    if (!url || !name || !Number.isSafeInteger(id) || id < 1) return [];
     const description = typeof bookmark.description === 'string' && bookmark.description.trim() ? bookmark.description.trim().slice(0, 1_000) : undefined;
     const tags = Array.isArray(bookmark.tags) ? bookmark.tags.map((tag) => typeof tag === 'string' ? tag : tag?.name).filter((tag) => typeof tag === 'string' && tag.trim()).map((tag) => tag.trim().slice(0, 80)).slice(0, 20) : undefined;
     const favicon = safeUrl(bookmark?.favicon);
-    return [{ id: Number(bookmark.id), name, url, ...(description && { description }), ...(tags?.length && { tags }), ...(favicon && { favicon }) }];
+    return [{ id, name, url, ...(description && { description }), ...(tags?.length && { tags }), ...(favicon && { favicon }) }];
   });
+}
+
+function nextBookmarkCursor(payload) {
+  if (!payload?.data || Array.isArray(payload.data) || !Array.isArray(payload.data.links)) return null;
+  const rawCursor = payload.data.nextCursor;
+  if (rawCursor == null) return null;
+  if (typeof rawCursor !== 'number' || !Number.isSafeInteger(rawCursor) || rawCursor < 0) throw new Error('Linkwarden returned an invalid bookmark cursor.');
+  return rawCursor;
 }
 
 export function normalizeCollections(payload) {
@@ -118,17 +135,26 @@ export function createLinkwardenClient({ fetchImpl = fetchLinkwarden, timeoutMs 
   };
   const refresh = async ({ baseUrl, collectionId, accessToken }, generation) => {
     const key = `${baseUrl}:${collectionId}`;
-    const origin = new URL(baseUrl).origin;
-    let next = new URL(`/api/v1/collections/${collectionId}/bookmarks`, baseUrl).href;
     const bookmarks = [];
-    while (next) {
-      const payload = await request(next, accessToken);
-      bookmarks.push(...normalizeBookmarks(payload));
-      const candidate = payload?.next ?? payload?.meta?.next_page_url ?? payload?.links?.next;
-      if (!candidate) break;
-      const parsed = new URL(candidate, next);
-      if (parsed.origin !== origin) throw new Error('Linkwarden returned an invalid pagination link.');
-      next = parsed.href;
+    const bookmarkIds = new Set();
+    const seenCursors = new Set();
+    let cursor = null;
+    for (let page = 0; page < MAX_BOOKMARK_PAGES; page += 1) {
+      const url = new URL('/api/v1/search', baseUrl);
+      url.searchParams.set('collectionId', collectionId);
+      if (cursor != null) url.searchParams.set('cursor', cursor);
+      const payload = await request(url.href, accessToken);
+      for (const bookmark of normalizeBookmarks(payload)) {
+        if (bookmarkIds.has(bookmark.id)) continue;
+        bookmarkIds.add(bookmark.id);
+        bookmarks.push(bookmark);
+      }
+      const nextCursor = nextBookmarkCursor(payload);
+      if (nextCursor == null) break;
+      if (seenCursors.has(nextCursor)) throw new Error('Linkwarden returned a repeated bookmark cursor.');
+      if (page === MAX_BOOKMARK_PAGES - 1) throw new Error('Linkwarden returned too many bookmark pages.');
+      seenCursors.add(nextCursor);
+      cursor = nextCursor;
     }
     if (generation === cacheGeneration) cache.set(key, { bookmarks, fetchedAt: Date.now() });
     return { bookmarks, stale: false };

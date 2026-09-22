@@ -55,11 +55,19 @@ test('validates Linkwarden username and access token credentials', () => {
 });
 
 test('normalizes only safe bookmark fields', () => {
-  assert.deepEqual(normalizeBookmarks({ data: [
+  assert.deepEqual(normalizeBookmarks({ data: { links: [
     { id: 1, name: ' Documentation ', url: 'https://example.test/docs', description: ' Useful ', tags: [{ name: 'work' }, 'docs'], favicon: 'https://example.test/icon.svg' },
+    { id: 2, name: '', url: 'https://unnamed.example.test/path' },
+    { id: 3, name: 'No URL', url: null },
     { id: 2, name: 'Unsafe', url: 'javascript:alert(1)' },
     { id: 'bad', name: 'Invalid', url: 'https://example.test' }
-  ] }), [{ id: 1, name: 'Documentation', url: 'https://example.test/docs', description: 'Useful', tags: ['work', 'docs'], favicon: 'https://example.test/icon.svg' }]);
+  ], nextCursor: null } }), [
+    { id: 1, name: 'Documentation', url: 'https://example.test/docs', description: 'Useful', tags: ['work', 'docs'], favicon: 'https://example.test/icon.svg' },
+    { id: 2, name: 'https://unnamed.example.test/path', url: 'https://unnamed.example.test/path' }
+  ]);
+  assert.deepEqual(normalizeBookmarks({ data: { links: [], nextCursor: null } }), []);
+  assert.throws(() => normalizeBookmarks({ data: { links: {} } }), /invalid bookmark list/);
+  assert.throws(() => normalizeBookmarks({ data: { links: {} }, response: [] }), /invalid bookmark list/);
 });
 
 test('normalizes collections and builds a deterministic tree with safe roots', () => {
@@ -81,30 +89,40 @@ test('normalizes collections and builds a deterministic tree with safe roots', (
   assert.throws(() => normalizeCollections({ response: {} }), /invalid collection list/);
 });
 
-test('preserves Linkwarden response size, timeout, and pagination-origin protections', async () => {
+test('preserves Linkwarden response size, timeout, and cursor protections', async () => {
   const oversized = createLinkwardenClient({ fetchImpl: async () => new Response('{}', { headers: { 'content-length': '1000001' } }) });
   await assert.rejects(oversized.listCollections({ baseUrl: 'https://links.example.test', accessToken: 'token' }), /too large/);
 
   const timeout = createLinkwardenClient({ timeoutMs: 1, fetchImpl: async (_url, { signal }) => new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true })) });
   await assert.rejects(timeout.listCollections({ baseUrl: 'https://links.example.test', accessToken: 'token' }), /abort|timeout/i);
 
-  const invalidPagination = createLinkwardenClient({ fetchImpl: async () => Response.json({ response: [], next: 'https://outside.example.test/page/2' }) });
-  await assert.rejects(invalidPagination.test({ baseUrl: 'https://links.example.test', collectionId: 1, accessToken: 'token' }), /invalid pagination link/);
+  for (const nextCursor of ['5', true, '', []]) {
+    const invalidCursor = createLinkwardenClient({ fetchImpl: async () => Response.json({ data: { links: [], nextCursor } }) });
+    await assert.rejects(invalidCursor.test({ baseUrl: 'https://links.example.test', collectionId: 1, accessToken: 'token' }), /invalid bookmark cursor/);
+  }
+
+  const repeatedCursor = createLinkwardenClient({ fetchImpl: async () => Response.json({ data: { links: [], nextCursor: 5 } }) });
+  await assert.rejects(repeatedCursor.test({ baseUrl: 'https://links.example.test', collectionId: 1, accessToken: 'token' }), /repeated bookmark cursor/);
+
+  let pages = 0;
+  const tooManyPages = createLinkwardenClient({ fetchImpl: async () => Response.json({ data: { links: [], nextCursor: ++pages } }) });
+  await assert.rejects(tooManyPages.test({ baseUrl: 'https://links.example.test', collectionId: 1, accessToken: 'token' }), /too many bookmark pages/);
 });
 
-test('uses the collection endpoint, authorization, pagination, and cache fallback', async () => {
+test('uses the search endpoint, authorization, pagination, and cache fallback', async () => {
   const requests = [];
   let fail = false;
   const fetchImpl = async (url, options) => {
     requests.push({ url, options });
-    if (fail) throw new Error('offline');
-    if (url.endsWith('/bookmarks')) return Response.json({ response: [{ id: 1, name: 'One', url: 'https://one.test' }], next: '?page=2' });
-    return Response.json({ response: [{ id: 2, name: 'Two', url: 'https://two.test' }] });
+    if (fail) return Response.json({ data: { links: {} } });
+    if (!new URL(url).searchParams.has('cursor')) return Response.json({ data: { links: [{ id: 1, name: 'One', url: 'https://one.test' }], nextCursor: 99 } });
+    return Response.json({ data: { links: [{ id: 1, name: 'Duplicate', url: 'https://duplicate.test' }, { id: 2, name: 'Two', url: 'https://two.test' }], nextCursor: null } });
   };
   const client = createLinkwardenClient({ fetchImpl, cacheSeconds: 0 });
   const settings = { baseUrl: 'https://links.example.test', collectionId: 7, accessToken: 'private-token' };
   assert.deepEqual(await client.getBookmarks(settings), { bookmarks: [{ id: 1, name: 'One', url: 'https://one.test/' }, { id: 2, name: 'Two', url: 'https://two.test/' }], stale: false });
-  assert.equal(requests[0].url, 'https://links.example.test/api/v1/collections/7/bookmarks');
+  assert.equal(requests[0].url, 'https://links.example.test/api/v1/search?collectionId=7');
+  assert.equal(requests[1].url, 'https://links.example.test/api/v1/search?collectionId=7&cursor=99');
   assert.equal(requests[0].options.headers.Authorization, 'Bearer private-token');
   fail = true;
   assert.deepEqual(await client.getBookmarks(settings, { force: true }), { bookmarks: [{ id: 1, name: 'One', url: 'https://one.test/' }, { id: 2, name: 'Two', url: 'https://two.test/' }], stale: true });
@@ -114,8 +132,8 @@ test('keeps cache and stale fallback isolated by collection', async () => {
   let offline = false;
   const client = createLinkwardenClient({ cacheSeconds: 0, fetchImpl: async (url) => {
     if (offline) throw new Error('offline');
-    const collectionId = Number(/collections\/(\d+)/.exec(url)[1]);
-    return Response.json({ response: [{ id: collectionId, name: `Collection ${collectionId}`, url: `https://${collectionId}.example.test` }] });
+    const collectionId = Number(new URL(url).searchParams.get('collectionId'));
+    return Response.json({ data: { links: [{ id: collectionId, name: `Collection ${collectionId}`, url: `https://${collectionId}.example.test` }], nextCursor: null } });
   } });
   const common = { baseUrl: 'https://links.example.test', accessToken: 'token' };
   await client.getBookmarks({ ...common, collectionId: 1 });
@@ -135,7 +153,7 @@ test('does not repopulate a cleared cache from an obsolete request', async () =>
   const settings = { baseUrl: 'https://links.example.test', collectionId: 1, accessToken: 'old-token' };
   const pending = client.getBookmarks(settings);
   client.clearCache();
-  resolveRequest(Response.json({ response: [{ id: 1, name: 'Old account', url: 'https://old.example.test' }] }));
+  resolveRequest(Response.json({ data: { links: [{ id: 1, name: 'Old account', url: 'https://old.example.test' }], nextCursor: null } }));
   await pending;
   offline = true;
   await assert.rejects(client.getBookmarks(settings, { force: true }), /currently unavailable/);
