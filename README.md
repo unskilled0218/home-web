@@ -42,7 +42,7 @@ Restrict port 3000 at the host firewall to the trusted LAN. If a reverse proxy i
 npm test
 ```
 
-The tests validate MAC handling, IPv4 validation, and magic-packet construction. A safe packet-dispatch integration test requires a disposable UDP receiver on the deployment network.
+The tests validate Wake-on-LAN packet handling, Linkwarden credential storage and migration, collection trees, bookmark caching, API behavior, and scoped self-signed TLS. A safe packet-dispatch integration test requires a disposable UDP receiver on the deployment network.
 
 ## Linkwarden bookmarks
 
@@ -52,6 +52,6 @@ Bookmarks are optional and do not affect Wake-on-LAN. Before connecting Linkward
 openssl rand -base64 32
 ```
 
-Set that output as `LINKWARDEN_CONFIG_ENCRYPTION_KEY`, restart the service, then use **Bookmarks settings** to enter the Linkwarden base URL, username, and a least-privilege access token. Choose **Test connection** first, then **List collections** to retrieve every collection available to that account and select one by name; numeric collection IDs are never shown. Linkwarden authenticates the remote request with the access token, while the username is stored as the dashboard's account label. The token is encrypted in `data/wol.db`; it is never returned to the browser. The dashboard requests only the selected collection through its own local endpoint, caches results for 60 seconds by default, and can refresh explicitly.
+Set that output as `LINKWARDEN_CONFIG_ENCRYPTION_KEY` and restart the service. Open **Bookmarks settings**, enter the Linkwarden base URL, username, and a least-privilege access token, then choose **Connect**. A successful connection validates access, encrypts the token in `data/wol.db`, and immediately displays every available collection as a tree. Select any collection in the tree to load its bookmarks; each collection has an independent 60-second cache and can be refreshed explicitly. The browser receives short-lived opaque collection tokens instead of Linkwarden's numeric collection IDs. On a later reconnect, leave the access-token field blank to retain the saved token. Use **Disconnect** beside the collection tree to delete the saved configuration and encrypted token.
 
-The Linkwarden service must be reachable from the dashboard host with valid TLS appropriate to the deployment. Back up the database and encryption secret together. Losing the secret makes saved credentials unrecoverable; changing it requires deliberately decrypting and re-encrypting the saved token while the old secret is available. Existing collection-ID configuration is retained but asks for re-authentication before it is used. Use **Disconnect** to delete the saved configuration and encrypted token.
+The Linkwarden service must be reachable from the dashboard host. HTTPS connections to Linkwarden accept self-signed certificates and do not verify the certificate chain or hostname, so use this only on a trusted LAN and never expose the connection path to an untrusted network. Other Node HTTPS traffic is not affected. Back up the database and encryption secret together. Losing the secret makes saved credentials unrecoverable; changing it requires deliberately decrypting and re-encrypting the saved token while the old secret is available. Existing saved URL, username, and encrypted-token data is retained when upgrading from the former single-collection configuration.

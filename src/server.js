@@ -15,7 +15,6 @@ const store = createStore(config.databasePath);
 const wakeRequests = new Map();
 const linkwarden = createLinkwardenClient({ cacheSeconds: config.linkwardenCacheSeconds });
 const collectionSelections = new Map();
-const connectionVerifications = new Map();
 const MIME_TYPES = { '.css': 'text/css; charset=utf-8', '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml' };
 
 function json(response, status, body) {
@@ -66,51 +65,38 @@ function deviceId(pathname, suffix = '') {
 function linkwardenStatus() {
   const saved = store.getLinkwarden();
   let encryptionReady = false;
-  try { encryptionKey(config.linkwardenEncryptionKey); encryptionReady = true; } catch { /* The optional integration remains disabled until a valid key is supplied. */ }
-  const needsReauthentication = Boolean(saved && (!saved.username || !saved.collectionName));
-  return { configured: Boolean(saved) && !needsReauthentication, accessTokenPresent: Boolean(saved), encryptionReady, needsReauthentication, ...(saved && !needsReauthentication && { baseUrl: saved.baseUrl, username: saved.username, collectionName: saved.collectionName, updatedAt: saved.updatedAt }) };
+  let credentialsReadable = false;
+  try { encryptionKey(config.linkwardenEncryptionKey); encryptionReady = true; if (saved) { decryptApiKey(saved.encryptedAccessToken, config.linkwardenEncryptionKey); credentialsReadable = true; } } catch { /* The optional integration remains disabled until valid credentials can be decrypted. */ }
+  const configured = Boolean(saved?.username && credentialsReadable);
+  return { configured, accessTokenPresent: Boolean(saved), encryptionReady, needsReauthentication: Boolean(saved) && !configured, ...(configured && { baseUrl: saved.baseUrl, username: saved.username, updatedAt: saved.updatedAt }) };
 }
 
 function savedLinkwardenSettings() {
   const saved = store.getLinkwarden();
   if (!saved) throw new Error('Linkwarden is not configured.');
-  if (!saved.username || !saved.collectionName) throw new Error('Linkwarden needs re-authentication before bookmarks can be loaded.');
-  try { return { baseUrl: saved.baseUrl, username: saved.username, collectionName: saved.collectionName, collectionId: saved.collectionId, accessToken: decryptApiKey(saved.encryptedAccessToken, config.linkwardenEncryptionKey) }; } catch { throw new Error('Linkwarden credentials cannot be decrypted. Check the encryption secret.'); }
+  if (!saved.username) throw new Error('Linkwarden needs re-authentication before bookmarks can be loaded.');
+  try { return { baseUrl: saved.baseUrl, username: saved.username, accessToken: decryptApiKey(saved.encryptedAccessToken, config.linkwardenEncryptionKey) }; } catch { throw new Error('Linkwarden credentials cannot be decrypted. Check the encryption secret.'); }
 }
 
 function selectionFingerprint(settings) {
   return createHash('sha256').update(`${settings.baseUrl}\0${settings.username}\0${settings.accessToken}`).digest('base64url');
 }
 
-function storeCollectionSelections(settings, collections) {
+function storeCollectionTree(settings, collections) {
   const now = Date.now();
   for (const [token, selection] of collectionSelections) if (selection.expiresAt <= now) collectionSelections.delete(token);
   if (collectionSelections.size > 1_000) collectionSelections.clear();
-  return collections.map((collection) => {
+  const tokenize = (collection) => {
     const token = randomBytes(24).toString('base64url');
-    collectionSelections.set(token, { ...collection, baseUrl: settings.baseUrl, username: settings.username, fingerprint: selectionFingerprint(settings), expiresAt: now + 5 * 60_000 });
-    return { name: collection.name, selectionToken: token };
-  });
+    collectionSelections.set(token, { id: collection.id, fingerprint: selectionFingerprint(settings), expiresAt: now + 60 * 60_000 });
+    return { name: collection.name, collectionToken: token, children: collection.children.map(tokenize) };
+  };
+  return collections.map(tokenize);
 }
 
-function storeConnectionVerification(settings) {
-  const now = Date.now();
-  for (const [token, verification] of connectionVerifications) if (verification.expiresAt <= now) connectionVerifications.delete(token);
-  if (connectionVerifications.size > 1_000) connectionVerifications.clear();
-  const token = randomBytes(24).toString('base64url');
-  connectionVerifications.set(token, { fingerprint: selectionFingerprint(settings), expiresAt: now + 5 * 60_000 });
-  return token;
-}
-
-function verifiedConnection(input, settings) {
-  const verification = connectionVerifications.get(typeof input.connectionToken === 'string' ? input.connectionToken : '');
-  if (!verification || verification.expiresAt <= Date.now() || verification.fingerprint !== selectionFingerprint(settings)) throw new Error('Test the Linkwarden connection before listing collections.');
-}
-
-function selectedCollection(input, settings) {
-  const token = typeof input.collectionToken === 'string' ? input.collectionToken : '';
+function selectedCollection(token, settings) {
   const selection = collectionSelections.get(token);
-  if (!selection || selection.expiresAt <= Date.now() || selection.baseUrl !== settings.baseUrl || selection.username !== settings.username || selection.fingerprint !== selectionFingerprint(settings)) throw new Error('Select a collection from the current Linkwarden list.');
+  if (!selection || selection.expiresAt <= Date.now() || selection.fingerprint !== selectionFingerprint(settings)) throw new Error('Select a collection from the current Linkwarden tree.');
   return selection;
 }
 
@@ -138,40 +124,36 @@ async function handleApi(request, response, pathname) {
   if (request.method === 'GET' && pathname === '/api/health') return json(response, 200, { status: 'ok' });
   if (request.method === 'GET' && pathname === '/api/devices') return json(response, 200, { devices: store.list() });
   if (request.method === 'GET' && pathname === '/api/linkwarden') return json(response, 200, { linkwarden: linkwardenStatus() });
+  if (request.method === 'GET' && pathname === '/api/linkwarden/collections') {
+    try { const settings = savedLinkwardenSettings(); return json(response, 200, { collections: storeCollectionTree(settings, await linkwarden.listCollections(settings)) }); }
+    catch { return json(response, 503, { error: 'Linkwarden collections are currently unavailable.' }); }
+  }
   if (request.method === 'GET' && pathname === '/api/bookmarks') {
     if (!store.getLinkwarden()) return json(response, 200, { configured: false, bookmarks: [] });
     try {
-      const result = await linkwarden.getBookmarks(savedLinkwardenSettings(), { force: new URL(request.url, 'http://localhost').searchParams.get('refresh') === '1' });
+      const url = new URL(request.url, 'http://localhost');
+      const settings = savedLinkwardenSettings();
+      const collection = selectedCollection(url.searchParams.get('collection') ?? '', settings);
+      const result = await linkwarden.getBookmarks({ ...settings, collectionId: collection.id }, { force: url.searchParams.get('refresh') === '1' });
       return json(response, 200, { configured: true, ...result });
-    } catch { return json(response, 503, { configured: true, error: 'Bookmarks are currently unavailable.' }); }
+    } catch (error) { return json(response, error.message.startsWith('Select a collection') ? 400 : 503, { configured: true, error: error.message.startsWith('Select a collection') ? error.message : 'Bookmarks are currently unavailable.' }); }
   }
 
   const id = deviceId(pathname);
   const wakeId = deviceId(pathname, '/wake');
   try {
     if (request.method === 'POST' && pathname === '/api/devices') return json(response, 201, { device: store.create(validateDevice(await readJson(request))) });
-    if (request.method === 'POST' && pathname === '/api/linkwarden/collections') {
-      const input = await readJson(request);
-      const settings = credentialsFromInput(input);
-      verifiedConnection(input, settings);
-      const collections = await linkwarden.listCollections(settings);
-      return json(response, 200, { collections: storeCollectionSelections(settings, collections) });
-    }
-    if (request.method === 'POST' && pathname === '/api/linkwarden/test') {
-      const settings = credentialsFromInput(await readJson(request));
-      await linkwarden.listCollections(settings);
-      return json(response, 200, { message: 'Linkwarden connection succeeded. You can now list collections.', connectionToken: storeConnectionVerification(settings) });
-    }
     if (request.method === 'PUT' && pathname === '/api/linkwarden') {
-      const input = await readJson(request);
-      const settings = credentialsFromInput(input);
-      const collection = selectedCollection(input, settings);
-      store.saveLinkwarden({ ...settings, collectionName: collection.name, collectionId: collection.id, encryptedAccessToken: encryptApiKey(settings.accessToken, config.linkwardenEncryptionKey) });
-      linkwarden.clearCache();
-      return json(response, 200, { linkwarden: linkwardenStatus() });
+      const settings = credentialsFromInput(await readJson(request));
+      encryptionKey(config.linkwardenEncryptionKey);
+      const collections = await linkwarden.listCollections(settings);
+      const encryptedAccessToken = encryptApiKey(settings.accessToken, config.linkwardenEncryptionKey);
+      store.saveLinkwarden({ ...settings, encryptedAccessToken });
+      linkwarden.clearCache(); collectionSelections.clear();
+      return json(response, 200, { linkwarden: linkwardenStatus(), collections: storeCollectionTree(settings, collections) });
     }
     if (request.method === 'DELETE' && pathname === '/api/linkwarden') {
-      store.removeLinkwarden(); linkwarden.clearCache(); return json(response, 204, {});
+      store.removeLinkwarden(); linkwarden.clearCache(); collectionSelections.clear(); return json(response, 204, {});
     }
     if (request.method === 'PUT' && id) {
       if (!store.get(id)) return json(response, 404, { error: 'Device not found.' });

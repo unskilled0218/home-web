@@ -20,9 +20,9 @@
       <p class="status" id="status" role="status" aria-live="polite"></p>
       <section id="devices" class="groups" aria-live="polite"></section>
       <section class="bookmarks-section" aria-labelledby="bookmarks-title">
-        <div class="section-heading"><div><p class="eyebrow">LINKWARDEN</p><h2 id="bookmarks-title">Bookmarks</h2></div><button class="button secondary" id="refresh-bookmarks" type="button">Refresh</button></div>
+        <div class="section-heading"><div><p class="eyebrow">LINKWARDEN</p><h2 id="bookmarks-title">Bookmarks</h2><p class="connected-account" id="linkwarden-account" hidden></p></div><div class="bookmark-actions"><button class="text-button" id="disconnect-linkwarden" type="button" hidden>Disconnect</button><button class="button secondary" id="refresh-bookmarks" type="button" disabled>Refresh</button></div></div>
         <p class="bookmark-status" id="bookmark-status" role="status" aria-live="polite"></p>
-        <div class="bookmark-grid" id="bookmarks" aria-live="polite"></div>
+        <div class="bookmark-layout"><nav class="collection-tree" id="collection-tree" aria-label="Linkwarden collections" hidden></nav><div class="bookmark-grid" id="bookmarks" aria-live="polite"></div></div>
       </section>
     </main>
     <dialog id="device-dialog">
@@ -40,13 +40,12 @@
     <dialog id="linkwarden-dialog">
       <form id="linkwarden-form">
         <div class="dialog-heading"><h2>Bookmarks settings</h2><button class="icon-button" id="linkwarden-close" type="button" aria-label="Close">×</button></div>
-        <p class="form-help" id="linkwarden-help">Sign in with a Linkwarden username and access token, then choose a collection. The token is encrypted on this server and never shown again.</p>
+        <p class="form-help" id="linkwarden-help">Connect with a Linkwarden username and access token. The token is encrypted on this server and never shown again.</p>
         <label>Linkwarden URL<input id="linkwarden-url" name="url" type="url" required placeholder="https://links.example.com"></label>
         <label>Username<input id="linkwarden-username" name="username" required maxlength="120" autocomplete="username" placeholder="your-linkwarden-username"></label>
         <label>Access token <span class="optional">leave blank to keep current token</span><input id="linkwarden-token" name="accessToken" type="password" autocomplete="new-password" placeholder="Paste a Linkwarden access token"></label>
-        <div class="collection-picker"><div><label for="linkwarden-collection">Collection</label><select id="linkwarden-collection" name="collectionToken" required disabled><option value="">Test connection first</option></select></div><button class="button secondary" id="list-linkwarden-collections" type="button" disabled>List collections</button></div>
         <p class="dialog-error" id="linkwarden-error" role="alert"></p>
-        <div class="dialog-actions"><button class="button secondary" id="disconnect-linkwarden" type="button">Disconnect</button><button class="button secondary" id="test-linkwarden" type="button">Test connection</button><button class="button" type="submit">Save settings</button></div>
+        <div class="dialog-actions"><button class="button" type="submit">Connect</button></div>
       </form>
     </dialog>
     <script type="module" src="/app.js"></script>

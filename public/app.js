@@ -1,4 +1,4 @@
-const state = { devices: [], selected: new Set(), bookmarks: [], linkwarden: null, collections: [], connectionToken: null };
+const state = { devices: [], selected: new Set(), bookmarks: [], linkwarden: null, collections: [], activeCollectionToken: null, collectionRequest: 0 };
 const devicesElement = document.querySelector('#devices');
 const statusElement = document.querySelector('#status');
 const searchElement = document.querySelector('#search');
@@ -10,6 +10,10 @@ const bookmarkStatusElement = document.querySelector('#bookmark-status');
 const linkwardenDialog = document.querySelector('#linkwarden-dialog');
 const linkwardenForm = document.querySelector('#linkwarden-form');
 const linkwardenError = document.querySelector('#linkwarden-error');
+const collectionTreeElement = document.querySelector('#collection-tree');
+const refreshBookmarksButton = document.querySelector('#refresh-bookmarks');
+const disconnectLinkwardenButton = document.querySelector('#disconnect-linkwarden');
+const linkwardenAccountElement = document.querySelector('#linkwarden-account');
 
 function setStatus(message = '', error = false) {
   statusElement.textContent = message;
@@ -63,6 +67,7 @@ function renderBookmarks(message = '') {
   bookmarksElement.replaceChildren();
   bookmarkStatusElement.textContent = message;
   if (!state.linkwarden?.configured) { bookmarkStatusElement.textContent = 'Bookmarks are not connected. Open Bookmarks settings to connect Linkwarden.'; return; }
+  if (!state.activeCollectionToken) { bookmarkStatusElement.textContent ||= 'Choose a collection to view its bookmarks.'; return; }
   if (!state.bookmarks.length) { const empty = document.createElement('p'); empty.className = 'empty'; empty.textContent = 'No valid bookmarks were found in this collection.'; bookmarksElement.append(empty); return; }
   for (const bookmark of state.bookmarks) {
     const card = document.createElement('article'); card.className = 'bookmark';
@@ -73,17 +78,58 @@ function renderBookmarks(message = '') {
   }
 }
 
+function renderCollectionTree() {
+  collectionTreeElement.replaceChildren();
+  collectionTreeElement.hidden = !state.linkwarden?.configured;
+  disconnectLinkwardenButton.hidden = !state.linkwarden?.configured;
+  linkwardenAccountElement.hidden = !state.linkwarden?.configured;
+  linkwardenAccountElement.textContent = state.linkwarden?.configured ? `${state.linkwarden.username} · ${state.linkwarden.baseUrl}` : '';
+  refreshBookmarksButton.disabled = !state.activeCollectionToken;
+  if (!state.linkwarden?.configured) return;
+  if (!state.collections.length) { const empty = document.createElement('p'); empty.className = 'empty'; empty.textContent = 'No collections are available for this account.'; collectionTreeElement.append(empty); return; }
+  const renderNodes = (collections) => {
+    const list = document.createElement('ul');
+    for (const collection of collections) {
+      const item = document.createElement('li');
+      const select = button(collection.name, 'collection-node', () => selectCollection(collection));
+      select.classList.toggle('selected', collection.collectionToken === state.activeCollectionToken);
+      select.setAttribute('aria-current', collection.collectionToken === state.activeCollectionToken ? 'true' : 'false');
+      item.append(select);
+      if (collection.children.length) item.append(renderNodes(collection.children));
+      list.append(item);
+    }
+    return list;
+  };
+  collectionTreeElement.append(renderNodes(state.collections));
+}
+
 async function load() {
   try { state.devices = (await api('/api/devices')).devices; state.selected = new Set([...state.selected].filter((id) => state.devices.some((device) => device.id === id))); render(); } catch (error) { setStatus(error.message, true); }
 }
 
 async function loadBookmarks(refresh = false) {
+  if (!state.activeCollectionToken) { renderBookmarks(); return; }
+  const collectionToken = state.activeCollectionToken;
   bookmarkStatusElement.textContent = 'Loading bookmarks…';
-  try { const result = await api(`/api/bookmarks${refresh ? '?refresh=1' : ''}`); state.bookmarks = result.bookmarks; renderBookmarks(result.stale ? 'Showing recently cached bookmarks while Linkwarden is unavailable.' : ''); } catch (error) { renderBookmarks(error.message); }
+  const query = new URLSearchParams({ collection: collectionToken, ...(refresh && { refresh: '1' }) });
+  try { const result = await api(`/api/bookmarks?${query}`); if (collectionToken !== state.activeCollectionToken) return; state.bookmarks = result.bookmarks; renderBookmarks(result.stale ? 'Showing recently cached bookmarks while Linkwarden is unavailable.' : ''); }
+  catch (error) { if (collectionToken !== state.activeCollectionToken) return; if (error.message.startsWith('Select a collection')) { await loadCollections(); bookmarkStatusElement.textContent = 'The collection session expired. Choose a collection again.'; } else renderBookmarks(error.message); }
+}
+
+async function loadCollections() {
+  const request = ++state.collectionRequest;
+  state.activeCollectionToken = null; state.bookmarks = []; refreshBookmarksButton.disabled = true;
+  bookmarkStatusElement.textContent = 'Loading collections…';
+  try { const collections = (await api('/api/linkwarden/collections')).collections; if (request !== state.collectionRequest) return; state.collections = collections; renderCollectionTree(); renderBookmarks(); }
+  catch (error) { if (request !== state.collectionRequest) return; state.collections = []; renderCollectionTree(); renderBookmarks(error.message); }
 }
 
 async function loadLinkwarden() {
-  try { state.linkwarden = (await api('/api/linkwarden')).linkwarden; renderBookmarks(); if (state.linkwarden.configured) await loadBookmarks(); } catch (error) { bookmarkStatusElement.textContent = error.message; }
+  try { state.linkwarden = (await api('/api/linkwarden')).linkwarden; renderCollectionTree(); renderBookmarks(); if (state.linkwarden.configured) await loadCollections(); } catch (error) { bookmarkStatusElement.textContent = error.message; }
+}
+
+async function selectCollection(collection) {
+  state.activeCollectionToken = collection.collectionToken; state.bookmarks = []; renderCollectionTree(); await loadBookmarks();
 }
 
 async function wake(device) {
@@ -128,52 +174,23 @@ function openLinkwardenForm() {
   linkwardenForm.reset(); linkwardenError.textContent = '';
   document.querySelector('#linkwarden-url').value = settings?.baseUrl ?? '';
   document.querySelector('#linkwarden-username').value = settings?.username ?? '';
-  const collectionSelect = document.querySelector('#linkwarden-collection');
-  state.connectionToken = null;
-  collectionSelect.disabled = true; collectionSelect.replaceChildren(new Option('Test connection first', ''));
-  document.querySelector('#list-linkwarden-collections').disabled = true;
-  document.querySelector('#disconnect-linkwarden').hidden = !settings?.configured;
-  document.querySelector('#linkwarden-help').textContent = settings?.encryptionReady ? 'The access token is encrypted on this server and never shown again. Leave it blank to retain the configured token, then list and select a collection.' : 'Set a valid server encryption key before connecting Linkwarden.';
+  document.querySelector('#linkwarden-help').textContent = settings?.encryptionReady ? 'The access token is encrypted on this server and never shown again. Leave it blank to retain the configured token.' : 'Set a valid server encryption key before connecting Linkwarden.';
   linkwardenDialog.showModal();
-}
-
-function linkwardenPayload() { return { ...Object.fromEntries(new FormData(linkwardenForm)), ...(state.connectionToken && { connectionToken: state.connectionToken }) }; }
-
-function resetLinkwardenConnection() {
-  state.connectionToken = null;
-  const select = document.querySelector('#linkwarden-collection');
-  select.disabled = true; select.replaceChildren(new Option('Test connection first', ''));
-  document.querySelector('#list-linkwarden-collections').disabled = true;
-}
-
-async function listLinkwardenCollections() {
-  linkwardenError.textContent = '';
-  const select = document.querySelector('#linkwarden-collection');
-  select.disabled = true; select.replaceChildren(new Option('Loading collections…', ''));
-  try {
-    state.collections = (await api('/api/linkwarden/collections', { method: 'POST', body: JSON.stringify(linkwardenPayload()) })).collections;
-    select.replaceChildren(new Option(state.collections.length ? 'Choose a collection' : 'No collections available', ''));
-    for (const collection of state.collections) select.append(new Option(collection.name, collection.selectionToken));
-    select.disabled = state.collections.length === 0;
-    if (!state.collections.length) linkwardenError.textContent = 'No collections are available for this Linkwarden account.';
-  } catch (error) { resetLinkwardenConnection(); linkwardenError.textContent = error.message; }
 }
 
 document.querySelector('#linkwarden-settings').addEventListener('click', openLinkwardenForm);
 document.querySelector('#linkwarden-close').addEventListener('click', () => linkwardenDialog.close());
-document.querySelector('#refresh-bookmarks').addEventListener('click', () => loadBookmarks(true));
-document.querySelector('#list-linkwarden-collections').addEventListener('click', listLinkwardenCollections);
-document.querySelector('#test-linkwarden').addEventListener('click', async () => {
-  linkwardenError.textContent = '';
-  try { const result = await api('/api/linkwarden/test', { method: 'POST', body: JSON.stringify(linkwardenPayload()) }); state.connectionToken = result.connectionToken; document.querySelector('#list-linkwarden-collections').disabled = false; linkwardenError.textContent = result.message; } catch (error) { resetLinkwardenConnection(); linkwardenError.textContent = error.message; }
-});
-for (const selector of ['#linkwarden-url', '#linkwarden-username', '#linkwarden-token']) document.querySelector(selector).addEventListener('input', resetLinkwardenConnection);
-document.querySelector('#disconnect-linkwarden').addEventListener('click', async () => {
+refreshBookmarksButton.addEventListener('click', () => loadBookmarks(true));
+disconnectLinkwardenButton.addEventListener('click', async () => {
   if (!window.confirm('Disconnect Linkwarden and delete its saved API key?')) return;
-  try { await api('/api/linkwarden', { method: 'DELETE' }); linkwardenDialog.close(); state.bookmarks = []; await loadLinkwarden(); } catch (error) { linkwardenError.textContent = error.message; }
+  try { await api('/api/linkwarden', { method: 'DELETE' }); state.collectionRequest += 1; state.collections = []; state.activeCollectionToken = null; state.bookmarks = []; await loadLinkwarden(); } catch (error) { bookmarkStatusElement.textContent = error.message; }
 });
 linkwardenForm.addEventListener('submit', async (event) => {
   event.preventDefault(); linkwardenError.textContent = '';
-  try { state.linkwarden = (await api('/api/linkwarden', { method: 'PUT', body: JSON.stringify(linkwardenPayload()) })).linkwarden; linkwardenDialog.close(); await loadBookmarks(true); } catch (error) { linkwardenError.textContent = error.message; }
+  try {
+    const result = await api('/api/linkwarden', { method: 'PUT', body: JSON.stringify(Object.fromEntries(new FormData(linkwardenForm))) });
+    state.collectionRequest += 1; state.linkwarden = result.linkwarden; state.collections = result.collections; state.activeCollectionToken = null; state.bookmarks = [];
+    linkwardenDialog.close(); renderCollectionTree(); renderBookmarks();
+  } catch (error) { linkwardenError.textContent = error.message; }
 });
 load(); loadLinkwarden();

@@ -1,4 +1,28 @@
+import http from 'node:http';
+import https from 'node:https';
+import { Readable } from 'node:stream';
+
 const MAX_RESPONSE_BYTES = 1_000_000;
+
+function fetchLinkwarden(url, { headers, signal } = {}, redirects = 0) {
+  const parsed = new URL(url);
+  const transport = parsed.protocol === 'https:' ? https : http;
+  const options = { headers, signal, ...(parsed.protocol === 'https:' && { rejectUnauthorized: false }) };
+  return new Promise((resolve, reject) => {
+    const request = transport.get(parsed, options, (response) => {
+      if ([301, 302, 303, 307, 308].includes(response.statusCode) && response.headers.location) {
+        const target = new URL(response.headers.location, parsed);
+        response.resume();
+        if (target.origin !== parsed.origin) { reject(new Error('Linkwarden returned a cross-origin redirect.')); return; }
+        if (redirects >= 5) { reject(new Error('Linkwarden returned too many redirects.')); return; }
+        resolve(fetchLinkwarden(target, { headers, signal }, redirects + 1));
+        return;
+      }
+      resolve(new Response(Readable.toWeb(response), { status: response.statusCode ?? 500, statusText: response.statusMessage, headers: response.headers }));
+    });
+    request.on('error', reject);
+  });
+}
 
 export function normalizeLinkwardenCredentials(input, existing = null) {
   let url;
@@ -30,6 +54,45 @@ export function normalizeBookmarks(payload) {
   });
 }
 
+export function normalizeCollections(payload) {
+  const entries = payload?.response ?? payload?.data ?? [];
+  if (!Array.isArray(entries)) throw new Error('Linkwarden returned an invalid collection list.');
+  const seen = new Set();
+  return entries.flatMap((collection) => {
+    const id = Number(collection?.id);
+    const name = typeof collection?.name === 'string' ? collection.name.trim().slice(0, 300) : '';
+    if (!Number.isSafeInteger(id) || id < 1 || !name || seen.has(id)) return [];
+    seen.add(id);
+    const rawParentId = collection?.parentId ?? collection?.parent?.id;
+    const parentId = rawParentId == null ? null : Number(rawParentId);
+    return [{ id, name, parentId: Number.isSafeInteger(parentId) && parentId > 0 && parentId !== id ? parentId : null }];
+  });
+}
+
+export function buildCollectionTree(collections) {
+  const nodes = new Map(collections.map((collection) => [collection.id, { ...collection, children: [] }]));
+  const invalidParents = new Set();
+  for (const node of nodes.values()) {
+    if (node.parentId != null && !nodes.has(node.parentId)) invalidParents.add(node.id);
+    const seen = new Set([node.id]);
+    const chain = [node.id];
+    let parentId = node.parentId;
+    while (parentId != null && nodes.has(parentId)) {
+      if (seen.has(parentId)) { for (const id of chain) invalidParents.add(id); break; }
+      seen.add(parentId);
+      chain.push(parentId);
+      parentId = nodes.get(parentId).parentId;
+    }
+  }
+  for (const id of invalidParents) nodes.get(id).parentId = null;
+  const compare = (left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: 'base' }) || left.id - right.id;
+  const roots = [];
+  for (const node of nodes.values()) (node.parentId == null ? roots : nodes.get(node.parentId).children).push(node);
+  const sort = (items) => { items.sort(compare); for (const item of items) sort(item.children); };
+  sort(roots);
+  return roots;
+}
+
 async function boundedJson(response, limit = MAX_RESPONSE_BYTES) {
   if (!response.ok) throw new Error('Linkwarden request failed.');
   const length = Number(response.headers.get('content-length'));
@@ -41,9 +104,10 @@ async function boundedJson(response, limit = MAX_RESPONSE_BYTES) {
   return JSON.parse(new TextDecoder().decode(Buffer.concat(chunks)));
 }
 
-export function createLinkwardenClient({ fetchImpl = fetch, timeoutMs = 8_000, cacheSeconds = 60 } = {}) {
-  let cache = null;
-  let inFlight = null;
+export function createLinkwardenClient({ fetchImpl = fetchLinkwarden, timeoutMs = 8_000, cacheSeconds = 60 } = {}) {
+  const cache = new Map();
+  const inFlight = new Map();
+  let cacheGeneration = 0;
   const request = async (url, accessToken) => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -52,7 +116,8 @@ export function createLinkwardenClient({ fetchImpl = fetch, timeoutMs = 8_000, c
       return boundedJson(response);
     } finally { clearTimeout(timer); }
   };
-  const refresh = async ({ baseUrl, collectionId, accessToken }) => {
+  const refresh = async ({ baseUrl, collectionId, accessToken }, generation) => {
+    const key = `${baseUrl}:${collectionId}`;
     const origin = new URL(baseUrl).origin;
     let next = new URL(`/api/v1/collections/${collectionId}/bookmarks`, baseUrl).href;
     const bookmarks = [];
@@ -65,33 +130,24 @@ export function createLinkwardenClient({ fetchImpl = fetch, timeoutMs = 8_000, c
       if (parsed.origin !== origin) throw new Error('Linkwarden returned an invalid pagination link.');
       next = parsed.href;
     }
-    cache = { key: `${baseUrl}:${collectionId}`, bookmarks, fetchedAt: Date.now() };
+    if (generation === cacheGeneration) cache.set(key, { bookmarks, fetchedAt: Date.now() });
     return { bookmarks, stale: false };
   };
   return {
-    clearCache: () => { cache = null; },
+    clearCache: () => { cacheGeneration += 1; cache.clear(); inFlight.clear(); },
     async listCollections({ baseUrl, accessToken }) {
       const payload = await request(new URL('/api/v1/collections', baseUrl).href, accessToken);
-      const entries = payload?.response ?? payload?.data ?? [];
-      if (!Array.isArray(entries)) throw new Error('Linkwarden returned an invalid collection list.');
-      return entries.flatMap((collection) => {
-        const id = Number(collection?.id);
-        const name = typeof collection?.name === 'string' ? collection.name.trim().slice(0, 300) : '';
-        return Number.isSafeInteger(id) && id > 0 && name ? [{ id, name }] : [];
-      });
+      return buildCollectionTree(normalizeCollections(payload));
     },
     async getBookmarks(settings, { force = false } = {}) {
       const key = `${settings.baseUrl}:${settings.collectionId}`;
-      if (!force && cache?.key === key && Date.now() - cache.fetchedAt < cacheSeconds * 1_000) return { bookmarks: cache.bookmarks, stale: false };
-      if (inFlight) {
-        try { await inFlight.promise; } catch { /* The matching stale-cache fallback is handled below. */ }
-        if (cache?.key === key) return { bookmarks: cache.bookmarks, stale: false };
-        return this.getBookmarks(settings, { force: true });
-      }
-      const promise = refresh(settings);
-      inFlight = { key, promise };
-      try { return await promise; } catch { if (cache?.key === key) return { bookmarks: cache.bookmarks, stale: true }; throw new Error('Linkwarden is currently unavailable.'); } finally { if (inFlight?.promise === promise) inFlight = null; }
+      const cached = cache.get(key);
+      if (!force && cached && Date.now() - cached.fetchedAt < cacheSeconds * 1_000) return { bookmarks: cached.bookmarks, stale: false };
+      const generation = cacheGeneration;
+      const promise = inFlight.get(key) ?? refresh(settings, generation);
+      inFlight.set(key, promise);
+      try { return await promise; } catch { if (cached) return { bookmarks: cached.bookmarks, stale: true }; throw new Error('Linkwarden is currently unavailable.'); } finally { if (inFlight.get(key) === promise) inFlight.delete(key); }
     },
-    test: (settings) => refresh(settings)
+    test: (settings) => refresh(settings, cacheGeneration)
   };
 }
