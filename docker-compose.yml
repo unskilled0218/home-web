@@ -10,6 +10,9 @@ services:
       DATABASE_PATH: /app/data/wol.db
       WOL_PORT: ${WOL_PORT:-9}
       WAKE_COOLDOWN_SECONDS: ${WAKE_COOLDOWN_SECONDS:-20}
+      LINKWARDEN_CONFIG_ENCRYPTION_KEY: ${LINKWARDEN_CONFIG_ENCRYPTION_KEY:-}
+      LINKWARDEN_CONFIG_ENCRYPTION_KEY_FILE: /app/data/linkwarden-config-encryption.key
+      LINKWARDEN_CACHE_SECONDS: ${LINKWARDEN_CACHE_SECONDS:-60}
     volumes:
       - ./:/app:ro
       - ./data:/app/data

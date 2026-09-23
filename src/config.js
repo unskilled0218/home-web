@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { resolveLinkwardenEncryptionKey } from './linkwarden-key.js';
 
 const integer = (value, fallback, name) => {
   const parsed = Number.parseInt(value ?? fallback, 10);
@@ -14,6 +15,9 @@ export const config = Object.freeze({
   databasePath: path.resolve(process.env.DATABASE_PATH ?? './data/wol.db'),
   wolPort: integer(process.env.WOL_PORT, 9, 'WOL_PORT'),
   wakeCooldownSeconds: integer(process.env.WAKE_COOLDOWN_SECONDS, 20, 'WAKE_COOLDOWN_SECONDS'),
-  linkwardenEncryptionKey: process.env.LINKWARDEN_CONFIG_ENCRYPTION_KEY ?? '',
+  linkwardenEncryptionKey: resolveLinkwardenEncryptionKey({
+    explicitSecret: process.env.LINKWARDEN_CONFIG_ENCRYPTION_KEY,
+    filePath: process.env.LINKWARDEN_CONFIG_ENCRYPTION_KEY_FILE
+  }),
   linkwardenCacheSeconds: integer(process.env.LINKWARDEN_CACHE_SECONDS, 60, 'LINKWARDEN_CACHE_SECONDS')
 });

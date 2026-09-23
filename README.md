@@ -17,13 +17,15 @@ For another device on the LAN to reach the dashboard, set `HOST` to the server's
 
 ## Container deployment
 
-The supplied `docker-compose.yml` uses the official Node image and host networking because UDP broadcast packets need to leave through the LAN interface. On Linux, set `HOST` to the host's private address before running:
+The supplied `docker-compose.yml` uses the official Node image and host networking because UDP broadcast packets need to leave through the LAN interface. It automatically creates the Linkwarden encryption key at `data/linkwarden-config-encryption.key` on first startup and reuses it after container recreation. No Linkwarden secret must be configured before a fresh Compose deployment. On Linux, set `HOST` to the host's private address before running:
 
 ```sh
 HOST=192.168.1.10 docker compose up -d
 ```
 
 Restrict port 3000 at the host firewall to the trusted LAN. If a reverse proxy is used, keep it LAN-only and pass requests directly to the private-bound application. Host networking behaves differently on Docker Desktop; run the service directly on the LAN host there.
+
+To retain an existing externally managed key, set `LINKWARDEN_CONFIG_ENCRYPTION_KEY` in Compose's `.env` file before the first startup. An explicit key takes precedence and the automatic key file is not created. Keep using the same value after every restart.
 
 ## Operational checklist
 
@@ -34,7 +36,7 @@ Restrict port 3000 at the host firewall to the trusted LAN. If a reverse proxy i
 - Enable Wake-on-LAN in each target's BIOS/UEFI and NIC/operating-system power settings.
 - VLANs and routed subnets commonly block broadcasts. Place the service appropriately or configure network forwarding deliberately.
 - Keep the dashboard on a trusted LAN. It intentionally has no authentication, so do not expose it on an untrusted network.
-- Back up `data/wol.db`; it contains the device inventory and wake attempt audit trail.
+- Back up `data/wol.db` and `data/linkwarden-config-encryption.key` together; the database contains the device inventory, wake attempt audit trail, and encrypted Linkwarden credentials.
 
 ## Checks
 
@@ -46,7 +48,13 @@ The tests validate Wake-on-LAN packet handling, Linkwarden credential storage an
 
 ## Linkwarden bookmarks
 
-Bookmarks are optional and do not affect Wake-on-LAN. Before connecting Linkwarden, generate a server-only encryption secret and add it to the environment:
+Bookmarks are optional and do not affect Wake-on-LAN. Compose creates and persists the required server-only encryption secret automatically. For a direct Node.js run, use the same key-file behavior by setting a persistent writable path:
+
+```sh
+LINKWARDEN_CONFIG_ENCRYPTION_KEY_FILE=./data/linkwarden-config-encryption.key npm start
+```
+
+Alternatively, generate a key once and provide that same value through the process environment on every run:
 
 ```sh
 openssl rand -base64 32
@@ -54,4 +62,4 @@ openssl rand -base64 32
 
 Set that output as `LINKWARDEN_CONFIG_ENCRYPTION_KEY` and restart the service. Open **Bookmarks settings**, enter the Linkwarden base URL, username, and a least-privilege access token, then choose **Connect**. A successful connection validates access, encrypts the token in `data/wol.db`, and immediately displays every available collection as a tree. Select any collection in the tree to load its HTTP(S) URL records through Linkwarden's current search API; note, image, and archive-only records without a web URL are omitted. Each collection has an independent 60-second cache and can be refreshed explicitly. The browser receives short-lived opaque collection tokens instead of Linkwarden's numeric collection IDs. On a later reconnect, leave the access-token field blank to retain the saved token. Use **Disconnect** beside the collection tree to delete the saved configuration and encrypted token.
 
-The Linkwarden service must be reachable from the dashboard host. HTTPS connections to Linkwarden accept self-signed certificates and do not verify the certificate chain or hostname, so use this only on a trusted LAN and never expose the connection path to an untrusted network. Other Node HTTPS traffic is not affected. Back up the database and encryption secret together. Losing the secret makes saved credentials unrecoverable; changing it requires deliberately decrypting and re-encrypting the saved token while the old secret is available. Existing saved URL, username, and encrypted-token data is retained when upgrading from the former single-collection configuration.
+The Linkwarden service must be reachable from the dashboard host. HTTPS connections to Linkwarden accept self-signed certificates and do not verify the certificate chain or hostname, so use this only on a trusted LAN and never expose the connection path to an untrusted network. Other Node HTTPS traffic is not affected. Protect and back up the database and encryption key together. Losing, deleting, or replacing the key makes saved credentials unrecoverable; changing it requires deliberately decrypting and re-encrypting the saved token while the old secret is available. A malformed or unreadable persisted key stops startup rather than silently replacing the secret. Existing saved URL, username, and encrypted-token data is retained when upgrading from the former single-collection configuration.
