@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { loadLinkwardenCa } from '../src/linkwarden-ca.js';
 
 test('loads a private CA alongside default roots and rejects bad paths', async () => {
-  const directory = mkdtempSync(path.join(tmpdir(), 'lan-wake-ca-'));
+  const directory = mkdtempSync(path.join(tmpdir(), 'dashboard-ca-'));
   const empty = path.join(directory, 'empty.pem');
   const caFile = path.join(directory, 'private-ca.pem');
   writeFileSync(empty, '   \n');

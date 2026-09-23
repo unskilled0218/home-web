@@ -11,7 +11,7 @@ import { loadEnvFile, parseEnv } from '../src/env.js';
 
 test('parses documented env syntax and preserves explicit environment values', async () => {
   assert.deepEqual(parseEnv('# comment\nPLAIN=value\nDOUBLE="two words"\nSINGLE=\'three words\'\nEMPTY=\n'), { PLAIN: 'value', DOUBLE: 'two words', SINGLE: 'three words', EMPTY: '' });
-  const directory = mkdtempSync(path.join(tmpdir(), 'lan-wake-env-'));
+  const directory = mkdtempSync(path.join(tmpdir(), 'dashboard-env-'));
   const file = path.join(directory, '.env');
   writeFileSync(file, 'HOST=192.168.1.10\nPORT=4000\nLINKWARDEN_CONFIG_ENCRYPTION_KEY=ignored\n');
   const environment = { PORT: '5000', LINKWARDEN_CONFIG_ENCRYPTION_KEY: Buffer.alloc(32, 3).toString('base64') };
@@ -27,7 +27,7 @@ test('parses documented env syntax and preserves explicit environment values', a
 });
 
 test('loads an env file before production startup', async (context) => {
-  const directory = mkdtempSync(path.join(tmpdir(), 'lan-wake-start-'));
+  const directory = mkdtempSync(path.join(tmpdir(), 'dashboard-start-'));
   const portServer = net.createServer();
   portServer.listen(0, '127.0.0.1');
   await once(portServer, 'listening');

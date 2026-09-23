@@ -1,6 +1,6 @@
-# LAN Wake
+# dashboard
 
-LAN Wake is a small, self-hosted dashboard for Linkwarden bookmarks and Wake-on-LAN controls on a trusted local network. It has no accounts or internet-facing use case. Bookmarks appear first, with saved machines and wake controls beneath them. A successful wake request means the host sent the UDP magic packet; it does not prove that the target computer booted.
+dashboard is a small, self-hosted website for Linkwarden bookmarks and Wake-on-LAN controls on a trusted local network. It has no accounts or internet-facing use case. Bookmarks appear first, with saved machines and wake controls beneath them. A successful wake request means the host sent the UDP magic packet; it does not prove that the target computer booted.
 
 ## Run locally
 

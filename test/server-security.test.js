@@ -53,7 +53,7 @@ function rawRequest(port, requestText) {
 }
 
 test('blocks rebinding hosts and never reuses a Linkwarden token for a changed identity', async (context) => {
-  const directory = mkdtempSync(path.join(tmpdir(), 'lan-wake-security-'));
+  const directory = mkdtempSync(path.join(tmpdir(), 'dashboard-security-'));
   const primaryRequests = [];
   const secondaryRequests = [];
   const linkwardenServer = (requests) => http.createServer((request, response) => {

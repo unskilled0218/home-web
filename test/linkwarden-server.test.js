@@ -18,7 +18,7 @@ async function availablePort() {
 }
 
 test('connects atomically and navigates collections through opaque tokens', async (context) => {
-  const directory = mkdtempSync(path.join(tmpdir(), 'lan-wake-api-'));
+  const directory = mkdtempSync(path.join(tmpdir(), 'dashboard-api-'));
   const certificatePath = path.join(directory, 'certificate.pem');
   const keyPath = path.join(directory, 'key.pem');
   try {

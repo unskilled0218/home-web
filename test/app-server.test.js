@@ -8,7 +8,7 @@ import { createDashboardServer } from '../src/app.js';
 import { createStore } from '../src/db.js';
 
 test('covers device CRUD validation and deterministic Wake behavior', async (context) => {
-  const directory = mkdtempSync(path.join(tmpdir(), 'lan-wake-api-'));
+  const directory = mkdtempSync(path.join(tmpdir(), 'dashboard-api-'));
   const store = createStore(path.join(directory, 'dashboard.db'));
   let current = 100_000;
   const wakeCalls = [];

@@ -1,8 +1,8 @@
 {
-  "name": "lan-wol-dashboard",
+  "name": "dashboard",
   "version": "0.8.0",
   "private": true,
-  "description": "A self-hosted local-LAN Wake-on-LAN dashboard.",
+  "description": "A self-hosted dashboard for Linkwarden bookmarks and Wake-on-LAN controls.",
   "type": "module",
   "engines": {
     "node": ">=24.0.0"

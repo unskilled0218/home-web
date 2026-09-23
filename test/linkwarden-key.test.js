@@ -8,7 +8,7 @@ import { encryptionKey } from '../src/linkwarden-crypto.js';
 import { resolveLinkwardenEncryptionKey } from '../src/linkwarden-key.js';
 
 function temporaryDirectory(context) {
-  const directory = mkdtempSync(path.join(tmpdir(), 'lan-wake-key-'));
+  const directory = mkdtempSync(path.join(tmpdir(), 'dashboard-key-'));
   context.after(() => rmSync(directory, { recursive: true, force: true }));
   return directory;
 }

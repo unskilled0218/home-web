@@ -23,7 +23,7 @@ test('encrypts Linkwarden keys with authenticated encryption', () => {
 });
 
 test('migrates and stores Linkwarden configuration without plaintext access-token fields', () => {
-  const directory = mkdtempSync(path.join(tmpdir(), 'lan-wake-'));
+  const directory = mkdtempSync(path.join(tmpdir(), 'dashboard-'));
   const databasePath = path.join(directory, 'wol.db');
   const legacy = new DatabaseSync(databasePath);
   legacy.exec('CREATE TABLE linkwarden_config (id INTEGER PRIMARY KEY, base_url TEXT NOT NULL, username TEXT, collection_name TEXT, collection_id INTEGER NOT NULL, key_ciphertext TEXT NOT NULL, key_iv TEXT NOT NULL, key_tag TEXT NOT NULL, created_at TEXT, updated_at TEXT)');
@@ -194,7 +194,7 @@ test('lists every valid Linkwarden collection tree with Bearer authorization', a
 });
 
 test('requires explicit trust for a private CA and still verifies hostnames', async (context) => {
-  const directory = mkdtempSync(path.join(tmpdir(), 'lan-wake-self-signed-'));
+  const directory = mkdtempSync(path.join(tmpdir(), 'dashboard-self-signed-'));
   const certificatePath = path.join(directory, 'certificate.pem');
   const keyPath = path.join(directory, 'key.pem');
   try {
