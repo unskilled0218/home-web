@@ -3,7 +3,7 @@
 ## Delivered
 
 - Reordered the dashboard so Linkwarden Bookmarks is the first functional section and the complete Wake-on-LAN area appears beneath it.
-- Replaced the Wake-specific hero with neutral home-network framing and moved the packet-dispatch explanation into the Wake-on-LAN section.
+- Removed the top-level title and description entirely and moved the packet-dispatch explanation into the Wake-on-LAN section.
 - Moved Bookmarks settings beside Disconnect and Refresh, and moved Add device into the Wake-on-LAN heading so feature controls are no longer mixed in the global hero.
 - Added an explicitly labelled Wake-on-LAN section with the same eyebrow, heading, action group, spacing, divider, and status hierarchy as Bookmarks.
 - Consolidated bookmark and device grids/cards onto shared dimensions and surfaces while retaining collection navigation, device selection, wake actions, and feature-specific content styles.

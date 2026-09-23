@@ -143,6 +143,7 @@ test('renders Bookmarks before an accessible Wake-on-LAN section', () => {
   const bookmarksSection = html.slice(bookmarksStart, html.indexOf('</section>', bookmarksStart));
   const wakeSection = html.slice(wakeStart, html.indexOf('</section>', wakeStart));
   assert.ok(bookmarksStart > -1 && wakeStart > bookmarksStart);
+  assert.doesNotMatch(html, /<(?:header|h1)\b/);
   assert.match(bookmarksSection, /aria-labelledby="bookmarks-title"/);
   assert.match(bookmarksSection, /class="section-actions bookmark-actions"[^>]*>[\s\S]*id="linkwarden-settings"[\s\S]*id="disconnect-linkwarden"[\s\S]*id="refresh-bookmarks"/);
   assert.match(bookmarksSection, /id="bookmark-status" role="status" aria-live="polite"/);
