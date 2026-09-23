@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import http from 'node:http';
 import https from 'node:https';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
@@ -107,6 +108,28 @@ test('preserves Linkwarden response size, timeout, and cursor protections', asyn
   let pages = 0;
   const tooManyPages = createLinkwardenClient({ fetchImpl: async () => Response.json({ data: { links: [], nextCursor: ++pages } }) });
   await assert.rejects(tooManyPages.test({ baseUrl: 'https://links.example.test', collectionId: 1, accessToken: 'token' }), /too many bookmark pages/);
+});
+
+test('rejects bodyless statuses and malformed redirects without callback exceptions', async () => {
+  for (const fixture of [
+    { status: 101, headers: { connection: 'upgrade', upgrade: 'test' } },
+    { status: 204 },
+    { status: 205 },
+    { status: 304 },
+    { status: 500 },
+    { status: 302, location: 'http://[invalid' }
+  ]) {
+    const server = http.createServer((_request, response) => {
+      response.writeHead(fixture.status, { ...fixture.headers, ...(fixture.location && { location: fixture.location }) });
+      response.end();
+    });
+    server.listen(0, '127.0.0.1');
+    await new Promise((resolve) => server.once('listening', resolve));
+    try {
+      const client = createLinkwardenClient();
+      await assert.rejects(client.listCollections({ baseUrl: `http://127.0.0.1:${server.address().port}`, accessToken: 'token' }));
+    } finally { await new Promise((resolve) => server.close(resolve)); }
+  }
 });
 
 test('uses the search endpoint, authorization, pagination, and cache fallback', async () => {

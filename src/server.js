@@ -3,9 +3,10 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash, randomBytes } from 'node:crypto';
-import { config } from './config.js';
+import { config, normalizeDashboardHostname } from './config.js';
 import { createStore } from './db.js';
-import { normalizeBroadcastAddress, normalizeMacAddress, isValidIpv4, sendMagicPacket } from './wol.js';
+import { normalizeBroadcastAddress, normalizeMacAddress, isValidIpv4 } from './wol.js';
+import { executeWakeRequest } from './wake-request.js';
 import { decryptApiKey, encryptApiKey, encryptionKey } from './linkwarden-crypto.js';
 import { createLinkwardenClient, normalizeLinkwardenCredentials } from './linkwarden.js';
 
@@ -31,11 +32,26 @@ function isTrustedAddress(address = '') {
   return first === 10 || first === 127 || (first === 192 && second === 168) || (first === 172 && second >= 16 && second <= 31);
 }
 
-function sameOrigin(request) {
+function requestAuthority(request) {
+  const rawHost = request.headers.host;
+  if (typeof rawHost !== 'string' || !rawHost) return null;
+  try {
+    const parsed = new URL(`http://${rawHost}`);
+    if (parsed.username || parsed.password || parsed.pathname !== '/' || parsed.search || parsed.hash) return null;
+    return { hostname: normalizeDashboardHostname(parsed.hostname, 'Host'), port: parsed.port };
+  } catch { return null; }
+}
+
+function apiRequestAllowed(request) {
+  const authority = requestAuthority(request);
+  if (!authority || !config.allowedHosts.includes(authority.hostname)) return false;
   const origin = request.headers.origin;
-  if (!origin) return true;
-  const host = request.headers.host;
-  return origin === `http://${host}` || origin === `https://${host}`;
+  if (request.method === 'GET' || !origin) return true;
+  try {
+    const parsed = new URL(origin);
+    if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password || parsed.pathname !== '/' || parsed.search || parsed.hash) return false;
+    return normalizeDashboardHostname(parsed.hostname, 'Origin') === authority.hostname && parsed.port === authority.port && config.allowedHosts.includes(authority.hostname);
+  } catch { return false; }
 }
 
 function validateDevice(input) {
@@ -103,7 +119,10 @@ function selectedCollection(token, settings) {
 function credentialsFromInput(input) {
   const existing = store.getLinkwarden();
   const settings = normalizeLinkwardenCredentials(input, existing);
-  if (!settings.accessToken && existing) settings.accessToken = decryptApiKey(existing.encryptedAccessToken, config.linkwardenEncryptionKey);
+  if (!settings.accessToken && existing) {
+    if (settings.baseUrl !== existing.baseUrl || settings.username !== existing.username) throw new Error('A new access token is required when changing the Linkwarden URL or username.');
+    settings.accessToken = decryptApiKey(existing.encryptedAccessToken, config.linkwardenEncryptionKey);
+  }
   return settings;
 }
 
@@ -120,7 +139,7 @@ async function serveStatic(request, response, pathname) {
 
 async function handleApi(request, response, pathname) {
   if (!isTrustedAddress(request.socket.remoteAddress)) return json(response, 403, { error: 'This service only accepts local-network requests.' });
-  if (request.method !== 'GET' && !sameOrigin(request)) return json(response, 403, { error: 'Request origin is not allowed.' });
+  if (!apiRequestAllowed(request)) return json(response, 403, { error: 'Request host or origin is not allowed.' });
   if (request.method === 'GET' && pathname === '/api/health') return json(response, 200, { status: 'ok' });
   if (request.method === 'GET' && pathname === '/api/devices') return json(response, 200, { devices: store.list() });
   if (request.method === 'GET' && pathname === '/api/linkwarden') return json(response, 200, { linkwarden: linkwardenStatus() });
@@ -168,15 +187,9 @@ async function handleApi(request, response, pathname) {
       const waitMs = config.wakeCooldownSeconds * 1_000 - (now - last);
       if (waitMs > 0) return json(response, 429, { error: `Please wait ${Math.ceil(waitMs / 1_000)} seconds before waking this device again.` });
       wakeRequests.set(wakeId, now);
-      try {
-        const dispatch = await sendMagicPacket({ macAddress: device.macAddress, broadcastAddress: device.broadcastAddress, ipAddress: device.ipAddress, port: config.wolPort });
-        store.markWake(wakeId);
-        store.audit(wakeId, 'sent', `${dispatch.sent}/${dispatch.attempted} Moonlight-compatible UDP datagrams sent`);
-        return json(response, 200, { message: `Wake packet sent to ${device.name} (${dispatch.sent}/${dispatch.attempted} Moonlight-compatible UDP datagrams). This does not confirm that it has powered on.` });
-      } catch (error) {
-        store.audit(wakeId, 'failed', String(error.message).slice(0, 240));
-        return json(response, 502, { error: 'Unable to send the wake packet. Check the host network and device broadcast address.' });
-      }
+      const result = await executeWakeRequest({ device, port: config.wolPort, markWake: () => store.markWake(wakeId), audit: (outcome, detail) => store.audit(wakeId, outcome, detail) });
+      if (!result.sent) return json(response, 502, { error: 'Unable to send the wake packet. Check the host network and device broadcast address.' });
+      return json(response, 200, { message: `Wake packet sent to ${device.name} (${result.dispatch.sent}/${result.dispatch.attempted} Moonlight-compatible UDP datagrams). This does not confirm that it has powered on.` });
     }
   } catch (error) {
     if (error?.code?.startsWith('ERR_SQLITE_CONSTRAINT')) return json(response, 409, { error: 'A device already uses that MAC address.' });
@@ -185,10 +198,23 @@ async function handleApi(request, response, pathname) {
   return json(response, 404, { error: 'Not found.' });
 }
 
-const server = http.createServer(async (request, response) => {
-  const pathname = new URL(request.url, `http://${request.headers.host ?? 'localhost'}`).pathname;
-  if (pathname.startsWith('/api/')) return handleApi(request, response, pathname);
-  return serveStatic(request, response, pathname);
+function handleUnexpectedRequestError(response) {
+  console.error('Unexpected request handling failure.');
+  if (response.destroyed || response.writableEnded) return;
+  try {
+    if (!response.headersSent) json(response, 500, { error: 'Internal server error.' });
+    else response.end();
+  } catch { response.destroy(); }
+}
+
+const server = http.createServer((request, response) => {
+  void (async () => {
+    let pathname;
+    try { pathname = new URL(request.url, 'http://localhost').pathname; }
+    catch { return json(response, 400, { error: 'Invalid request target.' }); }
+    if (pathname.startsWith('/api/')) return handleApi(request, response, pathname);
+    return serveStatic(request, response, pathname);
+  })().catch(() => handleUnexpectedRequestError(response));
 });
 
 server.listen(config.port, config.host, () => console.log(`LAN WoL dashboard listening at http://${config.host}:${config.port}`));

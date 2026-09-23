@@ -13,7 +13,7 @@ npm start
 
 Open `http://127.0.0.1:3000` to connect Linkwarden or add devices. For **Broadcast address**, enter the target PC's directed subnet broadcast address: for example, use `192.168.1.255` for a PC at `192.168.1.42` on a `255.255.255.0` network. The database is created at `data/wol.db` and should be backed up along with the configuration.
 
-For another device on the LAN to reach the dashboard, set `HOST` to the server's explicit private address, such as `192.168.1.10`. Do not bind it to a public interface and do not expose the port through a router.
+For another device on the LAN to reach the dashboard, set `HOST` to the server's explicit private address, such as `192.168.1.10`. That address is accepted automatically as an HTTP Host. If the browser uses a private DNS name instead, also set `DASHBOARD_ALLOWED_HOSTS` to that hostname. Do not bind the service to a public interface or expose its port through a router.
 
 ## Container deployment
 
@@ -23,7 +23,15 @@ The supplied `docker-compose.yml` uses the official Node image and host networki
 HOST=192.168.1.10 docker compose up -d
 ```
 
-Restrict port 3000 at the host firewall to the trusted LAN. If a reverse proxy is used, keep it LAN-only and pass requests directly to the private-bound application. Host networking behaves differently on Docker Desktop; run the service directly on the LAN host there.
+For private DNS, list the exact hostname used in the browser:
+
+```sh
+HOST=192.168.1.10 DASHBOARD_ALLOWED_HOSTS=home.lan docker compose up -d
+```
+
+`DASHBOARD_ALLOWED_HOSTS` is a comma-separated list of hostnames or IP addresses without schemes, ports, paths, or wildcards. Every API request must use either the configured `HOST` address or one of these names. If a reverse proxy is used, keep it LAN-only, preserve the browser-facing Host header, and list that hostname. Do not allow arbitrary Host values or trust forwarded-host headers because that would reintroduce DNS-rebinding access. A wildcard bind such as `0.0.0.0` or `::` requires at least one explicit allowed host.
+
+Restrict port 3000 at the host firewall to the trusted LAN. Host networking behaves differently on Docker Desktop; run the service directly on the LAN host there.
 
 To retain an existing externally managed key, set `LINKWARDEN_CONFIG_ENCRYPTION_KEY` in Compose's `.env` file before the first startup. An explicit key takes precedence and the automatic key file is not created. Keep using the same value after every restart.
 

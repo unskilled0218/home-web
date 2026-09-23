@@ -4,6 +4,7 @@ import { Readable } from 'node:stream';
 
 const MAX_RESPONSE_BYTES = 1_000_000;
 const MAX_BOOKMARK_PAGES = 100;
+const BODYLESS_STATUSES = new Set([204, 205, 304]);
 
 function fetchLinkwarden(url, { headers, signal } = {}, redirects = 0) {
   const parsed = new URL(url);
@@ -11,17 +12,27 @@ function fetchLinkwarden(url, { headers, signal } = {}, redirects = 0) {
   const options = { headers, signal, ...(parsed.protocol === 'https:' && { rejectUnauthorized: false }) };
   return new Promise((resolve, reject) => {
     const request = transport.get(parsed, options, (response) => {
-      if ([301, 302, 303, 307, 308].includes(response.statusCode) && response.headers.location) {
-        const target = new URL(response.headers.location, parsed);
+      try {
+        const status = response.statusCode;
+        if (!Number.isInteger(status) || status < 200 || status > 599) { response.resume(); reject(new Error('Linkwarden returned an invalid HTTP status.')); return; }
+        if ([301, 302, 303, 307, 308].includes(status) && response.headers.location) {
+          const target = new URL(response.headers.location, parsed);
+          response.resume();
+          if (target.origin !== parsed.origin) { reject(new Error('Linkwarden returned a cross-origin redirect.')); return; }
+          if (redirects >= 5) { reject(new Error('Linkwarden returned too many redirects.')); return; }
+          resolve(fetchLinkwarden(target, { headers, signal }, redirects + 1));
+          return;
+        }
+        const body = BODYLESS_STATUSES.has(status) ? null : Readable.toWeb(response);
+        if (body === null) response.resume();
+        resolve(new Response(body, { status, statusText: response.statusMessage, headers: response.headers }));
+      } catch (error) {
         response.resume();
-        if (target.origin !== parsed.origin) { reject(new Error('Linkwarden returned a cross-origin redirect.')); return; }
-        if (redirects >= 5) { reject(new Error('Linkwarden returned too many redirects.')); return; }
-        resolve(fetchLinkwarden(target, { headers, signal }, redirects + 1));
-        return;
+        reject(error);
       }
-      resolve(new Response(Readable.toWeb(response), { status: response.statusCode ?? 500, statusText: response.statusMessage, headers: response.headers }));
     });
     request.on('error', reject);
+    request.on('upgrade', (_response, socket) => { socket.destroy(); reject(new Error('Linkwarden returned an unsupported protocol upgrade.')); });
   });
 }
 

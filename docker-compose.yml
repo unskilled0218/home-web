@@ -7,6 +7,7 @@ services:
     environment:
       HOST: ${HOST:-127.0.0.1}
       PORT: ${PORT:-3000}
+      DASHBOARD_ALLOWED_HOSTS: ${DASHBOARD_ALLOWED_HOSTS:-}
       DATABASE_PATH: /app/data/wol.db
       WOL_PORT: ${WOL_PORT:-9}
       WAKE_COOLDOWN_SECONDS: ${WAKE_COOLDOWN_SECONDS:-20}

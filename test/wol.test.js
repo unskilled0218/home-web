@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createMagicPacket, interfaceBroadcastAddresses, isValidIpv4, moonlightDeliveryPlan, normalizeBroadcastAddress, normalizeMacAddress, sendMagicPacket } from '../src/wol.js';
+import { executeWakeRequest } from '../src/wake-request.js';
 
 test('normalizes valid MAC addresses', () => {
   assert.equal(normalizeMacAddress('aa-bb-cc-dd-ee-ff'), 'AA:BB:CC:DD:EE:FF');
@@ -69,4 +70,30 @@ test('fails when every Moonlight-compatible UDP send fails', async () => {
     send(packet, port, address, callback) { callback(new Error('network unavailable')); }, close() {}
   };
   await assert.rejects(() => sendMagicPacket({ macAddress: 'AA:BB:CC:DD:EE:FF', broadcastAddress: '192.168.1.255', port: 9, interfaces: {}, socketFactory: () => socket }), /Unable to send/);
+});
+
+test('contains wake audit failures without changing the dispatch result', async () => {
+  const messages = [];
+  const device = { macAddress: 'AA:BB:CC:DD:EE:FF', broadcastAddress: '192.168.1.255', ipAddress: null };
+  const sent = await executeWakeRequest({
+    device,
+    port: 9,
+    send: async () => ({ attempted: 6, sent: 6, failed: 0 }),
+    markWake: () => { throw new Error('device deleted'); },
+    audit: () => { throw new Error('foreign key'); },
+    logError: (message) => messages.push(message)
+  });
+  assert.deepEqual(sent, { sent: true, dispatch: { attempted: 6, sent: 6, failed: 0 } });
+  assert.deepEqual(messages, ['Wake packet was dispatched, but its audit record could not be persisted.']);
+
+  const failed = await executeWakeRequest({
+    device,
+    port: 9,
+    send: async () => { throw new Error('network unavailable'); },
+    markWake: () => assert.fail('markWake must not run'),
+    audit: () => { throw new Error('device deleted'); },
+    logError: (message) => messages.push(message)
+  });
+  assert.deepEqual(failed, { sent: false });
+  assert.equal(messages[1], 'Unable to persist a failed wake attempt.');
 });
