@@ -59,8 +59,8 @@ input:focus { outline: 3px solid #58c5bb66; border-color: #70d6cb; }
 .collection-node:hover, .collection-node:focus-visible { background: #1b3e59; }
 .collection-node.selected { background: #70d6cb; color: #082035; font-weight: 750; }
 
-.bookmark-grid, .device-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(230px, 100%), 1fr)); gap: .8rem; min-width: 0; }
-.bookmark, .device { min-width: 0; border: 1px solid #294964; border-radius: .8rem; padding: 1rem; background: #102a43cc; }
+.bookmark-grid, .device-grid, .home-device-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(230px, 100%), 1fr)); gap: .8rem; min-width: 0; }
+.bookmark, .device, .home-device { min-width: 0; border: 1px solid #294964; border-radius: .8rem; padding: 1rem; background: #102a43cc; }
 .bookmark a { color: #9aeee3; font-weight: 750; text-decoration-thickness: 2px; overflow-wrap: anywhere; }
 .bookmark p { color: #b6c7d7; line-height: 1.45; margin: .65rem 0 0; overflow-wrap: anywhere; }
 .bookmark .tags { color: #70d6cb; font-size: .82rem; }
@@ -75,6 +75,11 @@ input:focus { outline: 3px solid #58c5bb66; border-color: #70d6cb; }
 .device-actions { display: flex; gap: .5rem; }
 .device-actions .button { flex: 1; }
 .select { width: 1.1rem; height: 1.1rem; accent-color: #70d6cb; }
+.home-device-groups { display: grid; gap: 1.7rem; }
+.home-device-group h3 { margin: 0 0 .65rem; color: #b6c7d7; font-size: .9rem; letter-spacing: .08em; text-transform: uppercase; }
+.home-device h4 { margin: 0; font-size: 1rem; overflow-wrap: anywhere; }
+.home-device p { margin: .55rem 0 0; color: #9db5c9; line-height: 1.4; overflow-wrap: anywhere; }
+.home-device .device-state { color: #ffcf70; font-size: .78rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
 .empty { padding: 2rem; color: #b6c7d7; border: 1px dashed #31506a; border-radius: .8rem; text-align: center; }
 
 dialog { width: min(94vw, 470px); border: 1px solid #3d627e; border-radius: .9rem; padding: 0; color: #eff7ff; background: #102a43; box-shadow: 0 1rem 4rem #000a; }

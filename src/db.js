@@ -37,6 +37,15 @@ export function createStore(databasePath) {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE TABLE IF NOT EXISTS home_assistant_config (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      base_url TEXT NOT NULL,
+      token_ciphertext TEXT NOT NULL,
+      token_iv TEXT NOT NULL,
+      token_tag TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
   `);
   let columns = new Set(db.prepare('PRAGMA table_info(linkwarden_config)').all().map((column) => column.name));
   if (!columns.has('username')) { db.exec('ALTER TABLE linkwarden_config ADD COLUMN username TEXT'); columns.add('username'); }
@@ -78,9 +87,13 @@ export function createStore(databasePath) {
     audit: db.prepare('INSERT INTO wake_attempts (device_id, outcome, detail) VALUES (?, ?, ?)'),
     getLinkwarden: db.prepare('SELECT * FROM linkwarden_config WHERE id = 1'),
     saveLinkwarden: db.prepare("INSERT INTO linkwarden_config (id, base_url, username, key_ciphertext, key_iv, key_tag) VALUES (1, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET base_url = excluded.base_url, username = excluded.username, key_ciphertext = excluded.key_ciphertext, key_iv = excluded.key_iv, key_tag = excluded.key_tag, updated_at = CURRENT_TIMESTAMP"),
-    removeLinkwarden: db.prepare('DELETE FROM linkwarden_config WHERE id = 1')
+    removeLinkwarden: db.prepare('DELETE FROM linkwarden_config WHERE id = 1'),
+    getHomeAssistant: db.prepare('SELECT * FROM home_assistant_config WHERE id = 1'),
+    saveHomeAssistant: db.prepare("INSERT INTO home_assistant_config (id, base_url, token_ciphertext, token_iv, token_tag) VALUES (1, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET base_url = excluded.base_url, token_ciphertext = excluded.token_ciphertext, token_iv = excluded.token_iv, token_tag = excluded.token_tag, updated_at = CURRENT_TIMESTAMP"),
+    removeHomeAssistant: db.prepare('DELETE FROM home_assistant_config WHERE id = 1')
   };
   const mapLinkwarden = (row) => row && ({ baseUrl: row.base_url, username: row.username, encryptedAccessToken: { ciphertext: row.key_ciphertext, iv: row.key_iv, tag: row.key_tag }, updatedAt: row.updated_at });
+  const mapHomeAssistant = (row) => row && ({ baseUrl: row.base_url, encryptedAccessToken: { ciphertext: row.token_ciphertext, iv: row.token_iv, tag: row.token_tag }, updatedAt: row.updated_at });
   return {
     list: () => queries.list.all().map(mapDevice),
     get: (id) => mapDevice(queries.get.get(id)),
@@ -92,6 +105,9 @@ export function createStore(databasePath) {
     getLinkwarden: () => mapLinkwarden(queries.getLinkwarden.get()),
     saveLinkwarden: ({ baseUrl, username, encryptedAccessToken }) => queries.saveLinkwarden.run(baseUrl, username, encryptedAccessToken.ciphertext, encryptedAccessToken.iv, encryptedAccessToken.tag),
     removeLinkwarden: () => queries.removeLinkwarden.run().changes > 0,
+    getHomeAssistant: () => mapHomeAssistant(queries.getHomeAssistant.get()),
+    saveHomeAssistant: ({ baseUrl, encryptedAccessToken }) => queries.saveHomeAssistant.run(baseUrl, encryptedAccessToken.ciphertext, encryptedAccessToken.iv, encryptedAccessToken.tag),
+    removeHomeAssistant: () => queries.removeHomeAssistant.run().changes > 0,
     close: () => db.close()
   };
 }

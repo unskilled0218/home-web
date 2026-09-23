@@ -15,6 +15,7 @@ services:
       LINKWARDEN_CONFIG_ENCRYPTION_KEY_FILE: /app/data/linkwarden-config-encryption.key
       LINKWARDEN_CACHE_SECONDS: ${LINKWARDEN_CACHE_SECONDS:-60}
       LINKWARDEN_CA_FILE: ${LINKWARDEN_CA_FILE:-}
+      HOME_ASSISTANT_CACHE_SECONDS: ${HOME_ASSISTANT_CACHE_SECONDS:-30}
     volumes:
       - ./:/app:ro
       - ./data:/app/data

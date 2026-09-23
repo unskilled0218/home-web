@@ -38,3 +38,17 @@ export function restoreCollectionFocus(root, key) {
   target?.focus();
   return Boolean(target);
 }
+
+export function filterHomeDevices(devices, term) {
+  const normalized = term.trim().toLowerCase();
+  if (!normalized) return devices;
+  return devices.filter((device) => [device.name, device.area, device.manufacturer, device.model].filter(Boolean).join(' ').toLowerCase().includes(normalized));
+}
+
+export function groupHomeDevices(devices) {
+  return Map.groupBy(devices, (device) => device.area || 'Unassigned');
+}
+
+export function isLatestRequest(current, request) {
+  return current === request;
+}

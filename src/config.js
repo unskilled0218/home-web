@@ -47,7 +47,8 @@ export function loadConfig(environment = process.env) {
       filePath: environment.LINKWARDEN_CONFIG_ENCRYPTION_KEY_FILE
     }),
     linkwardenCacheSeconds: integer(environment.LINKWARDEN_CACHE_SECONDS, 60, 'LINKWARDEN_CACHE_SECONDS'),
-    linkwardenCaFile: environment.LINKWARDEN_CA_FILE ? path.resolve(environment.LINKWARDEN_CA_FILE) : null
+    linkwardenCaFile: environment.LINKWARDEN_CA_FILE ? path.resolve(environment.LINKWARDEN_CA_FILE) : null,
+    homeAssistantCacheSeconds: integer(environment.HOME_ASSISTANT_CACHE_SECONDS, 30, 'HOME_ASSISTANT_CACHE_SECONDS')
   });
 }
 

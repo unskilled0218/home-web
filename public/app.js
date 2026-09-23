@@ -1,6 +1,6 @@
-import { restoreCollectionFocus, runBulkWake, selectedButtonState, showDialogError, updateCollectionSelection, updateSelection } from './app-helpers.js';
+import { filterHomeDevices, groupHomeDevices, isLatestRequest, restoreCollectionFocus, runBulkWake, selectedButtonState, showDialogError, updateCollectionSelection, updateSelection } from './app-helpers.js';
 
-const state = { devices: [], selected: new Set(), bulkWakePending: false, bookmarks: [], linkwarden: null, collections: [], activeCollectionToken: null, collectionRequest: 0 };
+const state = { devices: [], selected: new Set(), bulkWakePending: false, bookmarks: [], linkwarden: null, collections: [], activeCollectionToken: null, collectionRequest: 0, homeAssistant: null, homeDevices: [], homeDeviceRequest: 0, homeAssistantRequest: 0 };
 const devicesElement = document.querySelector('#devices');
 const statusElement = document.querySelector('#status');
 const searchElement = document.querySelector('#search');
@@ -17,6 +17,17 @@ const collectionTreeElement = document.querySelector('#collection-tree');
 const refreshBookmarksButton = document.querySelector('#refresh-bookmarks');
 const disconnectLinkwardenButton = document.querySelector('#disconnect-linkwarden');
 const linkwardenAccountElement = document.querySelector('#linkwarden-account');
+const homeAssistantDevicesElement = document.querySelector('#home-assistant-devices');
+const homeAssistantStatusElement = document.querySelector('#home-assistant-status');
+const homeAssistantAccountElement = document.querySelector('#home-assistant-account');
+const homeAssistantToolbar = document.querySelector('#home-assistant-toolbar');
+const homeDeviceSearch = document.querySelector('#home-device-search');
+const refreshHomeDevicesButton = document.querySelector('#refresh-home-devices');
+const disconnectHomeAssistantButton = document.querySelector('#disconnect-home-assistant');
+const homeAssistantDialog = document.querySelector('#home-assistant-dialog');
+const homeAssistantForm = document.querySelector('#home-assistant-form');
+const homeAssistantError = document.querySelector('#home-assistant-error');
+const homeAssistantSubmit = document.querySelector('#home-assistant-submit');
 
 function setStatus(message = '', error = false) {
   statusElement.textContent = message;
@@ -84,6 +95,66 @@ function renderBookmarks(message = '') {
     if (bookmark.tags?.length) { const tags = document.createElement('p'); tags.className = 'tags'; tags.textContent = bookmark.tags.join(' · '); card.append(tags); }
     bookmarksElement.append(card);
   }
+}
+
+function setHomeAssistantStatus(message = '', error = false) {
+  homeAssistantStatusElement.textContent = message;
+  homeAssistantStatusElement.classList.toggle('error', error);
+}
+
+function renderHomeDevices(message = '', error = false) {
+  homeAssistantDevicesElement.replaceChildren();
+  const configured = Boolean(state.homeAssistant?.configured);
+  const credentialsPresent = Boolean(state.homeAssistant?.accessTokenPresent);
+  homeAssistantAccountElement.hidden = !credentialsPresent;
+  homeAssistantAccountElement.textContent = credentialsPresent ? state.homeAssistant.baseUrl : '';
+  homeAssistantToolbar.hidden = !configured;
+  disconnectHomeAssistantButton.hidden = !credentialsPresent;
+  refreshHomeDevicesButton.disabled = !configured;
+  if (message) setHomeAssistantStatus(message, error);
+  else if (state.homeAssistant?.needsReauthentication) setHomeAssistantStatus('Home Assistant needs re-authentication. Open settings and enter a new long-lived access token.', true);
+  else if (!configured) setHomeAssistantStatus('Home Assistant is not connected. Open Home Assistant settings to connect.');
+  else setHomeAssistantStatus();
+  if (!configured) return;
+  const filtered = filterHomeDevices(state.homeDevices, homeDeviceSearch.value);
+  if (!filtered.length) {
+    const empty = document.createElement('p'); empty.className = 'empty'; empty.textContent = state.homeDevices.length ? 'No Home Assistant devices match that search.' : 'No devices are available in this Home Assistant registry.'; homeAssistantDevicesElement.append(empty); return;
+  }
+  for (const [area, devices] of groupHomeDevices(filtered)) {
+    const section = document.createElement('section'); section.className = 'home-device-group';
+    const title = document.createElement('h3'); title.textContent = area; section.append(title);
+    const grid = document.createElement('div'); grid.className = 'home-device-grid';
+    for (const device of devices) {
+      const card = document.createElement('article'); card.className = 'home-device';
+      const name = document.createElement('h4'); name.textContent = device.name; card.append(name);
+      const details = [device.manufacturer, device.model].filter(Boolean).join(' · ');
+      if (details) { const metadata = document.createElement('p'); metadata.textContent = details; card.append(metadata); }
+      if (device.disabled) { const disabled = document.createElement('p'); disabled.className = 'device-state'; disabled.textContent = 'Disabled in Home Assistant'; card.append(disabled); }
+      grid.append(card);
+    }
+    section.append(grid); homeAssistantDevicesElement.append(section);
+  }
+}
+
+async function loadHomeDevices(refresh = false) {
+  const request = ++state.homeDeviceRequest;
+  setHomeAssistantStatus('Loading Home Assistant devices…');
+  try {
+    const result = await api(`/api/home-assistant/devices${refresh ? '?refresh=1' : ''}`);
+    if (!isLatestRequest(state.homeDeviceRequest, request)) return;
+    state.homeDevices = result.devices; renderHomeDevices();
+  } catch (error) { if (isLatestRequest(state.homeDeviceRequest, request)) renderHomeDevices(error.message, true); }
+}
+
+async function loadHomeAssistant() {
+  const request = ++state.homeAssistantRequest;
+  try {
+    const homeAssistant = (await api('/api/home-assistant')).homeAssistant;
+    if (!isLatestRequest(state.homeAssistantRequest, request)) return;
+    state.homeAssistant = homeAssistant;
+    renderHomeDevices();
+    if (state.homeAssistant.configured) await loadHomeDevices();
+  } catch (error) { if (isLatestRequest(state.homeAssistantRequest, request)) renderHomeDevices(error.message, true); }
 }
 
 function renderCollectionTree() {
@@ -216,4 +287,37 @@ linkwardenForm.addEventListener('submit', async (event) => {
     linkwardenDialog.close(); renderCollectionTree(); renderBookmarks();
   } catch (error) { linkwardenError.textContent = error.message; }
 });
-load(); loadLinkwarden();
+
+function openHomeAssistantForm() {
+  homeAssistantForm.reset(); showDialogError(homeAssistantError);
+  document.querySelector('#home-assistant-url').value = state.homeAssistant?.baseUrl ?? '';
+  document.querySelector('#home-assistant-help').textContent = state.homeAssistant?.needsReauthentication ? 'The saved token cannot be read. Enter a new long-lived access token to reconnect.' : state.homeAssistant?.encryptionReady ? 'The access token is encrypted on this server and never shown again. Leave it blank to retain the token when the URL is unchanged.' : 'Set a valid server encryption key before connecting Home Assistant.';
+  homeAssistantDialog.showModal();
+}
+
+document.querySelector('#home-assistant-settings').addEventListener('click', openHomeAssistantForm);
+document.querySelector('#home-assistant-close').addEventListener('click', () => homeAssistantDialog.close());
+homeDeviceSearch.addEventListener('input', () => renderHomeDevices());
+refreshHomeDevicesButton.addEventListener('click', () => loadHomeDevices(true));
+disconnectHomeAssistantButton.addEventListener('click', async () => {
+  if (!window.confirm('Disconnect Home Assistant and delete its saved access token?')) return;
+  const request = ++state.homeAssistantRequest;
+  try {
+    await api('/api/home-assistant', { method: 'DELETE' });
+    if (!isLatestRequest(state.homeAssistantRequest, request)) return;
+    state.homeDeviceRequest += 1; state.homeAssistant = { configured: false, accessTokenPresent: false, needsReauthentication: false, encryptionReady: state.homeAssistant?.encryptionReady }; state.homeDevices = []; homeDeviceSearch.value = ''; renderHomeDevices();
+  } catch (error) { if (isLatestRequest(state.homeAssistantRequest, request)) renderHomeDevices(error.message, true); }
+});
+homeAssistantForm.addEventListener('submit', async (event) => {
+  event.preventDefault(); showDialogError(homeAssistantError); homeAssistantSubmit.disabled = true;
+  const request = ++state.homeAssistantRequest;
+  try {
+    const result = await api('/api/home-assistant', { method: 'PUT', body: JSON.stringify(Object.fromEntries(new FormData(homeAssistantForm))) });
+    if (!isLatestRequest(state.homeAssistantRequest, request)) return;
+    state.homeDeviceRequest += 1; state.homeAssistant = result.homeAssistant; state.homeDevices = result.devices; homeDeviceSearch.value = '';
+    homeAssistantDialog.close(); renderHomeDevices('Home Assistant connected.');
+  } catch (error) { if (isLatestRequest(state.homeAssistantRequest, request)) showDialogError(homeAssistantError, error.message); }
+  finally { homeAssistantSubmit.disabled = false; }
+});
+
+load(); loadLinkwarden(); loadHomeAssistant();

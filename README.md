@@ -1,6 +1,6 @@
 # dashboard
 
-dashboard is a small, self-hosted website for Linkwarden bookmarks and Wake-on-LAN controls on a trusted local network. It has no accounts or internet-facing use case. Bookmarks appear first, with saved machines and wake controls beneath them. A successful wake request means the host sent the UDP magic packet; it does not prove that the target computer booted.
+dashboard is a small, self-hosted website for Home Assistant devices, Linkwarden bookmarks, and Wake-on-LAN controls on a trusted local network. It has no accounts or internet-facing use case. A successful wake request means the host sent the UDP magic packet; it does not prove that the target computer booted.
 
 ## Run locally
 
@@ -11,7 +11,7 @@ cp .env.example .env
 npm start
 ```
 
-Open `http://127.0.0.1:3000` to connect Linkwarden or add devices. For **Broadcast address**, enter the target PC's directed subnet broadcast address: for example, use `192.168.1.255` for a PC at `192.168.1.42` on a `255.255.255.0` network. The database is created at `data/wol.db` and should be backed up along with the configuration.
+Open `http://127.0.0.1:3000` to connect Home Assistant or Linkwarden, or to add Wake-on-LAN devices. For **Broadcast address**, enter the target PC's directed subnet broadcast address: for example, use `192.168.1.255` for a PC at `192.168.1.42` on a `255.255.255.0` network. The database is created at `data/wol.db` and should be backed up along with the configuration.
 
 `npm start`, `npm run start:lan`, and `npm run dev` load the repository-root `.env` before application configuration. Values already supplied by the process environment take precedence, and the file is optional. `start:lan` uses the same safety checks as `start`; configure the explicit private `HOST` address and any browser-facing `DASHBOARD_ALLOWED_HOSTS` in `.env` rather than enabling an unrestricted wildcard bind.
 
@@ -19,7 +19,7 @@ For another device on the LAN to reach the dashboard, set `HOST` to the server's
 
 ## Container deployment
 
-The supplied `docker-compose.yml` uses the official Node image and host networking because UDP broadcast packets need to leave through the LAN interface. It automatically creates the Linkwarden encryption key at `data/linkwarden-config-encryption.key` on first startup and reuses it after container recreation. No Linkwarden secret must be configured before a fresh Compose deployment. On Linux, set `HOST` to the host's private address before running:
+The supplied `docker-compose.yml` uses the official Node image and host networking because UDP broadcast packets need to leave through the LAN interface. It automatically creates the integration-credential encryption key at `data/linkwarden-config-encryption.key` on first startup and reuses it after container recreation. No encryption secret must be configured before a fresh Compose deployment. On Linux, set `HOST` to the host's private address before running:
 
 ```sh
 HOST=192.168.1.10 docker compose up -d
@@ -35,7 +35,7 @@ HOST=192.168.1.10 DASHBOARD_ALLOWED_HOSTS=home.lan docker compose up -d
 
 Restrict port 3000 at the host firewall to the trusted LAN. Host networking behaves differently on Docker Desktop; run the service directly on the LAN host there.
 
-To retain an existing externally managed key, set `LINKWARDEN_CONFIG_ENCRYPTION_KEY` in Compose's `.env` file before the first startup. An explicit key takes precedence and the automatic key file is not created. Keep using the same value after every restart.
+To retain an existing externally managed key, set `LINKWARDEN_CONFIG_ENCRYPTION_KEY` in Compose's `.env` file before the first startup. The legacy variable name is retained for compatibility, but the key encrypts both Linkwarden and Home Assistant credentials. An explicit key takes precedence and the automatic key file is not created. Keep using the same value after every restart.
 
 The project directory is mounted read-only at `/app`, so an optional CA at `./certs/linkwarden-ca.pem` is available to both direct runs and Compose under the same relative path. Keep private CA files out of version control; `certs/` is ignored. For a CA stored elsewhere, add a read-only bind mount in a Compose override and set `LINKWARDEN_CA_FILE` to its container path.
 
@@ -48,7 +48,7 @@ The project directory is mounted read-only at `/app`, so an optional CA at `./ce
 - Enable Wake-on-LAN in each target's BIOS/UEFI and NIC/operating-system power settings.
 - VLANs and routed subnets commonly block broadcasts. Place the service appropriately or configure network forwarding deliberately.
 - Keep the dashboard on a trusted LAN. It intentionally has no authentication, so do not expose it on an untrusted network.
-- Back up `data/wol.db` and `data/linkwarden-config-encryption.key` together; the database contains the device inventory, wake attempt audit trail, and encrypted Linkwarden credentials.
+- Back up `data/wol.db` and `data/linkwarden-config-encryption.key` together; the database contains the device inventory, wake attempt audit trail, and encrypted integration credentials.
 
 ## Checks
 
@@ -57,11 +57,21 @@ npm test
 npm run check
 ```
 
-The tests validate Wake-on-LAN packet handling, Linkwarden credential storage and migration, collection trees, bookmark caching, API behavior, and scoped private-CA TLS. A safe packet-dispatch integration test requires a disposable UDP receiver on the deployment network.
+The tests validate Home Assistant WebSocket handling and encrypted credentials, Wake-on-LAN packet handling, Linkwarden credential storage and migration, collection trees, bookmark caching, API behavior, and scoped private-CA TLS. A safe packet-dispatch integration test requires a disposable UDP receiver on the deployment network.
+
+## Home Assistant devices
+
+Home Assistant is optional and read-only. Open **Home Assistant settings**, enter the instance origin such as `http://homeassistant.local:8123`, and provide a long-lived access token from the Home Assistant user profile. Prefer a dedicated Home Assistant user with only the access needed to read the device and area registries.
+
+The dashboard server connects to Home Assistant's `/api/websocket`, authenticates there, reads `config/device_registry/list` and `config/area_registry/list`, and closes the connection after receiving the snapshot. Device cards show the saved display name, area, manufacturer, model, and disabled state. They do not show an online/offline claim and cannot control entities, call services, change automations, or import devices into Wake-on-LAN. **Refresh** bypasses the short snapshot cache.
+
+The long-lived token is encrypted in `data/wol.db` with the same server key used for Linkwarden credentials. It is never returned to the browser or prefilled after saving. Leave the token field blank to keep the saved token when the URL is unchanged; changing the URL requires a new token. A failed reconnect leaves the last working configuration intact. **Disconnect** deletes the saved Home Assistant URL and token.
+
+Normal certificate-chain and hostname verification applies to `https://` Home Assistant URLs. Use a certificate trusted by Node for `wss://` connections. Plain `http://` sends the token over the local network and should be used only on a network you trust. Keep the dashboard and Home Assistant LAN-only.
 
 ## Linkwarden bookmarks
 
-Bookmarks are optional and do not affect Wake-on-LAN. The example environment configures the same persistent server-only encryption-key file for direct and Compose runs:
+Bookmarks are optional and do not affect Home Assistant or Wake-on-LAN. The example environment configures the same persistent server-only encryption-key file for direct and Compose runs:
 
 ```sh
 LINKWARDEN_CONFIG_ENCRYPTION_KEY_FILE=./data/linkwarden-config-encryption.key npm start

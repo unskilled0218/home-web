@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { restoreCollectionFocus, runBulkWake, selectedButtonState, showDialogError, summarizeWakeResults, updateCollectionSelection, updateSelection } from '../public/app-helpers.js';
+import { filterHomeDevices, groupHomeDevices, isLatestRequest, restoreCollectionFocus, runBulkWake, selectedButtonState, showDialogError, summarizeWakeResults, updateCollectionSelection, updateSelection } from '../public/app-helpers.js';
 
 test('summarizes complete, partial, and total Wake outcomes', () => {
   assert.deepEqual(summarizeWakeResults([{ status: 'fulfilled' }, { status: 'fulfilled' }]), { succeeded: 2, failed: 0, error: false, message: 'Wake packets sent to 2 device(s).' });
@@ -42,4 +42,24 @@ test('updates collection controls in place and restores the matching focus targe
   assert.equal(controls[1].current, 'true');
   assert.equal(restoreCollectionFocus(root, 'second'), true);
   assert.equal(controls[1].focused, true);
+});
+
+test('filters and groups Home Assistant devices without accepting stale responses', async () => {
+  const devices = [
+    { name: 'Desk lamp', area: 'Office', manufacturer: 'Hue', model: 'Light' },
+    { name: 'Temperature', area: null, manufacturer: 'Acme', model: 'Sensor' }
+  ];
+  assert.deepEqual(filterHomeDevices(devices, ' hue '), [devices[0]]);
+  assert.deepEqual(filterHomeDevices(devices, 'sensor'), [devices[1]]);
+  assert.deepEqual([...groupHomeDevices(devices).keys()], ['Office', 'Unassigned']);
+  assert.equal(isLatestRequest(3, 3), true);
+  assert.equal(isLatestRequest(4, 3), false);
+  let generation = 1;
+  let resolveOld;
+  const oldResponse = new Promise((resolve) => { resolveOld = resolve; }).then((value) => { if (isLatestRequest(generation, 1)) return value; return 'ignored'; });
+  generation = 2;
+  const newResponse = Promise.resolve('new').then((value) => isLatestRequest(generation, 2) ? value : 'ignored');
+  resolveOld('old');
+  assert.equal(await newResponse, 'new');
+  assert.equal(await oldResponse, 'ignored');
 });

@@ -14,3 +14,9 @@ test('rejects wildcard binds without an explicit host and malformed allowed host
   assert.deepEqual(allowedDashboardHosts('0.0.0.0', 'dashboard.lan'), ['dashboard.lan']);
   for (const value of ['https://dashboard.lan', 'dashboard.lan:3000', 'dashboard.lan/path', '*.lan', 'dashboard_lan']) assert.throws(() => normalizeDashboardHostname(value), /hostnames or IP addresses/);
 });
+
+test('loads the Home Assistant cache duration', async () => {
+  const { loadConfig } = await import('../src/config.js');
+  const config = loadConfig({ HOST: '127.0.0.1', HOME_ASSISTANT_CACHE_SECONDS: '45' });
+  assert.equal(config.homeAssistantCacheSeconds, 45);
+});

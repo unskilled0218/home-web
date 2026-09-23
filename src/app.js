@@ -9,6 +9,7 @@ import { executeWakeRequest } from './wake-request.js';
 import { decryptApiKey, encryptApiKey, encryptionKey } from './linkwarden-crypto.js';
 import { normalizeLinkwardenCredentials } from './linkwarden.js';
 import { createCollectionSelectionStore } from './collection-selections.js';
+import { normalizeHomeAssistantCredentials } from './home-assistant.js';
 
 export const MAX_JSON_BODY_BYTES = 16_384;
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -81,14 +82,21 @@ function selectionFingerprint(settings) {
   return createHash('sha256').update(`${settings.baseUrl}\0${settings.username}\0${settings.accessToken}`).digest('base64url');
 }
 
-export function createDashboardServer({ runtimeConfig, store, linkwarden, wakeExecutor = executeWakeRequest, collectionSelections = createCollectionSelectionStore(), now = Date.now, publicRoot = defaultPublicRoot }) {
+export function createDashboardServer({ runtimeConfig, store, linkwarden, homeAssistant, wakeExecutor = executeWakeRequest, collectionSelections = createCollectionSelectionStore(), now = Date.now, publicRoot = defaultPublicRoot }) {
   const wakeRequests = new Map();
+  const integrationEncryptionKey = runtimeConfig.integrationEncryptionKey ?? runtimeConfig.linkwardenEncryptionKey;
+  let homeAssistantMutation = Promise.resolve();
+  const queueHomeAssistantMutation = (operation) => {
+    const result = homeAssistantMutation.then(operation, operation);
+    homeAssistantMutation = result.catch(() => {});
+    return result;
+  };
 
   function linkwardenStatus() {
     const saved = store.getLinkwarden();
     let encryptionReady = false;
     let credentialsReadable = false;
-    try { encryptionKey(runtimeConfig.linkwardenEncryptionKey); encryptionReady = true; if (saved) { decryptApiKey(saved.encryptedAccessToken, runtimeConfig.linkwardenEncryptionKey); credentialsReadable = true; } } catch { /* The optional integration remains disabled until valid credentials can be decrypted. */ }
+    try { encryptionKey(integrationEncryptionKey); encryptionReady = true; if (saved) { decryptApiKey(saved.encryptedAccessToken, integrationEncryptionKey); credentialsReadable = true; } } catch { /* The optional integration remains disabled until valid credentials can be decrypted. */ }
     const configured = Boolean(saved?.username && credentialsReadable);
     return { configured, accessTokenPresent: Boolean(saved), encryptionReady, needsReauthentication: Boolean(saved) && !configured, ...(configured && { baseUrl: saved.baseUrl, username: saved.username, updatedAt: saved.updatedAt }) };
   }
@@ -97,7 +105,7 @@ export function createDashboardServer({ runtimeConfig, store, linkwarden, wakeEx
     const saved = store.getLinkwarden();
     if (!saved) throw new Error('Linkwarden is not configured.');
     if (!saved.username) throw new Error('Linkwarden needs re-authentication before bookmarks can be loaded.');
-    try { return { baseUrl: saved.baseUrl, username: saved.username, accessToken: decryptApiKey(saved.encryptedAccessToken, runtimeConfig.linkwardenEncryptionKey) }; } catch { throw new Error('Linkwarden credentials cannot be decrypted. Check the encryption secret.'); }
+    try { return { baseUrl: saved.baseUrl, username: saved.username, accessToken: decryptApiKey(saved.encryptedAccessToken, integrationEncryptionKey) }; } catch { throw new Error('Linkwarden credentials cannot be decrypted. Check the encryption secret.'); }
   }
 
   function storeCollectionTree(settings, collections) {
@@ -122,7 +130,34 @@ export function createDashboardServer({ runtimeConfig, store, linkwarden, wakeEx
     const settings = normalizeLinkwardenCredentials(input, existing);
     if (!settings.accessToken && existing) {
       if (settings.baseUrl !== existing.baseUrl || settings.username !== existing.username) throw new Error('A new access token is required when changing the Linkwarden URL or username.');
-      settings.accessToken = decryptApiKey(existing.encryptedAccessToken, runtimeConfig.linkwardenEncryptionKey);
+      settings.accessToken = decryptApiKey(existing.encryptedAccessToken, integrationEncryptionKey);
+    }
+    return settings;
+  }
+
+  function homeAssistantStatus() {
+    const saved = store.getHomeAssistant();
+    let encryptionReady = false;
+    let credentialsReadable = false;
+    try { encryptionKey(integrationEncryptionKey); encryptionReady = true; if (saved) { decryptApiKey(saved.encryptedAccessToken, integrationEncryptionKey); credentialsReadable = true; } } catch { /* Re-authentication is required when saved credentials cannot be decrypted. */ }
+    const configured = Boolean(saved && credentialsReadable);
+    return { configured, accessTokenPresent: Boolean(saved), encryptionReady, needsReauthentication: Boolean(saved) && !configured, ...(saved && { baseUrl: saved.baseUrl, updatedAt: saved.updatedAt }) };
+  }
+
+  function savedHomeAssistantSettings() {
+    const saved = store.getHomeAssistant();
+    if (!saved) throw new Error('Home Assistant is not configured.');
+    try { return { baseUrl: saved.baseUrl, accessToken: decryptApiKey(saved.encryptedAccessToken, integrationEncryptionKey) }; }
+    catch { throw new Error('Home Assistant needs re-authentication.'); }
+  }
+
+  function homeAssistantCredentialsFromInput(input) {
+    const existing = store.getHomeAssistant();
+    const settings = normalizeHomeAssistantCredentials(input, existing);
+    if (!settings.accessToken && existing) {
+      if (settings.baseUrl !== existing.baseUrl) throw new Error('A new access token is required when changing the Home Assistant URL.');
+      try { settings.accessToken = decryptApiKey(existing.encryptedAccessToken, integrationEncryptionKey); }
+      catch { throw new Error('Home Assistant needs re-authentication.'); }
     }
     return settings;
   }
@@ -144,6 +179,15 @@ export function createDashboardServer({ runtimeConfig, store, linkwarden, wakeEx
     if (request.method === 'GET' && pathname === '/api/health') return json(response, 200, { status: 'ok' });
     if (request.method === 'GET' && pathname === '/api/devices') return json(response, 200, { devices: store.list() });
     if (request.method === 'GET' && pathname === '/api/linkwarden') return json(response, 200, { linkwarden: linkwardenStatus() });
+    if (request.method === 'GET' && pathname === '/api/home-assistant') return json(response, 200, { homeAssistant: homeAssistantStatus() });
+    if (request.method === 'GET' && pathname === '/api/home-assistant/devices') {
+      const status = homeAssistantStatus();
+      if (!status.configured) return json(response, 200, { configured: false, devices: [], ...(status.needsReauthentication && { needsReauthentication: true }) });
+      try {
+        const url = new URL(request.url, 'http://localhost');
+        return json(response, 200, { configured: true, devices: await homeAssistant.listDevices(savedHomeAssistantSettings(), { force: url.searchParams.get('refresh') === '1' }) });
+      } catch { return json(response, 503, { configured: true, error: 'Home Assistant devices are currently unavailable.' }); }
+    }
     if (request.method === 'GET' && pathname === '/api/linkwarden/collections') {
       try { const settings = savedLinkwardenSettings(); return json(response, 200, { collections: storeCollectionTree(settings, await linkwarden.listCollections(settings)) }); }
       catch { return json(response, 503, { error: 'Linkwarden collections are currently unavailable.' }); }
@@ -165,15 +209,30 @@ export function createDashboardServer({ runtimeConfig, store, linkwarden, wakeEx
       if (request.method === 'POST' && pathname === '/api/devices') return json(response, 201, { device: store.create(validateDevice(await readJson(request))) });
       if (request.method === 'PUT' && pathname === '/api/linkwarden') {
         const settings = credentialsFromInput(await readJson(request));
-        encryptionKey(runtimeConfig.linkwardenEncryptionKey);
+        encryptionKey(integrationEncryptionKey);
         const collections = await linkwarden.listCollections(settings);
-        const encryptedAccessToken = encryptApiKey(settings.accessToken, runtimeConfig.linkwardenEncryptionKey);
+        const encryptedAccessToken = encryptApiKey(settings.accessToken, integrationEncryptionKey);
         store.saveLinkwarden({ ...settings, encryptedAccessToken });
         linkwarden.clearCache(); collectionSelections.clear();
         return json(response, 200, { linkwarden: linkwardenStatus(), collections: storeCollectionTree(settings, collections) });
       }
       if (request.method === 'DELETE' && pathname === '/api/linkwarden') {
         store.removeLinkwarden(); linkwarden.clearCache(); collectionSelections.clear(); return json(response, 204, {});
+      }
+      if (request.method === 'PUT' && pathname === '/api/home-assistant') {
+        return await queueHomeAssistantMutation(async () => {
+          const settings = homeAssistantCredentialsFromInput(await readJson(request));
+          try { encryptionKey(integrationEncryptionKey); }
+          catch { throw new Error('Home Assistant credential encryption is not configured.'); }
+          homeAssistant.clearCache();
+          const devices = await homeAssistant.listDevices(settings, { force: true });
+          const encryptedAccessToken = encryptApiKey(settings.accessToken, integrationEncryptionKey);
+          store.saveHomeAssistant({ ...settings, encryptedAccessToken });
+          return json(response, 200, { homeAssistant: homeAssistantStatus(), devices });
+        });
+      }
+      if (request.method === 'DELETE' && pathname === '/api/home-assistant') {
+        return await queueHomeAssistantMutation(async () => { store.removeHomeAssistant(); homeAssistant.clearCache(); return json(response, 204, {}); });
       }
       if (request.method === 'PUT' && id) {
         if (!store.get(id)) return json(response, 404, { error: 'Device not found.' });
