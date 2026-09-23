@@ -33,18 +33,22 @@ export function allowedDashboardHosts(bindHost, configuredHosts = '') {
   return Object.freeze([...hosts]);
 }
 
-const host = process.env.HOST ?? '127.0.0.1';
+export function loadConfig(environment = process.env) {
+  const host = environment.HOST ?? '127.0.0.1';
+  return Object.freeze({
+    host,
+    port: integer(environment.PORT, 3000, 'PORT'),
+    allowedHosts: allowedDashboardHosts(host, environment.DASHBOARD_ALLOWED_HOSTS),
+    databasePath: path.resolve(environment.DATABASE_PATH ?? './data/wol.db'),
+    wolPort: integer(environment.WOL_PORT, 9, 'WOL_PORT'),
+    wakeCooldownSeconds: integer(environment.WAKE_COOLDOWN_SECONDS, 20, 'WAKE_COOLDOWN_SECONDS'),
+    linkwardenEncryptionKey: resolveLinkwardenEncryptionKey({
+      explicitSecret: environment.LINKWARDEN_CONFIG_ENCRYPTION_KEY,
+      filePath: environment.LINKWARDEN_CONFIG_ENCRYPTION_KEY_FILE
+    }),
+    linkwardenCacheSeconds: integer(environment.LINKWARDEN_CACHE_SECONDS, 60, 'LINKWARDEN_CACHE_SECONDS'),
+    linkwardenCaFile: environment.LINKWARDEN_CA_FILE ? path.resolve(environment.LINKWARDEN_CA_FILE) : null
+  });
+}
 
-export const config = Object.freeze({
-  host,
-  port: integer(process.env.PORT, 3000, 'PORT'),
-  allowedHosts: allowedDashboardHosts(host, process.env.DASHBOARD_ALLOWED_HOSTS),
-  databasePath: path.resolve(process.env.DATABASE_PATH ?? './data/wol.db'),
-  wolPort: integer(process.env.WOL_PORT, 9, 'WOL_PORT'),
-  wakeCooldownSeconds: integer(process.env.WAKE_COOLDOWN_SECONDS, 20, 'WAKE_COOLDOWN_SECONDS'),
-  linkwardenEncryptionKey: resolveLinkwardenEncryptionKey({
-    explicitSecret: process.env.LINKWARDEN_CONFIG_ENCRYPTION_KEY,
-    filePath: process.env.LINKWARDEN_CONFIG_ENCRYPTION_KEY_FILE
-  }),
-  linkwardenCacheSeconds: integer(process.env.LINKWARDEN_CACHE_SECONDS, 60, 'LINKWARDEN_CACHE_SECONDS')
-});
+export const config = loadConfig();

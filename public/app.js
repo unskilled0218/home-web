@@ -1,10 +1,13 @@
-const state = { devices: [], selected: new Set(), bookmarks: [], linkwarden: null, collections: [], activeCollectionToken: null, collectionRequest: 0 };
+import { restoreCollectionFocus, runBulkWake, selectedButtonState, showDialogError, updateCollectionSelection, updateSelection } from './app-helpers.js';
+
+const state = { devices: [], selected: new Set(), bulkWakePending: false, bookmarks: [], linkwarden: null, collections: [], activeCollectionToken: null, collectionRequest: 0 };
 const devicesElement = document.querySelector('#devices');
 const statusElement = document.querySelector('#status');
 const searchElement = document.querySelector('#search');
 const selectedButton = document.querySelector('#wake-selected');
 const dialog = document.querySelector('#device-dialog');
 const form = document.querySelector('#device-form');
+const deviceError = document.querySelector('#device-error');
 const bookmarksElement = document.querySelector('#bookmarks');
 const bookmarkStatusElement = document.querySelector('#bookmark-status');
 const linkwardenDialog = document.querySelector('#linkwarden-dialog');
@@ -33,11 +36,16 @@ function button(text, className, action) {
   return element;
 }
 
+function updateSelectedButton() {
+  const presentation = selectedButtonState(state.selected.size, state.bulkWakePending);
+  selectedButton.disabled = presentation.disabled;
+  selectedButton.textContent = presentation.text;
+}
+
 function render() {
   const term = searchElement.value.trim().toLowerCase();
   const filtered = state.devices.filter((device) => [device.name, device.group, device.macAddress, device.ipAddress].filter(Boolean).join(' ').toLowerCase().includes(term));
-  selectedButton.disabled = state.selected.size === 0;
-  selectedButton.textContent = state.selected.size ? `Wake selected (${state.selected.size})` : 'Wake selected';
+  updateSelectedButton();
   devicesElement.replaceChildren();
   if (!filtered.length) {
     const empty = document.createElement('p'); empty.className = 'empty'; empty.textContent = state.devices.length ? 'No devices match that search.' : 'No devices yet. Add the first computer on your LAN.'; devicesElement.append(empty); return;
@@ -51,7 +59,7 @@ function render() {
       const card = document.createElement('article'); card.className = 'device';
       const top = document.createElement('div'); top.className = 'device-top';
       const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.className = 'select'; checkbox.checked = state.selected.has(device.id); checkbox.ariaLabel = `Select ${device.name}`;
-      checkbox.addEventListener('change', () => { checkbox.checked ? state.selected.add(device.id) : state.selected.delete(device.id); render(); });
+      checkbox.addEventListener('change', () => { updateSelection(state.selected, device.id, checkbox.checked); updateSelectedButton(); });
       const name = document.createElement('h3'); name.textContent = device.name;
       top.append(checkbox, name); card.append(top);
       const details = document.createElement('p'); details.textContent = `${device.macAddress}${device.ipAddress ? ` · ${device.ipAddress}` : ''}`; card.append(details);
@@ -79,6 +87,7 @@ function renderBookmarks(message = '') {
 }
 
 function renderCollectionTree() {
+  const focusedKey = document.activeElement?.dataset?.collectionKey;
   collectionTreeElement.replaceChildren();
   collectionTreeElement.hidden = !state.linkwarden?.configured;
   disconnectLinkwardenButton.hidden = !state.linkwarden?.configured;
@@ -87,20 +96,23 @@ function renderCollectionTree() {
   refreshBookmarksButton.disabled = !state.activeCollectionToken;
   if (!state.linkwarden?.configured) return;
   if (!state.collections.length) { const empty = document.createElement('p'); empty.className = 'empty'; empty.textContent = 'No collections are available for this account.'; collectionTreeElement.append(empty); return; }
-  const renderNodes = (collections) => {
+  const renderNodes = (collections, parentKey = '') => {
     const list = document.createElement('ul');
-    for (const collection of collections) {
+    for (const [index, collection] of collections.entries()) {
       const item = document.createElement('li');
       const select = button(collection.name, 'collection-node', () => selectCollection(collection));
+      select.dataset.collectionToken = collection.collectionToken;
+      select.dataset.collectionKey = `${parentKey}${index}`;
       select.classList.toggle('selected', collection.collectionToken === state.activeCollectionToken);
       select.setAttribute('aria-current', collection.collectionToken === state.activeCollectionToken ? 'true' : 'false');
       item.append(select);
-      if (collection.children.length) item.append(renderNodes(collection.children));
+      if (collection.children.length) item.append(renderNodes(collection.children, `${parentKey}${index}.`));
       list.append(item);
     }
     return list;
   };
   collectionTreeElement.append(renderNodes(state.collections));
+  restoreCollectionFocus(collectionTreeElement, focusedKey);
 }
 
 async function load() {
@@ -129,12 +141,16 @@ async function loadLinkwarden() {
 }
 
 async function selectCollection(collection) {
-  state.activeCollectionToken = collection.collectionToken; state.bookmarks = []; renderCollectionTree(); await loadBookmarks();
+  state.activeCollectionToken = collection.collectionToken; state.bookmarks = []; refreshBookmarksButton.disabled = false; updateCollectionSelection(collectionTreeElement, state.activeCollectionToken); await loadBookmarks();
+}
+
+function wakeRequest(device) {
+  return api(`/api/devices/${device.id}/wake`, { method: 'POST', body: '{}' });
 }
 
 async function wake(device) {
   setStatus(`Sending wake packet to ${device.name}…`);
-  try { setStatus((await api(`/api/devices/${device.id}/wake`, { method: 'POST', body: '{}' })).message); await load(); } catch (error) { setStatus(error.message, true); }
+  try { setStatus((await wakeRequest(device)).message); await load(); } catch (error) { setStatus(error.message, true); }
 }
 
 async function removeDevice(device) {
@@ -144,6 +160,7 @@ async function removeDevice(device) {
 
 function openForm(device = null) {
   form.reset();
+  showDialogError(deviceError);
   document.querySelector('#dialog-title').textContent = device ? 'Edit device' : 'Add device';
   for (const [key, selector] of Object.entries({ id: '#device-id', name: '#name', macAddress: '#mac', broadcastAddress: '#broadcast', ipAddress: '#ip', group: '#group' })) document.querySelector(selector).value = device?.[key] ?? '';
   dialog.showModal();
@@ -155,19 +172,25 @@ document.querySelector('#dialog-close').addEventListener('click', () => dialog.c
 searchElement.addEventListener('input', render);
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
+  showDialogError(deviceError);
   const id = document.querySelector('#device-id').value;
   const payload = Object.fromEntries(new FormData(form));
   try {
     await api(id ? `/api/devices/${id}` : '/api/devices', { method: id ? 'PUT' : 'POST', body: JSON.stringify(payload) });
     dialog.close(); setStatus(id ? 'Device updated.' : 'Device added.'); await load();
-  } catch (error) { setStatus(error.message, true); }
+  } catch (error) { showDialogError(deviceError, error.message); }
 });
 selectedButton.addEventListener('click', async () => {
+  if (state.bulkWakePending) return;
   const devices = state.devices.filter((device) => state.selected.has(device.id));
-  selectedButton.disabled = true;
-  const results = await Promise.allSettled(devices.map(wake));
-  const failed = results.filter((result) => result.status === 'rejected').length;
-  state.selected.clear(); render(); setStatus(failed ? `${failed} wake request(s) failed.` : `Wake packets sent to ${devices.length} device(s).`, Boolean(failed));
+  state.bulkWakePending = true;
+  updateSelectedButton();
+  try {
+    const summary = await runBulkWake(devices, wakeRequest);
+    state.selected.clear();
+    await load();
+    setStatus(summary.message, summary.error);
+  } finally { state.bulkWakePending = false; updateSelectedButton(); }
 });
 function openLinkwardenForm() {
   const settings = state.linkwarden;

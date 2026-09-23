@@ -1,6 +1,6 @@
 {
   "name": "lan-wol-dashboard",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "private": true,
   "description": "A self-hosted local-LAN Wake-on-LAN dashboard.",
   "type": "module",
@@ -8,8 +8,10 @@
     "node": ">=24.0.0"
   },
   "scripts": {
-    "start": "node src/server.js",
-    "dev": "node --watch src/server.js",
-    "test": "node --test"
+    "start": "node src/start.js",
+    "start:lan": "node src/start.js",
+    "dev": "node --watch src/start.js",
+    "test": "node --test",
+    "check": "node --check src/*.js && node --check public/*.js"
   }
 }

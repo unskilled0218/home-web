@@ -193,13 +193,13 @@ test('lists every valid Linkwarden collection tree with Bearer authorization', a
   assert.equal(requests[0].options.headers.Authorization, 'Bearer private-token');
 });
 
-test('accepts a self-signed Linkwarden certificate without changing global TLS settings', async (context) => {
+test('requires explicit trust for a private CA and still verifies hostnames', async (context) => {
   const directory = mkdtempSync(path.join(tmpdir(), 'lan-wake-self-signed-'));
   const certificatePath = path.join(directory, 'certificate.pem');
   const keyPath = path.join(directory, 'key.pem');
   try {
     try {
-      execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', keyPath, '-out', certificatePath, '-days', '1', '-subj', '/CN=localhost'], { stdio: 'ignore' });
+      execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', keyPath, '-out', certificatePath, '-days', '1', '-subj', '/CN=127.0.0.1', '-addext', 'subjectAltName=IP:127.0.0.1'], { stdio: 'ignore' });
     } catch (error) {
       context.skip(`OpenSSL is required for the self-signed TLS test: ${error.message}`);
       return;
@@ -209,10 +209,13 @@ test('accepts a self-signed Linkwarden certificate without changing global TLS s
       response.writeHead(200, { 'content-type': 'application/json' });
       response.end('{"response":[{"id":1,"name":"Self signed"}]}');
     });
-    await new Promise((resolve, reject) => server.listen(0, '127.0.0.1', (error) => error ? reject(error) : resolve()));
+    await new Promise((resolve, reject) => server.listen(0, (error) => error ? reject(error) : resolve()));
     context.after(() => new Promise((resolve) => server.close(resolve)));
-    const client = createLinkwardenClient();
-    assert.deepEqual(await client.listCollections({ baseUrl: `https://127.0.0.1:${server.address().port}`, accessToken: 'private-token' }), [{ id: 1, name: 'Self signed', parentId: null, children: [] }]);
+    const baseUrl = `https://127.0.0.1:${server.address().port}`;
+    await assert.rejects(createLinkwardenClient().listCollections({ baseUrl, accessToken: 'private-token' }), /self-signed|certificate/i);
+    const client = createLinkwardenClient({ ca: readFileSync(certificatePath) });
+    assert.deepEqual(await client.listCollections({ baseUrl, accessToken: 'private-token' }), [{ id: 1, name: 'Self signed', parentId: null, children: [] }]);
+    await assert.rejects(client.listCollections({ baseUrl: `https://localhost:${server.address().port}`, accessToken: 'private-token' }), /hostname|not.*cert|altname/i);
     assert.notEqual(process.env.NODE_TLS_REJECT_UNAUTHORIZED, '0');
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });

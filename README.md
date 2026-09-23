@@ -13,6 +13,8 @@ npm start
 
 Open `http://127.0.0.1:3000` to connect Linkwarden or add devices. For **Broadcast address**, enter the target PC's directed subnet broadcast address: for example, use `192.168.1.255` for a PC at `192.168.1.42` on a `255.255.255.0` network. The database is created at `data/wol.db` and should be backed up along with the configuration.
 
+`npm start`, `npm run start:lan`, and `npm run dev` load the repository-root `.env` before application configuration. Values already supplied by the process environment take precedence, and the file is optional. `start:lan` uses the same safety checks as `start`; configure the explicit private `HOST` address and any browser-facing `DASHBOARD_ALLOWED_HOSTS` in `.env` rather than enabling an unrestricted wildcard bind.
+
 For another device on the LAN to reach the dashboard, set `HOST` to the server's explicit private address, such as `192.168.1.10`. That address is accepted automatically as an HTTP Host. If the browser uses a private DNS name instead, also set `DASHBOARD_ALLOWED_HOSTS` to that hostname. Do not bind the service to a public interface or expose its port through a router.
 
 ## Container deployment
@@ -35,6 +37,8 @@ Restrict port 3000 at the host firewall to the trusted LAN. Host networking beha
 
 To retain an existing externally managed key, set `LINKWARDEN_CONFIG_ENCRYPTION_KEY` in Compose's `.env` file before the first startup. An explicit key takes precedence and the automatic key file is not created. Keep using the same value after every restart.
 
+The project directory is mounted read-only at `/app`, so an optional CA at `./certs/linkwarden-ca.pem` is available to both direct runs and Compose under the same relative path. Keep private CA files out of version control; `certs/` is ignored. For a CA stored elsewhere, add a read-only bind mount in a Compose override and set `LINKWARDEN_CA_FILE` to its container path.
+
 ## Operational checklist
 
 - The service host must be able to route broadcasts to each target subnet. Enter the correct broadcast address for each device, for example `192.168.1.255`.
@@ -50,13 +54,14 @@ To retain an existing externally managed key, set `LINKWARDEN_CONFIG_ENCRYPTION_
 
 ```sh
 npm test
+npm run check
 ```
 
-The tests validate Wake-on-LAN packet handling, Linkwarden credential storage and migration, collection trees, bookmark caching, API behavior, and scoped self-signed TLS. A safe packet-dispatch integration test requires a disposable UDP receiver on the deployment network.
+The tests validate Wake-on-LAN packet handling, Linkwarden credential storage and migration, collection trees, bookmark caching, API behavior, and scoped private-CA TLS. A safe packet-dispatch integration test requires a disposable UDP receiver on the deployment network.
 
 ## Linkwarden bookmarks
 
-Bookmarks are optional and do not affect Wake-on-LAN. Compose creates and persists the required server-only encryption secret automatically. For a direct Node.js run, use the same key-file behavior by setting a persistent writable path:
+Bookmarks are optional and do not affect Wake-on-LAN. The example environment configures the same persistent server-only encryption-key file for direct and Compose runs:
 
 ```sh
 LINKWARDEN_CONFIG_ENCRYPTION_KEY_FILE=./data/linkwarden-config-encryption.key npm start
@@ -70,4 +75,12 @@ openssl rand -base64 32
 
 Set that output as `LINKWARDEN_CONFIG_ENCRYPTION_KEY` and restart the service. Open **Bookmarks settings**, enter the Linkwarden base URL, username, and a least-privilege access token, then choose **Connect**. A successful connection validates access, encrypts the token in `data/wol.db`, and immediately displays every available collection as a tree. Select any collection in the tree to load its HTTP(S) URL records through Linkwarden's current search API; note, image, and archive-only records without a web URL are omitted. Each collection has an independent 60-second cache and can be refreshed explicitly. The browser receives short-lived opaque collection tokens instead of Linkwarden's numeric collection IDs. On a later reconnect, leave the access-token field blank to retain the saved token. Use **Disconnect** beside the collection tree to delete the saved configuration and encrypted token.
 
-The Linkwarden service must be reachable from the dashboard host. HTTPS connections to Linkwarden accept self-signed certificates and do not verify the certificate chain or hostname, so use this only on a trusted LAN and never expose the connection path to an untrusted network. Other Node HTTPS traffic is not affected. Protect and back up the database and encryption key together. Losing, deleting, or replacing the key makes saved credentials unrecoverable; changing it requires deliberately decrypting and re-encrypting the saved token while the old secret is available. A malformed or unreadable persisted key stops startup rather than silently replacing the secret. Existing saved URL, username, and encrypted-token data is retained when upgrading from the former single-collection configuration.
+The Linkwarden service must be reachable from the dashboard host. HTTPS certificate chains and hostnames are verified by default. If Linkwarden uses a private CA, save only the public CA bundle and configure it for these requests:
+
+```sh
+mkdir -p certs
+cp /path/to/private-ca.pem certs/linkwarden-ca.pem
+printf '\nLINKWARDEN_CA_FILE=./certs/linkwarden-ca.pem\n' >> .env
+```
+
+The configured CA extends trust only for Linkwarden requests; hostname verification remains enabled and other Node HTTPS traffic is unaffected. An unreadable or empty CA file stops startup with a configuration error. Protect and back up the database and encryption key together. Losing, deleting, or replacing the key makes saved credentials unrecoverable; changing it requires deliberately decrypting and re-encrypting the saved token while the old secret is available. A malformed or unreadable persisted key stops startup rather than silently replacing the secret. Existing saved URL, username, and encrypted-token data is retained when upgrading from the former single-collection configuration.

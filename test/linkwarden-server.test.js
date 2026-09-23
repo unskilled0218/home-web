@@ -23,7 +23,7 @@ test('connects atomically and navigates collections through opaque tokens', asyn
   const keyPath = path.join(directory, 'key.pem');
   try {
     try {
-      execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', keyPath, '-out', certificatePath, '-days', '1', '-subj', '/CN=localhost'], { stdio: 'ignore' });
+      execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', keyPath, '-out', certificatePath, '-days', '1', '-subj', '/CN=127.0.0.1', '-addext', 'subjectAltName=IP:127.0.0.1'], { stdio: 'ignore' });
     } catch (error) {
       context.skip(`OpenSSL is required for the Linkwarden API test: ${error.message}`);
       return;
@@ -57,7 +57,8 @@ test('connects atomically and navigates collections through opaque tokens', asyn
           HOST: '127.0.0.1',
           PORT: String(dashboardPort),
           DATABASE_PATH: path.join(directory, 'dashboard.db'),
-          LINKWARDEN_CONFIG_ENCRYPTION_KEY: encryptionKey
+          LINKWARDEN_CONFIG_ENCRYPTION_KEY: encryptionKey,
+          LINKWARDEN_CA_FILE: certificatePath
         },
         stdio: ['ignore', 'pipe', 'pipe']
       });
@@ -155,6 +156,10 @@ test('renders Bookmarks before an accessible Wake-on-LAN section', () => {
   assert.match(html, /id="linkwarden-token"/);
   assert.match(html, />Connect<\/button>/);
   assert.match(html, /id="collection-tree"/);
+  assert.match(html, /<dialog id="device-dialog" aria-labelledby="dialog-title"/);
+  assert.match(html, /<dialog id="linkwarden-dialog" aria-labelledby="linkwarden-dialog-title"/);
+  assert.match(html, /id="device-error" role="alert"/);
+  assert.match(html, /id="linkwarden-error" role="alert"/);
   assert.doesNotMatch(html, /id="(?:test-linkwarden|list-linkwarden-collections|linkwarden-collection)"/);
   const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map((match) => match[1]);
   assert.equal(new Set(ids).size, ids.length);

@@ -6,10 +6,10 @@ const MAX_RESPONSE_BYTES = 1_000_000;
 const MAX_BOOKMARK_PAGES = 100;
 const BODYLESS_STATUSES = new Set([204, 205, 304]);
 
-function fetchLinkwarden(url, { headers, signal } = {}, redirects = 0) {
+function fetchLinkwarden(url, { headers, signal, ca } = {}, redirects = 0) {
   const parsed = new URL(url);
   const transport = parsed.protocol === 'https:' ? https : http;
-  const options = { headers, signal, ...(parsed.protocol === 'https:' && { rejectUnauthorized: false }) };
+  const options = { headers, signal, ...(parsed.protocol === 'https:' && ca && { ca }) };
   return new Promise((resolve, reject) => {
     const request = transport.get(parsed, options, (response) => {
       try {
@@ -20,7 +20,7 @@ function fetchLinkwarden(url, { headers, signal } = {}, redirects = 0) {
           response.resume();
           if (target.origin !== parsed.origin) { reject(new Error('Linkwarden returned a cross-origin redirect.')); return; }
           if (redirects >= 5) { reject(new Error('Linkwarden returned too many redirects.')); return; }
-          resolve(fetchLinkwarden(target, { headers, signal }, redirects + 1));
+          resolve(fetchLinkwarden(target, { headers, signal, ca }, redirects + 1));
           return;
         }
         const body = BODYLESS_STATUSES.has(status) ? null : Readable.toWeb(response);
@@ -132,7 +132,7 @@ async function boundedJson(response, limit = MAX_RESPONSE_BYTES) {
   return JSON.parse(new TextDecoder().decode(Buffer.concat(chunks)));
 }
 
-export function createLinkwardenClient({ fetchImpl = fetchLinkwarden, timeoutMs = 8_000, cacheSeconds = 60 } = {}) {
+export function createLinkwardenClient({ fetchImpl = fetchLinkwarden, timeoutMs = 8_000, cacheSeconds = 60, ca } = {}) {
   const cache = new Map();
   const inFlight = new Map();
   let cacheGeneration = 0;
@@ -140,7 +140,7 @@ export function createLinkwardenClient({ fetchImpl = fetchLinkwarden, timeoutMs 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const response = await fetchImpl(url, { headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' }, signal: controller.signal });
+      const response = await fetchImpl(url, { headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' }, signal: controller.signal, ca });
       return boundedJson(response);
     } finally { clearTimeout(timer); }
   };
