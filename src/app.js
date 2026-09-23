@@ -9,11 +9,12 @@ import { executeWakeRequest } from './wake-request.js';
 import { decryptApiKey, encryptApiKey, encryptionKey } from './linkwarden-crypto.js';
 import { normalizeLinkwardenCredentials } from './linkwarden.js';
 import { createCollectionSelectionStore } from './collection-selections.js';
-import { normalizeHomeAssistantCredentials } from './home-assistant.js';
+import { isHomeAssistantClientError, normalizeHomeAssistantCredentials } from './home-assistant.js';
 
 export const MAX_JSON_BODY_BYTES = 16_384;
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const defaultPublicRoot = path.join(root, 'public');
+const HOME_ASSISTANT_UNAVAILABLE = 'Home Assistant devices are currently unavailable.';
 const MIME_TYPES = { '.css': 'text/css; charset=utf-8', '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml' };
 
 function json(response, status, body) {
@@ -186,7 +187,7 @@ export function createDashboardServer({ runtimeConfig, store, linkwarden, homeAs
       try {
         const url = new URL(request.url, 'http://localhost');
         return json(response, 200, { configured: true, devices: await homeAssistant.listDevices(savedHomeAssistantSettings(), { force: url.searchParams.get('refresh') === '1' }) });
-      } catch { return json(response, 503, { configured: true, error: 'Home Assistant devices are currently unavailable.' }); }
+      } catch (error) { return json(response, 503, { configured: true, error: isHomeAssistantClientError(error) ? error.message : HOME_ASSISTANT_UNAVAILABLE }); }
     }
     if (request.method === 'GET' && pathname === '/api/linkwarden/collections') {
       try { const settings = savedLinkwardenSettings(); return json(response, 200, { collections: storeCollectionTree(settings, await linkwarden.listCollections(settings)) }); }
@@ -225,7 +226,9 @@ export function createDashboardServer({ runtimeConfig, store, linkwarden, homeAs
           try { encryptionKey(integrationEncryptionKey); }
           catch { throw new Error('Home Assistant credential encryption is not configured.'); }
           homeAssistant.clearCache();
-          const devices = await homeAssistant.listDevices(settings, { force: true });
+          let devices;
+          try { devices = await homeAssistant.listDevices(settings, { force: true }); }
+          catch (error) { throw new Error(isHomeAssistantClientError(error) ? error.message : HOME_ASSISTANT_UNAVAILABLE); }
           const encryptedAccessToken = encryptApiKey(settings.accessToken, integrationEncryptionKey);
           store.saveHomeAssistant({ ...settings, encryptedAccessToken });
           return json(response, 200, { homeAssistant: homeAssistantStatus(), devices });

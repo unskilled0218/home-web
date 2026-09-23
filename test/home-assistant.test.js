@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createHomeAssistantClient, normalizeHomeAssistantCredentials, normalizeHomeAssistantDevices } from '../src/home-assistant.js';
+import { createHomeAssistantClient, homeAssistantWebSocketError, isHomeAssistantClientError, normalizeHomeAssistantCredentials, normalizeHomeAssistantDevices } from '../src/home-assistant.js';
 
 function message(socket, data) {
   socket.dispatchEvent(new MessageEvent('message', { data: typeof data === 'string' ? data : JSON.stringify(data) }));
@@ -58,6 +58,24 @@ test('authenticates and correlates Home Assistant device and area commands', asy
     { id: 2, type: 'config/area_registry/list' }
   ]);
   assert.equal(sockets[0].closed, true);
+});
+
+test('classifies safe TLS failures without exposing upstream details', () => {
+  const cases = [
+    ['DEPTH_ZERO_SELF_SIGNED_CERT', /not trusted.*NODE_EXTRA_CA_CERTS/],
+    ['UNABLE_TO_VERIFY_LEAF_SIGNATURE', /not trusted/],
+    ['ERR_TLS_CERT_ALTNAME_INVALID', /does not match.*hostname/],
+    ['CERT_HAS_EXPIRED', /expired or not yet valid/],
+    ['CERT_NOT_YET_VALID', /expired or not yet valid/],
+    ['PRIVATE_UPSTREAM_CODE', /^Home Assistant connection failed.*NODE_EXTRA_CA_CERTS/]
+  ];
+  for (const [code, expected] of cases) {
+    const error = homeAssistantWebSocketError({ error: { code, message: 'private-token https://secret.internal' } });
+    assert.equal(isHomeAssistantClientError(error), true);
+    assert.match(error.message, expected);
+    assert.doesNotMatch(error.message, /private-token|secret\.internal/);
+  }
+  assert.equal(isHomeAssistantClientError(new Error('upstream detail')), false);
 });
 
 test('rejects authentication, command, malformed, closed, and timed-out sessions', async () => {

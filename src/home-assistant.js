@@ -2,6 +2,25 @@ import { createHash } from 'node:crypto';
 
 const MAX_MESSAGE_BYTES = 1_000_000;
 const MAX_REGISTRY_ENTRIES = 5_000;
+const TRUST_ERROR_CODES = new Set(['DEPTH_ZERO_SELF_SIGNED_CERT', 'SELF_SIGNED_CERT_IN_CHAIN', 'UNABLE_TO_GET_ISSUER_CERT', 'UNABLE_TO_GET_ISSUER_CERT_LOCALLY', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE', 'CERT_UNTRUSTED']);
+const CONNECTION_FAILED = 'Home Assistant connection failed. Check the URL and network; for a private certificate, configure NODE_EXTRA_CA_CERTS and restart the dashboard.';
+
+class HomeAssistantClientError extends Error {}
+
+const clientError = (message) => new HomeAssistantClientError(message);
+
+export function isHomeAssistantClientError(error) {
+  return error instanceof HomeAssistantClientError;
+}
+
+export function homeAssistantWebSocketError(event) {
+  const candidates = [event?.error, event?.error?.cause, event, event?.cause];
+  const code = candidates.map((candidate) => candidate?.code).find((value) => typeof value === 'string');
+  if (TRUST_ERROR_CODES.has(code)) return clientError('Home Assistant certificate is not trusted. Configure NODE_EXTRA_CA_CERTS with its private CA bundle and restart the dashboard.');
+  if (code === 'ERR_TLS_CERT_ALTNAME_INVALID') return clientError('Home Assistant certificate does not match the configured hostname. Fix the Home Assistant URL or certificate subject alternative names.');
+  if (code === 'CERT_HAS_EXPIRED' || code === 'CERT_NOT_YET_VALID') return clientError('Home Assistant certificate is expired or not yet valid. Replace the certificate or correct the system clock.');
+  return clientError(CONNECTION_FAILED);
+}
 
 export function normalizeHomeAssistantCredentials(input, existing = null) {
   let url;
@@ -73,21 +92,21 @@ function registrySnapshot(settings, { webSocketFactory, timeoutMs, maxMessageByt
     const send = (message) => {
       if (settled) return;
       try { socket.send(JSON.stringify(message)); }
-      catch { finish(new Error('Home Assistant connection failed.')); }
+      catch { finish(clientError(CONNECTION_FAILED)); }
     };
     const onMessage = (event) => {
-      if (settled || typeof event.data !== 'string' || Buffer.byteLength(event.data) > maxMessageBytes) return finish(new Error('Home Assistant returned an invalid response.'));
+      if (settled || typeof event.data !== 'string' || Buffer.byteLength(event.data) > maxMessageBytes) return finish(clientError('Home Assistant returned an invalid response.'));
       let message;
       try { message = JSON.parse(event.data); }
-      catch { return finish(new Error('Home Assistant returned an invalid response.')); }
-      if (!message || typeof message !== 'object' || typeof message.type !== 'string') return finish(new Error('Home Assistant returned an invalid response.'));
+      catch { return finish(clientError('Home Assistant returned an invalid response.')); }
+      if (!message || typeof message !== 'object' || typeof message.type !== 'string') return finish(clientError('Home Assistant returned an invalid response.'));
       if (phase !== 'commands') {
         if (phase === 'awaiting_auth_required' && message.type === 'auth_required') {
           phase = 'awaiting_auth_result';
           send({ type: 'auth', access_token: settings.accessToken });
           return;
         }
-        if (phase === 'awaiting_auth_result' && message.type === 'auth_invalid') return finish(new Error('Home Assistant rejected the access token.'));
+        if (phase === 'awaiting_auth_result' && message.type === 'auth_invalid') return finish(clientError('Home Assistant rejected the access token.'));
         if (phase === 'awaiting_auth_result' && message.type === 'auth_ok') {
           phase = 'commands';
           pendingCommands.add(1); pendingCommands.add(2);
@@ -95,28 +114,28 @@ function registrySnapshot(settings, { webSocketFactory, timeoutMs, maxMessageByt
           send({ id: 2, type: 'config/area_registry/list' });
           return;
         }
-        return finish(new Error('Home Assistant returned an unexpected authentication response.'));
+        return finish(clientError('Home Assistant returned an unexpected authentication response.'));
       }
-      if (message.type !== 'result' || !pendingCommands.has(message.id) || typeof message.success !== 'boolean') return finish(new Error('Home Assistant returned an invalid command response.'));
+      if (message.type !== 'result' || !pendingCommands.has(message.id) || typeof message.success !== 'boolean') return finish(clientError('Home Assistant returned an invalid command response.'));
       pendingCommands.delete(message.id);
-      if (!message.success) return finish(new Error('Home Assistant could not list its device registry.'));
-      if (!Array.isArray(message.result)) return finish(new Error('Home Assistant returned an invalid device registry.'));
+      if (!message.success) return finish(clientError('Home Assistant could not list its device registry.'));
+      if (!Array.isArray(message.result)) return finish(clientError('Home Assistant returned an invalid device registry.'));
       if (message.id === 1) devices = message.result;
       else areas = message.result;
       if (pendingCommands.size === 0) {
         try { finish(null, normalizeHomeAssistantDevices(devices, areas, maxEntries)); }
-        catch (error) { finish(error); }
+        catch (error) { finish(clientError(error.message)); }
       }
     };
-    const onError = () => finish(new Error('Home Assistant connection failed.'));
-    const onClose = () => finish(new Error('Home Assistant closed the connection before completing the request.'));
-    const timer = setTimeout(() => finish(new Error('Home Assistant connection timed out.')), timeoutMs);
+    const onError = (event) => finish(homeAssistantWebSocketError(event));
+    const onClose = () => finish(clientError('Home Assistant closed the connection before completing the request.'));
+    const timer = setTimeout(() => finish(clientError('Home Assistant connection timed out.')), timeoutMs);
     try {
       socket = webSocketFactory(webSocketUrl(settings.baseUrl));
       socket.addEventListener('message', onMessage);
       socket.addEventListener('error', onError);
       socket.addEventListener('close', onClose);
-    } catch { finish(new Error('Home Assistant connection failed.')); }
+    } catch { finish(clientError(CONNECTION_FAILED)); }
   });
 }
 

@@ -9,6 +9,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { createDashboardServer } from '../src/app.js';
 import { createStore } from '../src/db.js';
 import { decryptApiKey, encryptApiKey } from '../src/linkwarden-crypto.js';
+import { homeAssistantWebSocketError } from '../src/home-assistant.js';
 
 test('connects Home Assistant atomically and exposes only safe configuration', async (context) => {
   const directory = mkdtempSync(path.join(tmpdir(), 'dashboard-home-assistant-api-'));
@@ -23,7 +24,7 @@ test('connects Home Assistant atomically and exposes only safe configuration', a
     clearCache() { calls.push({ clear: true }); },
     async listDevices(settings, options) {
       calls.push({ settings, options });
-      if (failure) throw new Error(failure);
+      if (failure) throw failure instanceof Error ? failure : new Error(failure);
       if (blockNext) {
         blockNext = false;
         await new Promise((resolve) => { releaseBlocked = resolve; blockedStarted(); });
@@ -61,12 +62,21 @@ test('connects Home Assistant atomically and exposes only safe configuration', a
   assert.equal((await api('/api/home-assistant', { method: 'PUT', body: { url: 'https://home.example.test', accessToken: '' } })).status, 200);
 
   failure = 'upstream private detail';
-  assert.equal((await api('/api/home-assistant', { method: 'PUT', body: { url: 'https://home.example.test', accessToken: 'replacement' } })).status, 400);
+  const failedConnect = await api('/api/home-assistant', { method: 'PUT', body: { url: 'https://home.example.test', accessToken: 'replacement' } });
+  assert.equal(failedConnect.status, 400);
+  assert.equal(failedConnect.body.error, 'Home Assistant devices are currently unavailable.');
+  assert.equal(JSON.stringify(failedConnect.body).includes('private detail'), false);
   assert.equal(decryptApiKey(store.getHomeAssistant().encryptedAccessToken, secret), 'private-token');
   const unavailable = await api('/api/home-assistant/devices');
   assert.equal(unavailable.status, 503);
   assert.equal(unavailable.body.error, 'Home Assistant devices are currently unavailable.');
   assert.equal(JSON.stringify(unavailable.body).includes('private detail'), false);
+
+  failure = homeAssistantWebSocketError({ error: { code: 'UNABLE_TO_VERIFY_LEAF_SIGNATURE', message: 'private detail' } });
+  const certificateFailure = await api('/api/home-assistant/devices');
+  assert.equal(certificateFailure.status, 503);
+  assert.match(certificateFailure.body.error, /certificate is not trusted.*NODE_EXTRA_CA_CERTS/);
+  assert.equal(JSON.stringify(certificateFailure.body).includes('private detail'), false);
 
   assert.equal((await api('/api/home-assistant', { method: 'DELETE' })).status, 204);
   assert.equal(store.getHomeAssistant(), undefined);

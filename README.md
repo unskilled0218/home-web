@@ -13,7 +13,7 @@ npm start
 
 Open `http://127.0.0.1:3000` to connect Home Assistant or Linkwarden, or to add Wake-on-LAN devices. For **Broadcast address**, enter the target PC's directed subnet broadcast address: for example, use `192.168.1.255` for a PC at `192.168.1.42` on a `255.255.255.0` network. The database is created at `data/wol.db` and should be backed up along with the configuration.
 
-`npm start`, `npm run start:lan`, and `npm run dev` load the repository-root `.env` before application configuration. Values already supplied by the process environment take precedence, and the file is optional. `start:lan` uses the same safety checks as `start`; configure the explicit private `HOST` address and any browser-facing `DASHBOARD_ALLOWED_HOSTS` in `.env` rather than enabling an unrestricted wildcard bind.
+`npm start`, `npm run start:lan`, and `npm run dev` use Node's native optional env-file support to load the repository-root `.env` before the process initializes. Values already supplied by the process environment take precedence, and the file is optional. Loading before initialization is required for TLS settings such as `NODE_EXTRA_CA_CERTS`. `start:lan` uses the same safety checks as `start`; configure the explicit private `HOST` address and any browser-facing `DASHBOARD_ALLOWED_HOSTS` in `.env` rather than enabling an unrestricted wildcard bind.
 
 For another device on the LAN to reach the dashboard, set `HOST` to the server's explicit private address, such as `192.168.1.10`. That address is accepted automatically as an HTTP Host. If the browser uses a private DNS name instead, also set `DASHBOARD_ALLOWED_HOSTS` to that hostname. Do not bind the service to a public interface or expose its port through a router.
 
@@ -37,7 +37,7 @@ Restrict port 3000 at the host firewall to the trusted LAN. Host networking beha
 
 To retain an existing externally managed key, set `LINKWARDEN_CONFIG_ENCRYPTION_KEY` in Compose's `.env` file before the first startup. The legacy variable name is retained for compatibility, but the key encrypts both Linkwarden and Home Assistant credentials. An explicit key takes precedence and the automatic key file is not created. Keep using the same value after every restart.
 
-The project directory is mounted read-only at `/app`, so an optional CA at `./certs/linkwarden-ca.pem` is available to both direct runs and Compose under the same relative path. Keep private CA files out of version control; `certs/` is ignored. For a CA stored elsewhere, add a read-only bind mount in a Compose override and set `LINKWARDEN_CA_FILE` to its container path.
+The project directory is mounted read-only at `/app`, so optional CA bundles under `./certs` are available to both direct runs and Compose under the same relative paths. Keep these files out of version control; `certs/` is ignored. For a CA stored elsewhere, add a read-only bind mount in a Compose override and set the relevant CA variable to its container path.
 
 ## Operational checklist
 
@@ -57,7 +57,7 @@ npm test
 npm run check
 ```
 
-The tests validate Home Assistant WebSocket handling and encrypted credentials, Wake-on-LAN packet handling, Linkwarden credential storage and migration, collection trees, bookmark caching, API behavior, and scoped private-CA TLS. A safe packet-dispatch integration test requires a disposable UDP receiver on the deployment network.
+The tests validate Home Assistant WebSocket handling, private-CA TLS, and encrypted credentials, Wake-on-LAN packet handling, Linkwarden credential storage and migration, collection trees, bookmark caching, API behavior, and scoped Linkwarden private-CA TLS. A safe packet-dispatch integration test requires a disposable UDP receiver on the deployment network.
 
 ## Home Assistant devices
 
@@ -67,7 +67,20 @@ The dashboard server connects to Home Assistant's `/api/websocket`, authenticate
 
 The long-lived token is encrypted in `data/wol.db` with the same server key used for Linkwarden credentials. It is never returned to the browser or prefilled after saving. Leave the token field blank to keep the saved token when the URL is unchanged; changing the URL requires a new token. A failed reconnect leaves the last working configuration intact. **Disconnect** deletes the saved Home Assistant URL and token.
 
-Normal certificate-chain and hostname verification applies to `https://` Home Assistant URLs. Use a certificate trusted by Node for `wss://` connections. Plain `http://` sends the token over the local network and should be used only on a network you trust. Keep the dashboard and Home Assistant LAN-only.
+Normal certificate-chain and hostname verification applies to `https://` Home Assistant URLs. If Home Assistant uses a private CA, save only its public issuing CA/intermediate bundle and configure Node to load it before startup:
+
+```sh
+mkdir -p certs
+cp /path/to/home-assistant-ca.pem certs/home-assistant-ca.pem
+printf '\nNODE_EXTRA_CA_CERTS=./certs/home-assistant-ca.pem\n' >> .env
+npm start
+```
+
+The PEM file must contain one or more CA certificates and no private key. A self-signed Home Assistant leaf certificate can be used only when that certificate is itself the trust anchor. The hostname in the configured Home Assistant URL must appear in the certificate's subject alternative names; adding the CA does not bypass hostname, expiration, or chain verification. Changing or rotating the bundle requires a full dashboard process restart because Node reads `NODE_EXTRA_CA_CERTS` only during initialization.
+
+`NODE_EXTRA_CA_CERTS` augments trust for the whole Node process because the built-in WebSocket client has no per-connection CA option. Use the narrowest appropriate private CA. The supplied Compose service forwards the same variable, and the existing read-only project mount makes `./certs/home-assistant-ca.pem` available at that path inside `/app`. For a CA outside the project, mount it read-only and use its container path.
+
+If a connection fails, verify that the dashboard host can reach Home Assistant, the URL uses the certificate's exact DNS name or IP SAN, the full issuing chain is present, and the certificates and system clock are current. A trust error points to `NODE_EXTRA_CA_CERTS`; a hostname error requires correcting the URL or certificate rather than adding another CA. Node 24 may report some WebSocket TLS failures only as a generic network error, so check all of these items when no narrower category is available. Plain `http://` sends the token over the local network and should be used only on a network you trust. Keep the dashboard and Home Assistant LAN-only.
 
 ## Linkwarden bookmarks
 
@@ -93,4 +106,4 @@ cp /path/to/private-ca.pem certs/linkwarden-ca.pem
 printf '\nLINKWARDEN_CA_FILE=./certs/linkwarden-ca.pem\n' >> .env
 ```
 
-The configured CA extends trust only for Linkwarden requests; hostname verification remains enabled and other Node HTTPS traffic is unaffected. An unreadable or empty CA file stops startup with a configuration error. Protect and back up the database and encryption key together. Losing, deleting, or replacing the key makes saved credentials unrecoverable; changing it requires deliberately decrypting and re-encrypting the saved token while the old secret is available. A malformed or unreadable persisted key stops startup rather than silently replacing the secret. Existing saved URL, username, and encrypted-token data is retained when upgrading from the former single-collection configuration.
+Unlike Home Assistant's process-wide `NODE_EXTRA_CA_CERTS`, the configured `LINKWARDEN_CA_FILE` extends trust only for Linkwarden requests; hostname verification remains enabled and other Node HTTPS traffic is unaffected. An unreadable or empty CA file stops startup with a configuration error. Protect and back up the database and encryption key together. Losing, deleting, or replacing the key makes saved credentials unrecoverable; changing it requires deliberately decrypting and re-encrypting the saved token while the old secret is available. A malformed or unreadable persisted key stops startup rather than silently replacing the secret. Existing saved URL, username, and encrypted-token data is retained when upgrading from the former single-collection configuration.

@@ -4,7 +4,9 @@ import { createLinkwardenClient } from './linkwarden.js';
 import { loadLinkwardenCa } from './linkwarden-ca.js';
 import { createDashboardServer } from './app.js';
 import { createHomeAssistantClient } from './home-assistant.js';
+import { validateCaFile } from './ca-file.js';
 
+await validateCaFile(config.nodeExtraCaFile);
 const ca = await loadLinkwardenCa(config.linkwardenCaFile);
 const store = createStore(config.databasePath);
 const linkwarden = createLinkwardenClient({ cacheSeconds: config.linkwardenCacheSeconds, ca });

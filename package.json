@@ -1,6 +1,6 @@
 {
   "name": "dashboard",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "private": true,
   "description": "A self-hosted dashboard for Home Assistant devices, Linkwarden bookmarks, and Wake-on-LAN controls.",
   "type": "module",
@@ -8,9 +8,9 @@
     "node": ">=24.0.0"
   },
   "scripts": {
-    "start": "node src/start.js",
-    "start:lan": "node src/start.js",
-    "dev": "node --watch src/start.js",
+    "start": "node --env-file-if-exists=.env src/server.js",
+    "start:lan": "node --env-file-if-exists=.env src/server.js",
+    "dev": "node --watch --env-file-if-exists=.env src/server.js",
     "test": "node --test",
     "check": "node --check src/*.js && node --check public/*.js"
   }
