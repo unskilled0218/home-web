@@ -1,6 +1,6 @@
 # LAN Wake
 
-LAN Wake is a small, self-hosted Wake-on-LAN dashboard for a trusted local network. It has no accounts or internet-facing use case. A successful wake request means the host sent the UDP magic packet; it does not prove that the target computer booted.
+LAN Wake is a small, self-hosted dashboard for Linkwarden bookmarks and Wake-on-LAN controls on a trusted local network. It has no accounts or internet-facing use case. Bookmarks appear first, with saved machines and wake controls beneath them. A successful wake request means the host sent the UDP magic packet; it does not prove that the target computer booted.
 
 ## Run locally
 
@@ -11,7 +11,7 @@ cp .env.example .env
 npm start
 ```
 
-Open `http://127.0.0.1:3000`, add devices, then send wake packets. For **Broadcast address**, enter the target PC's directed subnet broadcast address: for example, use `192.168.1.255` for a PC at `192.168.1.42` on a `255.255.255.0` network. The database is created at `data/wol.db` and should be backed up along with the configuration.
+Open `http://127.0.0.1:3000` to connect Linkwarden or add devices. For **Broadcast address**, enter the target PC's directed subnet broadcast address: for example, use `192.168.1.255` for a PC at `192.168.1.42` on a `255.255.255.0` network. The database is created at `data/wol.db` and should be backed up along with the configuration.
 
 For another device on the LAN to reach the dashboard, set `HOST` to the server's explicit private address, such as `192.168.1.10`. Do not bind it to a public interface and do not expose the port through a router.
 

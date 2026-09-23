@@ -135,13 +135,26 @@ test('connects atomically and navigates collections through opaque tokens', asyn
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
-test('renders only one-step Linkwarden setup controls and a collection tree', () => {
+test('renders Bookmarks before an accessible Wake-on-LAN section', () => {
   const root = path.resolve(import.meta.dirname, '..');
   const html = readFileSync(path.join(root, 'public/index.html'), 'utf8');
+  const bookmarksStart = html.indexOf('<section class="dashboard-section bookmarks-section"');
+  const wakeStart = html.indexOf('<section class="dashboard-section wol-section"');
+  const bookmarksSection = html.slice(bookmarksStart, html.indexOf('</section>', bookmarksStart));
+  const wakeSection = html.slice(wakeStart, html.indexOf('</section>', wakeStart));
+  assert.ok(bookmarksStart > -1 && wakeStart > bookmarksStart);
+  assert.match(bookmarksSection, /aria-labelledby="bookmarks-title"/);
+  assert.match(bookmarksSection, /class="section-actions bookmark-actions"[^>]*>[\s\S]*id="linkwarden-settings"[\s\S]*id="disconnect-linkwarden"[\s\S]*id="refresh-bookmarks"/);
+  assert.match(bookmarksSection, /id="bookmark-status" role="status" aria-live="polite"/);
+  assert.match(wakeSection, /aria-labelledby="wol-title"/);
+  assert.match(wakeSection, /class="section-actions"[^>]*>[\s\S]*id="new-device"/);
+  assert.match(wakeSection, /id="status" role="status" aria-live="polite"/);
   assert.match(html, /id="linkwarden-url"/);
   assert.match(html, /id="linkwarden-username"/);
   assert.match(html, /id="linkwarden-token"/);
   assert.match(html, />Connect<\/button>/);
   assert.match(html, /id="collection-tree"/);
   assert.doesNotMatch(html, /id="(?:test-linkwarden|list-linkwarden-collections|linkwarden-collection)"/);
+  const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map((match) => match[1]);
+  assert.equal(new Set(ids).size, ids.length);
 });

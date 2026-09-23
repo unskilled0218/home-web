@@ -45,7 +45,7 @@ function render() {
   const groups = Map.groupBy(filtered, (device) => device.group || 'Ungrouped');
   for (const [group, devices] of groups) {
     const section = document.createElement('section'); section.className = 'group';
-    const title = document.createElement('h2'); title.textContent = group; section.append(title);
+    const title = document.createElement('h3'); title.textContent = group; section.append(title);
     const grid = document.createElement('div'); grid.className = 'device-grid';
     for (const device of devices) {
       const card = document.createElement('article'); card.className = 'device';
