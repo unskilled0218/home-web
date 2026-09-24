@@ -32,7 +32,7 @@ h2, h3, p { margin: .5em 0; }
 a { color: #b7e1ff; }
 summary { cursor: pointer; padding: .5rem 0; }
 #hourly, #daily { display: flex; gap: .7rem; overflow-x: auto; list-style: none; padding: .4rem 0; text-align: left; }
-#hourly li, #daily li { flex: 0 0 8em; padding: .5em; background: #182c3c; border-radius: .4rem; }
+#hourly li, #daily li { flex: 0 0 8em; padding: .5em; background: transparent; border-radius: .4rem; }
 .forecast-item { display: flex; flex-direction: column; align-items: center; gap: .2em; text-align: center; }
 .forecast-icon { flex: 0 0 auto; width: clamp(2rem, 3em, 3rem); height: clamp(2rem, 3em, 3rem); filter: brightness(0) invert(1) drop-shadow(1px 1px 2px rgb(0 0 0 / .5)); }
 .forecast-label, .forecast-temperature { font-weight: 700; }
