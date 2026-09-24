@@ -68,3 +68,18 @@ export function weatherDescription(code, day = 1) {
   if ([95, 96, 99].includes(code)) return 'Thunderstorm';
   return 'Conditions unavailable';
 }
+
+export function weatherIconKey(code, day = 1) {
+  if (!Number.isFinite(code)) return 'unknown';
+  const period = day === 0 ? 'night' : 'day';
+  if (code === 0) return `clear-${period}`;
+  if ([1, 2].includes(code)) return `partly-cloudy-${period}`;
+  if (code === 3) return 'cloudy';
+  if ([45, 48].includes(code)) return 'fog';
+  if ([51, 53, 55].includes(code)) return 'drizzle';
+  if ([56, 57, 66, 67].includes(code)) return 'sleet';
+  if ([61, 63, 65, 80, 81, 82].includes(code)) return 'rain';
+  if ([71, 73, 75, 77, 85, 86].includes(code)) return 'snow';
+  if ([95, 96, 99].includes(code)) return 'thunderstorm';
+  return 'unknown';
+}

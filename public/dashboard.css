@@ -20,10 +20,13 @@ body { display: flex; flex-direction: column; }
 #clock { font-size: calc(1em * var(--time-scale, 1)); }
 #date { margin: 0; font-size: 1.3em; }
 #time { font-size: clamp(2rem, 9vw, 5em); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
-#weather { font-size: calc(1em * var(--weather-scale, 1)); padding: .8em; background: #08101bcc; border-radius: .8rem; margin-top: .7rem; }
+#weather { font-size: calc(1em * var(--weather-scale, 1)); padding: 0; background: transparent; border-radius: 0; margin-top: .9rem; }
 h2, h3, p { margin: .5em 0; }
-#current-weather { display: flex; flex-wrap: wrap; gap: .5em 1em; align-items: baseline; }
-.right #current-weather { justify-content: flex-end; }
+#current-weather { display: flex; gap: .8em; align-items: center; }
+#current-weather-values { display: flex; flex-wrap: wrap; gap: .5em 1em; align-items: baseline; min-width: 0; }
+.right #current-weather, .right #current-weather-values { justify-content: flex-end; }
+.weather-icon { flex: 0 0 auto; width: clamp(3rem, 6em, 6rem); height: clamp(3rem, 6em, 6rem); color: #fff; filter: drop-shadow(0 2px 3px #000); overflow: visible; }
+.condition { font-weight: 600; }
 .temperature { font-size: 2em; }
 .attribution { font-size: .75em; }
 a { color: #b7e1ff; }
@@ -43,5 +46,5 @@ dialog section { border-top: 1px solid #62758a; margin-top: 1.2rem; padding-top:
 #location-search { display: flex; flex-wrap: wrap; align-items: end; gap: .5rem; }
 #location-results { list-style: none; padding: 0; }
 #location-results button { margin: .3rem 0; text-align: left; }
-@media (max-width: 600px) { #information { max-width: calc(100% - 1rem); margin-left: .5rem; margin-right: .5rem; } .page-tools { padding: .5rem; } fieldset { grid-template-columns: 1fr; } #weather { font-size: min(1em, 1.25rem); } }
+@media (max-width: 600px) { #information { max-width: calc(100% - 1rem); margin-left: .5rem; margin-right: .5rem; } .page-tools { padding: .5rem; } fieldset { grid-template-columns: 1fr; } #weather { font-size: min(1em, 1.25rem); } #current-weather { align-items: flex-start; } .weather-icon { width: clamp(2.75rem, 16vw, 4.5rem); height: clamp(2.75rem, 16vw, 4.5rem); } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { createDashboardServer } from '../src/app.js';
-import { clockText, loadSettings, normalizeSettings, orderPhotos, sampleHours, selectPhotos } from '../public/dashboard-helpers.js';
+import { clockText, loadSettings, normalizeSettings, orderPhotos, sampleHours, selectPhotos, weatherIconKey } from '../public/dashboard-helpers.js';
 import { createWeatherController, normalizeForecast, requestJson, searchLocations, weatherUrls } from '../public/dashboard-weather.js';
 import { createPhotoController } from '../public/dashboard-photos.js';
 
@@ -29,8 +29,27 @@ test('serves dashboard aliases and assets while preserving home and static conta
   for (const name of ['dashboard.js', 'dashboard-helpers.js', 'dashboard-weather.js', 'dashboard-photos.js', 'dashboard.css']) {
     const result = await fetch(`${base}/${name}`); assert.equal(result.status, 200); assert.match(result.headers.get('content-type'), name.endsWith('.css') ? /text\/css/ : /text\/javascript/);
   }
+  const spriteResponse = await fetch(`${base}/weather-icons.svg`); assert.equal(spriteResponse.status, 200); assert.match(spriteResponse.headers.get('content-type'), /image\/svg\+xml/);
+  const sprite = await spriteResponse.text();
+  const symbols = [...sprite.matchAll(/<symbol id="([^"]+)"/g)].map((match) => match[1]);
+  assert.deepEqual(symbols, ['clear-day', 'clear-night', 'partly-cloudy-day', 'partly-cloudy-night', 'cloudy', 'fog', 'drizzle', 'rain', 'sleet', 'snow', 'thunderstorm', 'unknown']);
+  assert.doesNotMatch(sprite, /<script|xlink:href|<text|\shref=/i);
+  const dashboardHtml = await (await fetch(`${base}/dashboard.html`)).text(); assert.match(dashboardHtml, /id="weather-icon"[^>]*aria-hidden="true"[^>]*hidden/);
+  const dashboardCss = await (await fetch(`${base}/dashboard.css`)).text(); assert.match(dashboardCss, /#weather \{[^}]*background: transparent;[^}]*border-radius: 0;/); assert.doesNotMatch(dashboardCss, /#weather \{[^}]*#08101bcc/);
+  const dashboardJs = await (await fetch(`${base}/dashboard.js`)).text(); assert.match(dashboardJs, /`\/weather-icons\.svg#\$\{weatherIconKey\(/); assert.doesNotMatch(dashboardJs, /innerHTML/);
   assert.match(await (await fetch(base)).text(), /href="\/dashboard"/);
   for (const route of ['/missing', '/dashboard/missing', '/%2e%2e/package.json', '/..%2fpackage.json', '/src/app.js']) assert.equal((await fetch(base + route)).status, 404);
+});
+
+test('maps bounded WMO conditions to local weather icons', () => {
+  const cases = [
+    [0, 1, 'clear-day'], [0, 0, 'clear-night'], [1, 1, 'partly-cloudy-day'], [2, 0, 'partly-cloudy-night'], [3, 1, 'cloudy'],
+    [45, 1, 'fog'], [48, 1, 'fog'], [51, 1, 'drizzle'], [55, 1, 'drizzle'], [56, 1, 'sleet'], [67, 1, 'sleet'],
+    [61, 1, 'rain'], [65, 1, 'rain'], [80, 1, 'rain'], [82, 1, 'rain'], [71, 1, 'snow'], [77, 1, 'snow'], [85, 1, 'snow'], [86, 1, 'snow'],
+    [95, 1, 'thunderstorm'], [99, 1, 'thunderstorm'], [4, 1, 'unknown'], [null, 1, 'unknown'], ['0', 1, 'unknown'], [NaN, 1, 'unknown'], [Infinity, 1, 'unknown']
+  ];
+  for (const [code, day, expected] of cases) assert.equal(weatherIconKey(code, day), expected, `${code}/${day}`);
+  assert.equal(weatherIconKey(1, null), 'partly-cloudy-day');
 });
 
 test('recovers preferences and constrains untrusted persisted settings', () => {

@@ -1,4 +1,4 @@
-import { SETTINGS_KEY, clockText, loadSettings, normalizeSettings, sampleHours, weatherDescription } from './dashboard-helpers.js';
+import { SETTINGS_KEY, clockText, loadSettings, normalizeSettings, sampleHours, weatherDescription, weatherIconKey } from './dashboard-helpers.js';
 import { createWeatherController, searchLocations } from './dashboard-weather.js';
 import { createPhotoController } from './dashboard-photos.js';
 
@@ -38,11 +38,14 @@ function renderWeather(state = weatherState) {
   $('location-name').textContent = settings.location?.label ?? 'Weather';
   const forecast = state.forecast;
   $('weather-status').textContent = !settings.location ? 'Choose a location in Settings to show weather.' : state.forecastError ? (forecast ? 'Forecast is stale; refresh failed. Retrying hourly.' : 'Forecast unavailable. Retrying hourly.') : state.loading ? 'Updating weather…' : state.forecastUpdated ? `Updated ${new Date(state.forecastUpdated).toLocaleTimeString([], { timeZone: settings.timezone })}` : '';
-  $('current-weather').replaceChildren(); $('hourly').replaceChildren(); $('daily').replaceChildren();
+  const icon = $('weather-icon'); const iconUse = $('weather-icon-use');
+  icon.hidden = true; iconUse.removeAttribute('href');
+  $('current-weather-values').replaceChildren(); $('hourly').replaceChildren(); $('daily').replaceChildren();
   $('forecast-details').hidden = !forecast;
   if (forecast) {
     const current = forecast.current; const units = forecast.units;
-    $('current-weather').append(element('strong', reading(current.temperature_2m, units.temperature_2m), 'temperature'), element('span', weatherDescription(current.weather_code, current.is_day)), element('span', `Wind ${reading(current.wind_speed_10m, units.wind_speed_10m)}`), element('span', `Humidity ${reading(current.relative_humidity_2m, units.relative_humidity_2m)}`), element('span', `Precipitation ${reading(current.precipitation, units.precipitation)}`));
+    iconUse.setAttribute('href', `/weather-icons.svg#${weatherIconKey(current.weather_code, current.is_day)}`); icon.hidden = false;
+    $('current-weather-values').append(element('strong', reading(current.temperature_2m, units.temperature_2m), 'temperature'), element('span', weatherDescription(current.weather_code, current.is_day), 'condition'), element('span', `Wind ${reading(current.wind_speed_10m, units.wind_speed_10m)}`), element('span', `Humidity ${reading(current.relative_humidity_2m, units.relative_humidity_2m)}`), element('span', `Precipitation ${reading(current.precipitation, units.precipitation)}`));
     for (const hour of sampleHours(forecast.hourly)) {
       const label = new Intl.DateTimeFormat(undefined, { timeZone: settings.timezone, weekday: 'short', hour: 'numeric', minute: '2-digit', hour12: settings.hour12 }).format(new Date(hour.time * 1000));
       $('hourly').append(element('li', `${label}: ${reading(hour.temperature, forecast.hourlyUnit)} · ${weatherDescription(hour.code)}`));
