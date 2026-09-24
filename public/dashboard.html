@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#000000">
+    <title>Photo dashboard</title>
+    <link rel="stylesheet" href="/dashboard.css">
+  </head>
+  <body>
+    <div id="photos" aria-hidden="true"></div>
+    <header class="page-tools"><a href="/">Home</a><button id="fullscreen" type="button">Enter fullscreen</button><button id="open-settings" type="button">Settings</button></header>
+    <p id="page-status" role="status"></p>
+    <main id="information">
+      <h1 class="sr-only">Photo dashboard</h1>
+      <section id="clock" aria-label="Clock"><p id="date"></p><time id="time"></time></section>
+      <section id="weather" aria-label="Weather">
+        <h2 id="location-name">Weather</h2>
+        <p id="weather-status" role="status">Choose a location in Settings to show weather.</p>
+        <div id="current-weather"></div>
+        <p id="air-quality"></p>
+        <details id="forecast-details"><summary>Hourly and seven-day forecast</summary><h3>Next 24 hours</h3><ul id="hourly"></ul><h3>Next seven days</h3><ul id="daily"></ul></details>
+        <p class="attribution">Weather: <a href="https://open-meteo.com/">Open-Meteo</a> · Air quality: <a href="https://ads.atmosphere.copernicus.eu/">CAMS ENSEMBLE</a></p>
+      </section>
+      <p id="photo-caption"></p>
+    </main>
+    <dialog id="settings-dialog" aria-labelledby="settings-title">
+      <div class="dialog-heading"><h2 id="settings-title">Dashboard settings</h2><button id="close-settings" type="button">Close</button></div>
+      <p id="settings-status" role="status"></p>
+      <form id="preferences">
+        <fieldset><legend>Information layout</legend>
+          <label>Position<select name="position"><option value="left">Lower left</option><option value="right">Lower right</option></select></label>
+          <label>Overall scale<input name="scale" type="number" min="0.5" max="2" step="0.1"></label>
+        </fieldset>
+        <fieldset><legend>Time</legend>
+          <label class="toggle"><input name="timeVisible" type="checkbox">Show clock</label>
+          <label>Clock scale<input name="timeScale" type="number" min="0.5" max="2" step="0.1"></label>
+          <label>Timezone<input name="timezone" maxlength="80" placeholder="Europe/London" required></label>
+          <label>Date style<select name="dateStyle"><option>short</option><option>medium</option><option>long</option><option>full</option></select></label>
+          <label class="toggle"><input name="hour12" type="checkbox">12-hour clock</label><label class="toggle"><input name="seconds" type="checkbox">Show seconds</label>
+        </fieldset>
+        <fieldset><legend>Weather</legend>
+          <label class="toggle"><input name="weatherVisible" type="checkbox">Show weather</label>
+          <label>Weather scale<input name="weatherScale" type="number" min="0.5" max="2" step="0.1"></label>
+          <label>Temperature<select name="temperature"><option value="celsius">Celsius</option><option value="fahrenheit">Fahrenheit</option></select></label>
+          <label>Wind<select name="wind"><option value="kmh">km/h</option><option value="mph">mph</option><option value="ms">m/s</option><option value="kn">knots</option></select></label>
+          <label>Precipitation<select name="precipitation"><option value="mm">mm</option><option value="inch">inches</option></select></label>
+        </fieldset>
+        <fieldset><legend>Images</legend>
+          <label>Order<select name="order"><option value="random">Shuffled</option><option value="name">Name</option><option value="date">Modification date</option></select></label>
+          <label>Interval (seconds)<input name="interval" type="number" min="5" max="3600"></label>
+          <label>Transition<select name="animation"><option value="fade">Fade</option><option value="slide">Slide</option><option value="none">None</option></select></label>
+          <label>Transition duration (seconds)<input name="duration" type="number" min="0" max="10" step="0.1"></label>
+          <label>Opacity<input name="opacity" type="number" min="0" max="1" step="0.1"></label>
+          <label>Background<select name="background"><option value="color">Solid color</option><option value="blur">Blurred image</option></select></label>
+          <label>Background color<input name="color" type="color"></label><label>Background blur (pixels)<input name="blur" type="number" min="0" max="100"></label>
+          <label class="toggle"><input name="imageInfo" type="checkbox">Show filename</label>
+        </fieldset>
+        <button type="submit">Save preferences</button>
+      </form>
+      <section aria-labelledby="photos-title"><h3 id="photos-title">Choose photos</h3><p>Photos stay in this browser session and are never uploaded. Reselect them after reload. JPEG, PNG, WebP, GIF; up to 100 files, 20 MiB each and 200 MiB total.</p><label>Photo files<input id="photo-files" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple></label><p id="photo-status" role="status">No photos selected. The clock works without photos.</p></section>
+      <section aria-labelledby="location-title"><h3 id="location-title">Weather location</h3><p>Searches and selected coordinates are sent directly to Open-Meteo. Preferences are saved only in this browser.</p><form id="location-search"><label>City or place<input id="location-query" type="search" minlength="2" maxlength="120" required></label><button type="submit">Search</button><button id="clear-location" type="button">Clear location</button></form><p id="search-status" role="status"></p><ul id="location-results"></ul></section>
+    </dialog>
+    <script type="module" src="/dashboard.js"></script>
+  </body>
+</html>

@@ -201,7 +201,7 @@ export function createDashboardServer({ runtimeConfig, store, linkwarden, homeAs
   }
 
   async function serveStatic(request, response, pathname) {
-    const requested = pathname === '/' ? '/index.html' : pathname;
+    const requested = pathname === '/' ? '/index.html' : ['/dashboard', '/dashboard/'].includes(pathname) ? '/dashboard.html' : pathname;
     const target = path.resolve(publicRoot, `.${requested}`);
     if (!target.startsWith(`${publicRoot}${path.sep}`)) return json(response, 404, { error: 'Not found.' });
     try {

@@ -17,6 +17,18 @@ Open `http://127.0.0.1:3000` to connect Home Assistant or Linkwarden, or to add 
 
 For another device on the LAN to reach the dashboard, set `HOST` to the server's explicit private address, such as `192.168.1.10`. That address is accepted automatically as an HTTP Host. If the browser uses a private DNS name instead, also set `DASHBOARD_ALLOWED_HOSTS` to that hostname. Do not bind the service to a public interface or expose its port through a router.
 
+## Photo dashboard
+
+Open `/dashboard` (or `/dashboard/`) for a photo, clock, and weather display inspired by the `dash-board` desktop application. The home page links to it, and **Home** returns to your integrations. A clock and dark background work immediately without configuration.
+
+**Settings** controls the lower-left/right information position, overall and individual clock/weather scale, visibility, timezone, date style, 12/24-hour format, seconds, and weather units. Date styles use the browser's locale and `Intl` formatting rather than the desktop app's custom format strings. Preferences are saved per browser in localStorage; blocked or corrupt storage falls back to defaults, and save failures are reported without stopping the page.
+
+Select JPEG, PNG, WebP, or GIF photos using **Choose photos**. Photos stay in the browser session, are never uploaded, and must be reselected after reload or returning from a suspended page. Selection is limited to 100 files, 20 MiB per file, and 200 MiB total. Invalid or undecodable images are reported and skipped. Choose name, modification-date, or shuffled ordering; none/fade/slide transitions; interval and transition duration; opacity; a solid or blurred-image background; and optional filename display. Transitions respect reduced-motion preferences, and slideshow timers pause while the page is hidden.
+
+Search for a weather location in settings. Search terms and selected coordinates are sent directly from the browser to [Open-Meteo](https://open-meteo.com/). The page shows current conditions, a three-hourly sample of the next 24 hours, seven daily forecasts, and the **US AQI**, with air-quality data attributed to [CAMS ENSEMBLE](https://ads.atmosphere.copernicus.eu/). Weather refreshes hourly while visible and when relevant settings change. Failed refreshes label retained data as stale; weather and air-quality failures are handled independently. The page uses the public provider endpoints and their usage terms, and requires internet access for weather only.
+
+**Enter fullscreen** uses the browser Fullscreen API and may be unavailable or denied by browser policy. Escape exits fullscreen. The dashboard uses native browser modules without a build step, Tauri, or a runtime dependency on the reference checkout.
+
 ## Container deployment
 
 The supplied `docker-compose.yml` uses the official Node image and host networking because UDP broadcast packets need to leave through the LAN interface. It automatically creates the integration-credential encryption key at `data/linkwarden-config-encryption.key` on first startup and reuses it after container recreation. No encryption secret must be configured before a fresh Compose deployment. On Linux, set `HOST` to the host's private address before running:
