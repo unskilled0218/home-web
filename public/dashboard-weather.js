@@ -28,7 +28,7 @@ export async function searchLocations(query, options) {
 export function weatherUrls(settings) {
   const common = { latitude: settings.location.latitude, longitude: settings.location.longitude, timezone: settings.timezone, timeformat: 'unixtime' };
   const forecast = new URL('https://api.open-meteo.com/v1/forecast');
-  forecast.search = new URLSearchParams({ ...common, temperature_unit: settings.temperature, wind_speed_unit: settings.wind, precipitation_unit: settings.precipitation, forecast_days: 7, current: 'temperature_2m,relative_humidity_2m,is_day,precipitation,weather_code,wind_speed_10m', hourly: 'temperature_2m,weather_code', daily: 'weather_code,temperature_2m_max,temperature_2m_min' });
+  forecast.search = new URLSearchParams({ ...common, temperature_unit: settings.temperature, wind_speed_unit: settings.wind, precipitation_unit: settings.precipitation, forecast_days: 7, current: 'temperature_2m,relative_humidity_2m,is_day,precipitation,weather_code,wind_speed_10m', hourly: 'temperature_2m,weather_code,is_day', daily: 'weather_code,temperature_2m_max,temperature_2m_min' });
   const air = new URL('https://air-quality-api.open-meteo.com/v1/air-quality');
   air.search = new URLSearchParams({ ...common, current: 'us_aqi' });
   return { forecast, air };
@@ -41,7 +41,11 @@ export function normalizeForecast(data) {
   const fields = ['temperature_2m', 'relative_humidity_2m', 'is_day', 'precipitation', 'weather_code', 'wind_speed_10m'];
   const current = Object.fromEntries(fields.map((key) => [key, value(data.current[key])]));
   const units = Object.fromEntries(fields.map((key) => [key, text(data.current_units?.[key], 24)]));
-  const hourly = (Array.isArray(data.hourly?.time) ? data.hourly.time : []).slice(0, 192).flatMap((time, i) => timestamp(time) && finite(data.hourly.temperature_2m?.[i]) ? [{ time, temperature: data.hourly.temperature_2m[i], code: value(data.hourly.weather_code?.[i]) }] : []).sort((a, b) => a.time - b.time);
+  const hourly = (Array.isArray(data.hourly?.time) ? data.hourly.time : []).slice(0, 192).flatMap((time, i) => {
+    if (!timestamp(time) || !finite(data.hourly.temperature_2m?.[i])) return [];
+    const day = data.hourly.is_day?.[i];
+    return [{ time, temperature: data.hourly.temperature_2m[i], code: value(data.hourly.weather_code?.[i]), day: day === 0 || day === 1 ? day : null }];
+  }).sort((a, b) => a.time - b.time);
   // Open-Meteo daily epoch values need its UTC offset reapplied for the calendar date.
   const offset = finite(data.utc_offset_seconds) && Math.abs(data.utc_offset_seconds) <= 86400 ? data.utc_offset_seconds : 0;
   const daily = (Array.isArray(data.daily?.time) ? data.daily.time : []).slice(0, 7).flatMap((time, i) => timestamp(time) ? [{ date: new Date((time + offset) * 1000).toISOString().slice(0, 10), min: value(data.daily.temperature_2m_min?.[i]), max: value(data.daily.temperature_2m_max?.[i]), code: value(data.daily.weather_code?.[i]) }] : []);

@@ -32,6 +32,12 @@ function updateClock() {
 function startClock() { clearInterval(clockTimer); updateClock(); if (!document.hidden && settings.timeVisible) clockTimer = setInterval(updateClock, 1000); }
 function element(tag, content, className) { const node = document.createElement(tag); node.textContent = content; if (className) node.className = className; return node; }
 const reading = (value, unit = '') => value === null || value === undefined ? 'Unavailable' : `${value}${unit ? ` ${unit}` : ''}`;
+function forecastItem({ code, day = 1, label, temperature }) {
+  const item = document.createElement('li'); item.className = 'forecast-item';
+  const icon = document.createElement('img'); icon.className = 'forecast-icon'; icon.alt = ''; icon.setAttribute('aria-hidden', 'true'); icon.src = `/weather-icons/${weatherIconFile(code, day)}`;
+  item.append(icon, element('span', label, 'forecast-label'), element('strong', temperature, 'forecast-temperature'), element('span', weatherDescription(code, day), 'forecast-condition'));
+  return item;
+}
 
 function renderWeather(state = weatherState) {
   weatherState = state;
@@ -48,12 +54,12 @@ function renderWeather(state = weatherState) {
     $('current-weather-values').append(element('strong', reading(current.temperature_2m, units.temperature_2m), 'temperature'), element('span', weatherDescription(current.weather_code, current.is_day), 'condition'), element('span', `Wind ${reading(current.wind_speed_10m, units.wind_speed_10m)}`), element('span', `Humidity ${reading(current.relative_humidity_2m, units.relative_humidity_2m)}`), element('span', `Precipitation ${reading(current.precipitation, units.precipitation)}`));
     for (const hour of sampleHours(forecast.hourly)) {
       const label = new Intl.DateTimeFormat(undefined, { timeZone: settings.timezone, weekday: 'short', hour: 'numeric', minute: '2-digit', hour12: settings.hour12 }).format(new Date(hour.time * 1000));
-      $('hourly').append(element('li', `${label}: ${reading(hour.temperature, forecast.hourlyUnit)} · ${weatherDescription(hour.code)}`));
+      $('hourly').append(forecastItem({ code: hour.code, day: hour.day, label, temperature: reading(hour.temperature, forecast.hourlyUnit) }));
     }
     if (!$('hourly').children.length) $('hourly').append(element('li', 'Hourly forecast unavailable.'));
     for (const day of forecast.daily) {
       const label = new Intl.DateTimeFormat(undefined, { timeZone: 'UTC', weekday: 'short', month: 'short', day: 'numeric' }).format(new Date(`${day.date}T12:00:00Z`));
-      $('daily').append(element('li', `${label}: ${reading(day.min, forecast.dailyUnit)} to ${reading(day.max, forecast.dailyUnit)} · ${weatherDescription(day.code)}`));
+      $('daily').append(forecastItem({ code: day.code, label, temperature: `${reading(day.min, forecast.dailyUnit)} to ${reading(day.max, forecast.dailyUnit)}` }));
     }
     if (!$('daily').children.length) $('daily').append(element('li', 'Daily forecast unavailable.'));
   }

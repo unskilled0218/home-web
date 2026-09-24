@@ -9,7 +9,7 @@ import { createPhotoController } from '../public/dashboard-photos.js';
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 const settings = (extra = {}) => normalizeSettings({ location: { latitude: 51, longitude: 0, label: 'London' }, timezone: 'Europe/London', ...extra });
-const forecast = () => ({ current: { time: 1727740800, temperature_2m: 12, weather_code: 0 }, current_units: { temperature_2m: '°C' }, utc_offset_seconds: 3600, hourly: { time: [1727740800], temperature_2m: [12] }, daily: { time: [1727737200], temperature_2m_min: [8], temperature_2m_max: [15] } });
+const forecast = () => ({ current: { time: 1727740800, temperature_2m: 12, weather_code: 0, is_day: 1 }, current_units: { temperature_2m: '°C' }, utc_offset_seconds: 3600, hourly: { time: [1727740800], temperature_2m: [12], weather_code: [0], is_day: [0] }, daily: { time: [1727737200], temperature_2m_min: [8], temperature_2m_max: [15], weather_code: [2] } });
 const response = (data) => ({ ok: true, json: async () => data });
 function scheduler() {
   const tasks = new Map(); let id = 0;
@@ -40,7 +40,8 @@ test('serves dashboard aliases and assets while preserving home and static conta
   const dashboardHtml = await (await fetch(`${base}/dashboard.html`)).text(); assert.match(dashboardHtml, /<img id="weather-icon"[^>]*alt=""[^>]*aria-hidden="true"[^>]*hidden>/);
   const dashboardCss = await (await fetch(`${base}/dashboard.css`)).text(); assert.match(dashboardCss, /#weather \{[^}]*background: transparent;[^}]*border-radius: 0;/); assert.doesNotMatch(dashboardCss, /#weather \{[^}]*#08101bcc/);
   assert.match(dashboardCss, /\.weather-icon \{[^}]*filter: brightness\(0\) invert\(1\) drop-shadow/);
-  const dashboardJs = await (await fetch(`${base}/dashboard.js`)).text(); assert.match(dashboardJs, /`\/weather-icons\/\$\{weatherIconFile\(/); assert.match(dashboardJs, /icon\.hidden = true; icon\.removeAttribute\('src'\)/); assert.doesNotMatch(dashboardJs, /innerHTML|weather-icons\.svg/);
+  assert.match(dashboardCss, /\.forecast-icon \{[^}]*width: clamp[^}]*filter: brightness\(0\) invert\(1\) drop-shadow/);
+  const dashboardJs = await (await fetch(`${base}/dashboard.js`)).text(); assert.match(dashboardJs, /`\/weather-icons\/\$\{weatherIconFile\(/); assert.match(dashboardJs, /icon\.hidden = true; icon\.removeAttribute\('src'\)/); assert.match(dashboardJs, /icon\.alt = ''; icon\.setAttribute\('aria-hidden', 'true'\)/); assert.match(dashboardJs, /forecastItem\(\{ code: hour\.code, day: hour\.day/); assert.match(dashboardJs, /forecastItem\(\{ code: day\.code, label/); assert.match(dashboardJs, /weatherDescription\(code, day\)/); assert.doesNotMatch(dashboardJs, /innerHTML|weather-icons\.svg/);
   assert.match(await (await fetch(base)).text(), /href="\/dashboard"/);
   for (const route of ['/missing', '/dashboard/missing', '/%2e%2e/package.json', '/..%2fpackage.json', '/src/app.js']) assert.equal((await fetch(base + route)).status, 404);
 });
@@ -81,17 +82,21 @@ test('bounds photo selection and provides deterministic ordering without mutatin
 });
 
 test('samples future hours with gaps, exhausted forecasts, and daily offset dates', () => {
-  const rows = [0, 3600, 7200, 14400, 25200, 90000].map((time) => ({ time }));
-  assert.deepEqual(sampleHours(rows, 1000).map((row) => row.time), [3600, 14400, 25200]);
+  const rows = [0, 3600, 7200, 14400, 25200, 90000].map((time, index) => ({ time, day: index % 2 }));
+  assert.deepEqual(sampleHours(rows, 1000).map((row) => [row.time, row.day]), [[3600, 1], [14400, 1], [25200, 0]]);
+  assert.equal(sampleHours(Array.from({ length: 30 }, (_, index) => ({ time: 3600 + index * 10800, day: index % 2 })), 1000).length, 8);
   assert.deepEqual(sampleHours(rows, 100000000), []);
-  const normalized = normalizeForecast(forecast()); assert.equal(normalized.daily[0].date, '2024-10-01');
+  const normalized = normalizeForecast(forecast()); assert.equal(normalized.daily[0].date, '2024-10-01'); assert.deepEqual(normalized.hourly[0], { time: 1727740800, temperature: 12, code: 0, day: 0 });
+  const hourly = { time: [1727740800, 1727744400, 1727748000, 1727751600], temperature_2m: [12, 13, 14, 15], weather_code: [0, 1], is_day: [1, 0, '1', 2] };
+  assert.deepEqual(normalizeForecast({ ...forecast(), hourly }).hourly.map(({ code, day }) => ({ code, day })), [{ code: 0, day: 1 }, { code: 1, day: 0 }, { code: null, day: null }, { code: null, day: null }]);
+  assert.equal(normalizeForecast({ ...forecast(), hourly: { time: [1727740800], temperature_2m: [12] } }).hourly[0].day, null);
   assert.throws(() => normalizeForecast({ current: { temperature_2m: '12' } }));
   assert.equal(normalizeForecast({ ...forecast(), hourly: { time: [1727740800], temperature_2m: [null] } }).hourly.length, 0);
 });
 
 test('constructs bounded provider queries and normalizes geocoding', async () => {
   const urls = weatherUrls(settings({ temperature: 'fahrenheit', wind: 'kn', precipitation: 'inch' }));
-  assert.equal(urls.forecast.hostname, 'api.open-meteo.com'); assert.equal(urls.forecast.searchParams.get('timeformat'), 'unixtime'); assert.equal(urls.forecast.searchParams.get('wind_speed_unit'), 'kn'); assert.equal(urls.forecast.searchParams.get('precipitation_unit'), 'inch'); assert.equal(urls.air.searchParams.get('current'), 'us_aqi');
+  assert.equal(urls.forecast.hostname, 'api.open-meteo.com'); assert.equal(urls.forecast.searchParams.get('timeformat'), 'unixtime'); assert.equal(urls.forecast.searchParams.get('wind_speed_unit'), 'kn'); assert.equal(urls.forecast.searchParams.get('precipitation_unit'), 'inch'); assert.deepEqual(urls.forecast.searchParams.get('hourly').split(','), ['temperature_2m', 'weather_code', 'is_day']); assert.equal(urls.forecast.searchParams.getAll('hourly').length, 1); assert.equal(urls.air.searchParams.get('current'), 'us_aqi');
   const results = await searchLocations('x'.repeat(200), { fetchImpl: async (url, options) => {
     assert.equal(url.hostname, 'geocoding-api.open-meteo.com'); assert.equal(url.searchParams.get('name').length, 120); assert.equal(options.credentials, 'omit');
     return response({ results: [{ name: 'London', latitude: 51, longitude: 0 }, { name: 'Invalid', latitude: 999, longitude: 0 }] });
