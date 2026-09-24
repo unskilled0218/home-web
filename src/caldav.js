@@ -13,8 +13,11 @@ const MAX_COMPONENT_DEPTH = 16;
 const MAX_EVENT_CANDIDATES = 500;
 const RANGE_DAYS = 14;
 const EVENT_LIMIT = 10;
+const MAX_CALENDARS = 20;
+const REPORT_CONCURRENCY = 4;
 const CALDAV_NAMESPACE = 'urn:ietf:params:xml:ns:caldav';
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+const RESPONSE_URL = Symbol('calDavResponseUrl');
 const TRUST_ERROR_CODES = new Set([
   'DEPTH_ZERO_SELF_SIGNED_CERT',
   'SELF_SIGNED_CERT_IN_CHAIN',
@@ -41,25 +44,24 @@ export function isCalDavClientError(error) {
 export function normalizeCalDavCredentials(input, existing = null) {
   let url;
   try {
-    url = new URL(typeof input?.collectionUrl === 'string' ? input.collectionUrl.trim() : '');
+    url = new URL(typeof input?.serverUrl === 'string' ? input.serverUrl.trim() : '');
   } catch {
-    throw new Error('CalDAV collection URL must be an absolute http or https URL.');
+    throw new Error('CalDAV server URL must be an absolute http or https URL.');
   }
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
-    throw new Error('CalDAV collection URL must be an absolute http or https URL without credentials, a query, or a fragment.');
+    throw new Error('CalDAV server URL must be an absolute http or https URL without credentials, a query, or a fragment.');
   }
-  url.pathname = `${url.pathname.replace(/\/+$/, '')}/`;
-  const baikalPath = /\/dav\.php\/(.*)$/i.exec(url.pathname)?.[1].split('/').filter(Boolean);
-  if (baikalPath && (baikalPath[0]?.toLowerCase() !== 'calendars' || baikalPath.length < 3)) throw new Error('Enter an exact Baikal calendar collection URL, such as /dav.php/calendars/username/calendar/. The /dav.php/ server URL is not a calendar.');
+  if (url.pathname !== '/' && url.pathname !== '') throw new Error('Enter only the CalDAV server URL without /dav.php/ or a calendar path.');
+  url.pathname = '/';
   const username = typeof input?.username === 'string' ? input.username.trim() : '';
   if (!username || username.length > 120 || username.includes(':')) {
     throw new Error('CalDAV username is required, must be at most 120 characters, and cannot contain a colon.');
   }
   const password = typeof input?.password === 'string' ? input.password : '';
-  const sameIdentity = existing && existing.collectionUrl === url.href && existing.username === username;
+  const sameIdentity = existing && existing.serverUrl === url.href && existing.username === username;
   if (!password && !sameIdentity) throw new Error('A CalDAV password is required to connect.');
   if (password.length > 2_000) throw new Error('CalDAV password is too long.');
-  return { collectionUrl: url.href, username, password: password || null };
+  return { serverUrl: url.href, username, password: password || null };
 }
 
 function utcBasic(value) {
@@ -71,6 +73,10 @@ export function buildCalDavReport(rangeStart, rangeEnd) {
   const end = utcBasic(rangeEnd);
   return `<?xml version="1.0" encoding="utf-8"?>\n<c:calendar-query xmlns:d="DAV:" xmlns:c="${CALDAV_NAMESPACE}">\n  <d:prop>\n    <c:calendar-data>\n      <c:expand start="${start}" end="${end}"/>\n    </c:calendar-data>\n  </d:prop>\n  <c:filter>\n    <c:comp-filter name="VCALENDAR">\n      <c:comp-filter name="VEVENT">\n        <c:time-range start="${start}" end="${end}"/>\n      </c:comp-filter>\n    </c:comp-filter>\n  </c:filter>\n</c:calendar-query>`;
 }
+
+const PRINCIPAL_PROPFIND = '<?xml version="1.0" encoding="utf-8"?>\n<d:propfind xmlns:d="DAV:"><d:prop><d:current-user-principal/></d:prop></d:propfind>';
+const HOME_PROPFIND = `<?xml version="1.0" encoding="utf-8"?>\n<d:propfind xmlns:d="DAV:" xmlns:c="${CALDAV_NAMESPACE}"><d:prop><c:calendar-home-set/></d:prop></d:propfind>`;
+const CALENDARS_PROPFIND = `<?xml version="1.0" encoding="utf-8"?>\n<d:propfind xmlns:d="DAV:" xmlns:c="${CALDAV_NAMESPACE}"><d:prop><d:resourcetype/><c:supported-calendar-component-set/></d:prop></d:propfind>`;
 
 function parseDigestChallenge(header) {
   if (typeof header !== 'string') return null;
@@ -119,9 +125,9 @@ export function buildDigestAuthorization(header, { username, password }, method,
 function requestCalDav(url, options, redirects = 0) {
   const parsed = new URL(url);
   const transport = parsed.protocol === 'https:' ? https : http;
-  const body = Buffer.from(options.body, 'utf8');
+  const body = Buffer.from(options.body ?? '', 'utf8');
   const requestOptions = {
-    method: 'REPORT',
+    method: options.method,
     headers: { ...options.headers, 'Content-Length': body.length },
     signal: options.signal,
     ...(parsed.protocol === 'https:' && options.ca && { ca: options.ca })
@@ -144,7 +150,12 @@ function requestCalDav(url, options, redirects = 0) {
             return;
           }
           response.resume();
-          if (target.origin !== parsed.origin || target.username || target.password) {
+          const configuredOrigin = new URL(options.origin);
+          if (configuredOrigin.protocol === 'https:' && target.protocol === 'http:' && target.hostname === configuredOrigin.hostname && !target.port) {
+            target.protocol = 'https:';
+            target.host = configuredOrigin.host;
+          }
+          if (target.origin !== options.origin || target.username || target.password || target.search || target.hash) {
             reject(clientError('CalDAV refused an unsafe cross-origin redirect.'));
             return;
           }
@@ -152,12 +163,16 @@ function requestCalDav(url, options, redirects = 0) {
             reject(clientError('CalDAV returned too many redirects.'));
             return;
           }
-          resolve(requestCalDav(target, options, redirects + 1));
+          const headers = { ...options.headers };
+          if (/^Digest\s/i.test(headers.Authorization ?? '')) delete headers.Authorization;
+          resolve(requestCalDav(target, { ...options, headers }, redirects + 1));
           return;
         }
         const responseBody = [204, 205, 304].includes(status) ? null : Readable.toWeb(response);
         if (!responseBody) response.resume();
-        resolve(new Response(responseBody, { status, statusText: response.statusMessage, headers: response.headers }));
+        const result = new Response(responseBody, { status, statusText: response.statusMessage, headers: response.headers });
+        result[RESPONSE_URL] = parsed.href;
+        resolve(result);
       } catch (error) {
         response.resume();
         reject(error);
@@ -234,26 +249,23 @@ function tagEnd(xml, start) {
   return -1;
 }
 
-export function extractCalendarData(xml) {
+function parseMultiStatus(xml) {
   if (typeof xml !== 'string' || Buffer.byteLength(xml) > MAX_RESPONSE_BYTES) throw clientError('CalDAV response is too large.');
   const stack = [];
-  const calendars = [];
-  const statuses = [];
   let position = 0;
   let elements = 0;
   let roots = 0;
-  let capture = null;
+  let root = null;
   let sawDeclaration = false;
-  let validRoot = false;
   const append = (text, encoded = true) => {
     if (text.includes(']]>')) throw clientError('CalDAV returned malformed XML.');
-    if (!capture) {
-      if (!stack.length && text.trim()) throw clientError('CalDAV returned malformed XML.');
-      if (stack.length && encoded) decodeXmlEntities(text);
+    if (!stack.length) {
+      if (text.trim()) throw clientError('CalDAV returned malformed XML.');
       return;
     }
-    capture.text += encoded ? decodeXmlEntities(text) : text;
-    if (Buffer.byteLength(capture.text) > MAX_RESPONSE_BYTES) throw clientError('CalDAV response is too large.');
+    const node = stack.at(-1).node;
+    node.text += encoded ? decodeXmlEntities(text) : text;
+    if (Buffer.byteLength(node.text) > MAX_RESPONSE_BYTES) throw clientError('CalDAV response is too large.');
   };
   while (position < xml.length) {
     const open = xml.indexOf('<', position);
@@ -273,7 +285,7 @@ export function extractCalendarData(xml) {
       if (!stack.length) throw clientError('CalDAV returned malformed XML.');
       const end = xml.indexOf(']]>', open + 9);
       if (end < 0) throw clientError('CalDAV returned malformed XML.');
-      if (capture) append(xml.slice(open + 9, end), false);
+      append(xml.slice(open + 9, end), false);
       position = end + 3;
       continue;
     }
@@ -292,23 +304,12 @@ export function extractCalendarData(xml) {
     if (source.startsWith('/')) {
       const name = source.slice(1).trim();
       if (!/^[A-Za-z_][A-Za-z0-9_.:-]*$/.test(name) || !stack.length || stack.at(-1).name !== name) throw clientError('CalDAV returned malformed XML.');
-      const frame = stack.pop();
-      if (capture?.frame === frame) {
-        if (capture.type === 'calendar') {
-          calendars.push({ text: capture.text, context: capture.context });
-          if (calendars.length > MAX_CALENDAR_OBJECTS) throw clientError('CalDAV returned too many calendar objects.');
-        } else {
-          const match = capture.text.trim().match(/^HTTP\/\d(?:\.\d)?\s+(\d{3})(?:\s|$)/i);
-          if (!match) throw clientError('CalDAV returned malformed XML.');
-          capture.context.status = Number(match[1]);
-          statuses.push(capture.context.status);
-        }
-        capture = null;
-      }
+      stack.pop();
     } else {
       const selfClosing = source.endsWith('/');
       if (selfClosing) source = source.slice(0, -1).trim();
       const { name, attributes } = parseXmlTag(source);
+      if (attributes.length > 64) throw clientError('CalDAV XML exceeds parser limits.');
       elements += 1;
       if (elements > MAX_XML_ELEMENTS || stack.length + 1 > MAX_XML_DEPTH) throw clientError('CalDAV XML exceeds parser limits.');
       if (!stack.length) roots += 1;
@@ -325,35 +326,100 @@ export function extractCalendarData(xml) {
       const prefix = separator < 0 ? '' : name.slice(0, separator);
       const localName = separator < 0 ? name : name.slice(separator + 1);
       if (separator >= 0 && !namespaces.has(prefix)) throw clientError('CalDAV returned malformed XML.');
-      if (elements === 1) validRoot = localName === 'multistatus' && namespaces.get(prefix) === 'DAV:';
       const namespace = namespaces.get(prefix);
-      const frame = { name, namespaces, namespace, localName, status: null };
-      const context = [...stack].reverse().find((candidate) => candidate.namespace === 'DAV:' && ['propstat', 'response'].includes(candidate.localName));
-      const isCalendarData = localName === 'calendar-data' && namespace === CALDAV_NAMESPACE;
-      const isStatus = localName === 'status' && namespace === 'DAV:';
-      if (isCalendarData) {
-        if (capture || !context) throw clientError('CalDAV returned malformed XML.');
-        capture = { type: 'calendar', frame, context, text: '' };
-      } else if (isStatus) {
-        if (capture || !context) throw clientError('CalDAV returned malformed XML.');
-        capture = { type: 'status', frame, context, text: '' };
-      } else if (capture) {
-        throw clientError('CalDAV returned malformed XML.');
-      }
-      if (selfClosing) {
-        if (capture?.frame === frame) {
-          if (capture.type === 'calendar') calendars.push({ text: '', context: capture.context });
-          else throw clientError('CalDAV returned malformed XML.');
-          capture = null;
-        }
-      } else stack.push(frame);
+      const nodeAttributes = new Map(attributes.filter(([attributeName]) => attributeName.toLowerCase() === 'name'));
+      const node = { namespace, localName, attributes: nodeAttributes, children: [], text: '' };
+      const frame = { name, namespaces, node };
+      if (stack.length) stack.at(-1).node.children.push(node);
+      else root = node;
+      if (!selfClosing) stack.push(frame);
     }
     position = end + 1;
   }
-  if (stack.length || capture || roots !== 1 || !validRoot) throw clientError('CalDAV returned malformed XML.');
-  const successful = calendars.filter(({ context }) => context.status >= 200 && context.status < 300).map(({ text }) => text);
-  if (!successful.length && (calendars.length || statuses.length)) throw clientError('CalDAV calendar report failed.');
-  return successful;
+  if (stack.length || roots !== 1 || root?.localName !== 'multistatus' || root.namespace !== 'DAV:') throw clientError('CalDAV returned malformed XML.');
+  return root;
+}
+
+const directChildren = (node, namespace, localName) => node.children.filter((child) => child.namespace === namespace && child.localName === localName);
+const directChild = (node, namespace, localName) => directChildren(node, namespace, localName)[0];
+
+function statusCode(node) {
+  const status = directChild(node, 'DAV:', 'status');
+  const match = status?.text.trim().match(/^HTTP\/\d(?:\.\d)?\s+(\d{3})(?:\s|$)/i);
+  if (!match) throw clientError('CalDAV returned malformed XML.');
+  return Number(match[1]);
+}
+
+function responseStatusCode(response) {
+  return directChild(response, 'DAV:', 'status') ? statusCode(response) : null;
+}
+
+function responseProperties(response) {
+  const responseStatus = responseStatusCode(response);
+  if (responseStatus !== null && (responseStatus < 200 || responseStatus >= 300)) return [];
+  const properties = [];
+  for (const propstat of directChildren(response, 'DAV:', 'propstat')) {
+    const code = statusCode(propstat);
+    const prop = directChild(propstat, 'DAV:', 'prop');
+    if (!prop) throw clientError('CalDAV returned malformed XML.');
+    if (code >= 200 && code < 300) properties.push(...prop.children);
+  }
+  return properties;
+}
+
+function responsesFrom(xml) {
+  return directChildren(parseMultiStatus(xml), 'DAV:', 'response');
+}
+
+export function extractCalendarData(xml) {
+  const responses = responsesFrom(xml);
+  const calendars = [];
+  let sawPropstat = false;
+  for (const response of responses) {
+    const propstats = directChildren(response, 'DAV:', 'propstat');
+    sawPropstat ||= propstats.length > 0;
+    for (const property of responseProperties(response)) {
+      if (property.namespace !== CALDAV_NAMESPACE || property.localName !== 'calendar-data') continue;
+      if (property.children.length) throw clientError('CalDAV returned malformed XML.');
+      calendars.push(property.text);
+      if (calendars.length > MAX_CALENDAR_OBJECTS) throw clientError('CalDAV returned too many calendar objects.');
+    }
+  }
+  const failed = responses.some((response) => {
+    const responseStatus = responseStatusCode(response);
+    return (responseStatus !== null && (responseStatus < 200 || responseStatus >= 300)) || directChildren(response, 'DAV:', 'propstat').some((propstat) => statusCode(propstat) >= 300);
+  });
+  if (!calendars.length && (failed || sawPropstat && responses.length)) throw clientError('CalDAV calendar report failed.');
+  return calendars;
+}
+
+function discoveryHref(xml, namespace, localName) {
+  for (const response of responsesFrom(xml)) {
+    const property = responseProperties(response).find((candidate) => candidate.namespace === namespace && candidate.localName === localName);
+    if (!property) continue;
+    const href = directChild(property, 'DAV:', 'href');
+    if (!href || href.children.length || !href.text.trim()) throw clientError('CalDAV discovery returned a malformed URL.');
+    return href.text.trim();
+  }
+  throw clientError('CalDAV discovery did not return the required account location.');
+}
+
+function discoveryCalendars(xml) {
+  const calendars = [];
+  for (const response of responsesFrom(xml)) {
+    const href = directChild(response, 'DAV:', 'href');
+    if (!href || href.children.length || !href.text.trim()) continue;
+    const properties = responseProperties(response);
+    const resourceType = properties.find((property) => property.namespace === 'DAV:' && property.localName === 'resourcetype');
+    if (!resourceType || !directChild(resourceType, CALDAV_NAMESPACE, 'calendar')) continue;
+    const supported = properties.find((property) => property.namespace === CALDAV_NAMESPACE && property.localName === 'supported-calendar-component-set');
+    if (supported) {
+      const names = directChildren(supported, CALDAV_NAMESPACE, 'comp').map((component) => [...component.attributes].find(([name]) => name.toLowerCase() === 'name')?.[1]?.toUpperCase()).filter(Boolean);
+      if (!names.includes('VEVENT')) continue;
+    }
+    calendars.push(href.text.trim());
+  }
+  return calendars;
 }
 
 function splitProperty(line) {
@@ -627,11 +693,11 @@ async function boundedText(response) {
   return new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks));
 }
 
-function statusError(status) {
+function statusError(status, operation = 'request') {
   if (status === 401) return clientError('CalDAV rejected the username or password.', { kind: 'authentication' });
-  if (status === 403) return clientError('Baikal denied access to this calendar (HTTP 403). Check the account calendar permissions and exact collection URL.', { kind: 'authorization' });
-  if (status === 405) return clientError('The configured endpoint does not accept CalDAV REPORT requests (HTTP 405). Check the exact calendar collection URL and reverse-proxy method rules.');
-  if ([400, 415, 422, 501].includes(status)) return clientError(`Baikal rejected the calendar query (HTTP ${status}). Check that the URL identifies an exact CalDAV calendar collection.`);
+  if (status === 403) return clientError('Baikal denied access to the calendar account (HTTP 403). Check the account permissions.', { kind: 'authorization' });
+  if (status === 405) return clientError(`The Baikal server does not accept the required CalDAV ${operation} request (HTTP 405). Check its WebDAV and reverse-proxy method rules.`);
+  if ([400, 415, 422, 501].includes(status)) return clientError(`Baikal rejected the CalDAV ${operation} request (HTTP ${status}).`);
   if (status === 429 || status >= 500) return clientError('CalDAV is currently unavailable.', { transient: true });
   return clientError('CalDAV returned an unexpected HTTP response.');
 }
@@ -651,39 +717,68 @@ export function createCalDavClient({ fetchImpl = requestCalDav, timeoutMs = 8_00
   const cache = new Map();
   const inFlight = new Map();
   let generation = 0;
-  const keyFor = (settings) => createHash('sha256').update(`${settings.collectionUrl}\0${settings.username}\0${settings.password}`).digest('base64url');
+  const keyFor = (settings) => createHash('sha256').update(`${settings.serverUrl}\0${settings.username}\0${settings.password}`).digest('base64url');
+  const responseUrl = (response, fallback) => response?.[RESPONSE_URL] || response?.url || fallback;
+  const resolveHref = (value, baseUrl, origin) => {
+    let target;
+    try { target = new URL(value, baseUrl); }
+    catch { throw clientError('CalDAV discovery returned a malformed URL.'); }
+    if (target.origin !== origin || target.username || target.password || target.search || target.hash) throw clientError('CalDAV discovery returned an unsafe cross-origin URL.');
+    return target.href;
+  };
   const refresh = async (settings, requestGeneration) => {
     const rangeStart = Number(now());
     const rangeEnd = rangeStart + RANGE_DAYS * 86_400_000;
-    const body = buildCalDavReport(rangeStart, rangeEnd);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
-    let response;
     try {
-      const request = (authorization) => fetchImpl(settings.collectionUrl, {
-        method: 'REPORT',
-        headers: {
-          Authorization: authorization,
-          Depth: '1',
-          Accept: 'application/xml, text/xml',
-          'Content-Type': 'application/xml; charset=utf-8'
-        },
-        body,
-        signal: controller.signal,
-        ca
-      });
-      response = await request(`Basic ${Buffer.from(`${settings.username}:${settings.password}`, 'utf8').toString('base64')}`);
-      const challenge = response?.status === 401 ? response.headers.get('www-authenticate') : null;
-      if (challenge && /(?:^|,\s*)Digest\s/i.test(challenge)) {
-        try { await response.body?.cancel(); } catch { /* The authentication retry does not need the challenge body. */ }
-        const authorization = buildDigestAuthorization(challenge, settings, 'REPORT', settings.collectionUrl, { cnonce: randomBytesImpl(16).toString('hex') });
-        response = await request(authorization);
+      const origin = new URL(settings.serverUrl).origin;
+      const nonceCounts = new Map();
+      const requestXml = async (url, { method, depth, body, operation }) => {
+        const request = (target, authorization) => fetchImpl(target, {
+          method,
+          headers: { Authorization: authorization, Depth: depth, Accept: 'application/xml, text/xml', 'Content-Type': 'application/xml; charset=utf-8' },
+          body,
+          signal: controller.signal,
+          ca,
+          origin
+        });
+        let actualUrl = url;
+        let authorization = `Basic ${Buffer.from(`${settings.username}:${settings.password}`, 'utf8').toString('base64')}`;
+        let response;
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          response = await request(actualUrl, authorization);
+          actualUrl = responseUrl(response, actualUrl);
+          const challenge = response?.status === 401 ? response.headers.get('www-authenticate') : null;
+          if (!challenge || !/(?:^|,\s*)Digest\s/i.test(challenge) || attempt === 2) break;
+          try { await response.body?.cancel(); } catch { /* The authentication retry does not need the challenge body. */ }
+          const nonce = parseDigestChallenge(challenge)?.nonce;
+          const nonceCount = (nonceCounts.get(nonce) ?? 0) + 1;
+          nonceCounts.set(nonce, nonceCount);
+          authorization = buildDigestAuthorization(challenge, settings, method, actualUrl, { cnonce: randomBytesImpl(16).toString('hex'), nonceCount });
+        }
+        if (!response || response.status !== 207) throw statusError(response?.status, operation);
+        const contentType = response.headers.get('content-type')?.split(';', 1)[0].trim().toLowerCase();
+        if (contentType !== 'application/xml' && contentType !== 'text/xml') throw clientError('CalDAV returned an invalid response type.');
+        return { xml: await boundedText(response), url: actualUrl };
+      };
+      const wellKnownUrl = new URL('/.well-known/caldav', settings.serverUrl).href;
+      const principalResult = await requestXml(wellKnownUrl, { method: 'PROPFIND', depth: '0', body: PRINCIPAL_PROPFIND, operation: 'discovery' });
+      const principalUrl = resolveHref(discoveryHref(principalResult.xml, 'DAV:', 'current-user-principal'), principalResult.url, origin);
+      const homeResult = await requestXml(principalUrl, { method: 'PROPFIND', depth: '0', body: HOME_PROPFIND, operation: 'discovery' });
+      const homeUrl = resolveHref(discoveryHref(homeResult.xml, CALDAV_NAMESPACE, 'calendar-home-set'), homeResult.url, origin);
+      const calendarsResult = await requestXml(homeUrl, { method: 'PROPFIND', depth: '1', body: CALENDARS_PROPFIND, operation: 'discovery' });
+      const collectionUrls = [...new Set(discoveryCalendars(calendarsResult.xml).map((href) => resolveHref(href, calendarsResult.url, origin)))].sort();
+      if (!collectionUrls.length) throw clientError('CalDAV discovery found no event calendars for this account.');
+      if (collectionUrls.length > MAX_CALENDARS) throw clientError(`CalDAV discovery found more than ${MAX_CALENDARS} event calendars.`);
+      const reportBody = buildCalDavReport(rangeStart, rangeEnd);
+      const calendarData = [];
+      for (let offset = 0; offset < collectionUrls.length; offset += REPORT_CONCURRENCY) {
+        const results = await Promise.all(collectionUrls.slice(offset, offset + REPORT_CONCURRENCY).map((url) => requestXml(url, { method: 'REPORT', depth: '1', body: reportBody, operation: 'calendar query' })));
+        for (const result of results) calendarData.push(...extractCalendarData(result.xml));
+        if (calendarData.length > MAX_CALENDAR_OBJECTS || calendarData.reduce((total, value) => total + Buffer.byteLength(value), 0) > MAX_RESPONSE_BYTES) throw clientError('CalDAV calendar data exceeds parser limits.');
       }
-      if (!response || response.status !== 207) throw statusError(response?.status);
-      const contentType = response.headers.get('content-type')?.split(';', 1)[0].trim().toLowerCase();
-      if (contentType !== 'application/xml' && contentType !== 'text/xml') throw clientError('CalDAV returned an invalid response type.');
-      const xml = await boundedText(response);
-      const events = parseCalendarEvents(extractCalendarData(xml), { rangeStart, rangeEnd });
+      const events = parseCalendarEvents(calendarData, { rangeStart, rangeEnd });
       const key = keyFor(settings);
       if (requestGeneration === generation) cache.set(key, { events, fetchedAt: Number(now()) });
       return { events, stale: false };

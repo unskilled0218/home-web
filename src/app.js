@@ -214,13 +214,13 @@ export function createDashboardServer({ runtimeConfig, store, linkwarden, homeAs
     let credentialsReadable = false;
     try { encryptionKey(integrationEncryptionKey); encryptionReady = true; if (saved) { decryptApiKey(saved.encryptedPassword, integrationEncryptionKey); credentialsReadable = true; } } catch { /* Re-authentication is required when saved credentials cannot be decrypted. */ }
     const configured = Boolean(saved && credentialsReadable);
-    return { configured, passwordPresent: Boolean(saved), encryptionReady, needsReauthentication: Boolean(saved) && !configured, ...(saved && { collectionUrl: saved.collectionUrl, username: saved.username, updatedAt: saved.updatedAt }) };
+    return { configured, passwordPresent: Boolean(saved), encryptionReady, needsReauthentication: Boolean(saved) && !configured, ...(saved && { serverUrl: saved.serverUrl, username: saved.username, updatedAt: saved.updatedAt }) };
   }
 
   function savedCalDavSettings() {
     const saved = store.getCalDav();
     if (!saved) throw new Error('Calendar is not configured.');
-    try { return { collectionUrl: saved.collectionUrl, username: saved.username, password: decryptApiKey(saved.encryptedPassword, integrationEncryptionKey) }; }
+    try { return { serverUrl: saved.serverUrl, username: saved.username, password: decryptApiKey(saved.encryptedPassword, integrationEncryptionKey) }; }
     catch { throw new Error('Calendar needs re-authentication.'); }
   }
 
@@ -228,7 +228,7 @@ export function createDashboardServer({ runtimeConfig, store, linkwarden, homeAs
     const existing = store.getCalDav();
     const settings = normalizeCalDavCredentials(input, existing);
     if (!settings.password && existing) {
-      if (settings.collectionUrl !== existing.collectionUrl || settings.username !== existing.username) throw new Error('A new CalDAV password is required when changing the collection URL or username.');
+      if (settings.serverUrl !== existing.serverUrl || settings.username !== existing.username) throw new Error('A new CalDAV password is required when changing the server URL or username.');
       try { settings.password = decryptApiKey(existing.encryptedPassword, integrationEncryptionKey); }
       catch { throw new Error('Calendar needs re-authentication.'); }
     }

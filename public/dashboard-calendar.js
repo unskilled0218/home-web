@@ -92,7 +92,7 @@ function statusFields(value) {
     configured: status.configured === true,
     encryptionReady: status.encryptionReady !== false,
     needsReauthentication: status.needsReauthentication === true || status.reauthenticationRequired === true,
-    collectionUrl: safeText(status.collectionUrl, 2048),
+    serverUrl: safeText(status.serverUrl, 2048),
     username: safeText(status.username, 120),
     updatedAt: safeText(status.updatedAt, 80)
   };
@@ -254,7 +254,7 @@ export function createCalendarController({
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            collectionUrl: safeText(credentials?.collectionUrl, 2048),
+            serverUrl: safeText(credentials?.serverUrl, 2048),
             username: safeText(credentials?.username, 120),
             password: typeof credentials?.password === 'string' ? credentials.password.slice(0, 2000) : ''
           })

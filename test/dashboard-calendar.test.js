@@ -31,7 +31,7 @@ test('loads status and events, deduplicates refresh, and owns a five-minute time
   let latest;
   const controller = createCalendarController({ ...timers, onChange: (state) => { latest = state; }, fetchImpl: async (url, options) => {
     calls.push({ url, options });
-    return url === '/api/calendar' ? json({ configured: true, collectionUrl: 'https://calendar.test/work/', username: 'sam' }) : json({ configured: true, events: [event], stale: false });
+    return url === '/api/calendar' ? json({ configured: true, serverUrl: 'https://calendar.test/', username: 'sam' }) : json({ configured: true, events: [event], stale: false });
   } });
   await tick();
   assert.deepEqual(calls.map(({ url }) => url), ['/api/calendar', '/api/calendar/events']);
@@ -85,15 +85,15 @@ test('connects atomically, disconnects, and retains a stale snapshot after refre
   let failEvents = false;
   const controller = createCalendarController({ ...timers, onChange: (state) => { latest = state; }, fetchImpl: async (url, options) => {
     requests.push({ url, options });
-    if (options.method === 'PUT') return json({ configured: true, collectionUrl: 'https://calendar.test/work/', username: 'sam', events: [event], stale: false });
+    if (options.method === 'PUT') return json({ configured: true, serverUrl: 'https://calendar.test/', username: 'sam', events: [event], stale: false });
     if (options.method === 'DELETE') return { ok: true, status: 204 };
     if (url === '/api/calendar') return json({ configured: false });
     return failEvents ? json({ error: 'Temporarily unavailable' }, 503) : json({ configured: true, events: [event] });
   } });
   await tick();
-  await controller.connect({ collectionUrl: ' https://calendar.test/work/ ', username: ' sam ', password: 'secret' });
+  await controller.connect({ serverUrl: ' https://calendar.test/ ', username: ' sam ', password: 'secret' });
   const put = requests.find(({ options }) => options.method === 'PUT');
-  assert.deepEqual(JSON.parse(put.options.body), { collectionUrl: 'https://calendar.test/work/', username: 'sam', password: 'secret' });
+  assert.deepEqual(JSON.parse(put.options.body), { serverUrl: 'https://calendar.test/', username: 'sam', password: 'secret' });
   assert.equal(latest.events.length, 1);
   failEvents = true;
   await controller.forceRefresh();
@@ -118,7 +118,7 @@ test('deduplicates duplicate connection submissions', async () => {
     return Promise.resolve(json({ configured: false }));
   } });
   await tick();
-  const credentials = { collectionUrl: 'https://calendar.test/work/', username: 'sam', password: 'secret' };
+  const credentials = { serverUrl: 'https://calendar.test/', username: 'sam', password: 'secret' };
   const first = controller.connect(credentials);
   const second = controller.connect(credentials);
   assert.equal(first, second);
@@ -133,7 +133,7 @@ test('aborts obsolete work and ignores late results after reconnect and disposal
   const states = [];
   const controller = createCalendarController({ onChange: (state) => states.push(state), fetchImpl: (url, options) => new Promise((resolve) => pending.push({ url, options, resolve })) });
   assert.equal(pending[0].url, '/api/calendar');
-  const connect = controller.connect({ collectionUrl: 'https://new.test/calendar/', username: 'new', password: 'secret' });
+  const connect = controller.connect({ serverUrl: 'https://new.test/', username: 'new', password: 'secret' });
   assert.equal(pending[0].options.signal.aborted, true);
   pending[1].resolve(json({ configured: true, username: 'new', events: [event] }));
   await connect;

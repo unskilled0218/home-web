@@ -142,7 +142,7 @@ preferences.addEventListener('submit', (event) => {
 });
 function fillCalendarForm() {
   const state = calendar.getState();
-  $('calendar-url').value = state.collectionUrl ?? '';
+  $('calendar-url').value = state.serverUrl ?? '';
   $('calendar-username').value = state.username ?? '';
   $('calendar-password').value = '';
   $('disconnect-calendar').disabled = !state.configured && !state.needsReauthentication;
@@ -179,7 +179,7 @@ $('calendar-connection').addEventListener('submit', async (event) => {
   event.preventDefault();
   setCalendarMutationPending(true); $('calendar-settings-status').textContent = 'Connecting to Baikal…';
   try {
-    await calendar.connect({ collectionUrl: $('calendar-url').value, username: $('calendar-username').value, password: $('calendar-password').value });
+    await calendar.connect({ serverUrl: $('calendar-url').value, username: $('calendar-username').value, password: $('calendar-password').value });
     const state = calendar.getState();
     if (state.configured && !state.error) { $('calendar-settings-status').textContent = 'Calendar connected.'; fillCalendarForm(); dialog.close(); }
     else $('calendar-settings-status').textContent = state.error || 'Calendar could not be connected.';

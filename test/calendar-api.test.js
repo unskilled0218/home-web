@@ -54,15 +54,16 @@ test('stores CalDAV credentials securely and exposes only safe calendar data', a
   };
 
   assert.deepEqual((await api('/api/calendar/events')).body, { configured: false, events: [] });
-  const credentials = { collectionUrl: 'https://baikal.example.test/dav.php/calendars/user/default', username: 'user', password: 'private-password' };
+  const credentials = { serverUrl: 'https://baikal.example.test', username: 'user', password: 'private-password' };
   const connected = await api('/api/calendar', { method: 'PUT', body: credentials });
   assert.equal(connected.status, 200);
   assert.equal(connected.body.configured, true);
-  assert.equal(connected.body.collectionUrl, `${credentials.collectionUrl}/`);
+  assert.equal(connected.body.serverUrl, `${credentials.serverUrl}/`);
   assert.deepEqual(connected.body.events, [{ title: 'Planning', start: '2026-01-02T15:00:00.000Z', end: '2026-01-02T16:00:00.000Z', allDay: false, location: 'Office' }]);
   assert.equal(JSON.stringify(connected.body).includes('private-password'), false);
   assert.equal(JSON.stringify(connected.body).includes('private-uid'), false);
   assert.equal(JSON.stringify(connected.body).includes('/dav/private.ics'), false);
+  assert.equal(JSON.stringify(connected.body).includes('/dav.php/'), false);
   assert.equal(decryptApiKey(store.getCalDav().encryptedPassword, secret), 'private-password');
 
   const inspector = new DatabaseSync(databasePath);
@@ -79,7 +80,8 @@ test('stores CalDAV credentials securely and exposes only safe calendar data', a
   assert.equal((await api('/api/calendar', { method: 'PUT', body: { ...credentials, password: '' } })).status, 200);
   const testCount = calls.filter(({ test: value }) => value).length;
   assert.equal((await api('/api/calendar', { method: 'PUT', body: { ...credentials, username: 'other', password: '' } })).status, 400);
-  assert.equal((await api('/api/calendar', { method: 'PUT', body: { ...credentials, collectionUrl: 'https://other.example.test/calendar/', password: '' } })).status, 400);
+  assert.equal((await api('/api/calendar', { method: 'PUT', body: { ...credentials, serverUrl: 'https://other.example.test', password: '' } })).status, 400);
+  assert.equal((await api('/api/calendar', { method: 'PUT', body: { ...credentials, serverUrl: 'https://baikal.example.test/dav.php/', password: 'replacement' } })).status, 400);
   assert.equal(calls.filter(({ test: value }) => value).length, testCount);
 
   failure = 'private upstream detail';
@@ -95,7 +97,7 @@ test('stores CalDAV credentials securely and exposes only safe calendar data', a
   failure = null;
   assert.equal((await api('/api/calendar', { method: 'DELETE' })).status, 204);
   assert.equal(store.getCalDav(), undefined);
-  store.saveCalDav({ collectionUrl: 'https://baikal.example.test/calendar/', username: 'user', encryptedPassword: encryptApiKey('unreadable', Buffer.alloc(32, 7).toString('base64')) });
+  store.saveCalDav({ serverUrl: 'https://baikal.example.test/', username: 'user', encryptedPassword: encryptApiKey('unreadable', Buffer.alloc(32, 7).toString('base64')) });
   assert.deepEqual((await api('/api/calendar/events')).body, { configured: false, events: [], needsReauthentication: true });
   assert.equal((await api('/api/calendar')).body.needsReauthentication, true);
 
@@ -109,4 +111,29 @@ test('stores CalDAV credentials securely and exposes only safe calendar data', a
   assert.equal((await reconnect).status, 200);
   assert.equal((await disconnect).status, 204);
   assert.equal(store.getCalDav(), undefined);
+});
+
+test('migrates an encrypted exact collection URL to the server origin', () => {
+  const directory = mkdtempSync(path.join(tmpdir(), 'dashboard-calendar-migration-'));
+  const databasePath = path.join(directory, 'dashboard.db');
+  const legacy = new DatabaseSync(databasePath);
+  legacy.exec(`CREATE TABLE caldav_config (id INTEGER PRIMARY KEY CHECK (id = 1), collection_url TEXT NOT NULL, username TEXT NOT NULL, password_ciphertext TEXT NOT NULL, password_iv TEXT NOT NULL, password_tag TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`);
+  legacy.prepare('INSERT INTO caldav_config VALUES (1, ?, ?, ?, ?, ?, ?, ?)').run('https://baikal.example.test:8443/dav.php/calendars/user/default/', 'user', 'ciphertext', 'iv', 'tag', '2025-01-02 03:04:05', '2026-02-03 04:05:06');
+  legacy.close();
+  let store = createStore(databasePath);
+  assert.deepEqual(store.getCalDav(), { serverUrl: 'https://baikal.example.test:8443/', username: 'user', encryptedPassword: { ciphertext: 'ciphertext', iv: 'iv', tag: 'tag' }, updatedAt: '2026-02-03 04:05:06' });
+  store.close();
+  store = createStore(databasePath);
+  store.close();
+  const inspector = new DatabaseSync(databasePath);
+  const columns = inspector.prepare('PRAGMA table_info(caldav_config)').all().map(({ name }) => name);
+  const row = inspector.prepare('SELECT * FROM caldav_config').get();
+  inspector.close();
+  assert.equal(columns.includes('collection_url'), false);
+  assert.equal(columns.includes('base_url'), true);
+  assert.equal(row.base_url, 'https://baikal.example.test:8443/');
+  assert.equal(row.password_ciphertext, 'ciphertext');
+  assert.equal(row.created_at, '2025-01-02 03:04:05');
+  assert.equal(row.updated_at, '2026-02-03 04:05:06');
+  rmSync(directory, { recursive: true, force: true });
 });

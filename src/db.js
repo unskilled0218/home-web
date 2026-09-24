@@ -48,7 +48,7 @@ export function createStore(databasePath) {
     );
     CREATE TABLE IF NOT EXISTS caldav_config (
       id INTEGER PRIMARY KEY CHECK (id = 1),
-      collection_url TEXT NOT NULL,
+      base_url TEXT NOT NULL,
       username TEXT NOT NULL,
       password_ciphertext TEXT NOT NULL,
       password_iv TEXT NOT NULL,
@@ -77,6 +77,39 @@ export function createStore(databasePath) {
     ALTER TABLE linkwarden_config_new RENAME TO linkwarden_config;
     COMMIT;
   `);
+  const calDavColumns = new Set(db.prepare('PRAGMA table_info(caldav_config)').all().map((column) => column.name));
+  if (calDavColumns.has('collection_url') && !calDavColumns.has('base_url')) {
+    const legacy = db.prepare('SELECT * FROM caldav_config WHERE id = 1').get();
+    let baseUrl;
+    if (legacy) {
+      try {
+        const url = new URL(legacy.collection_url);
+        if (!['http:', 'https:'].includes(url.protocol)) throw new Error();
+        baseUrl = `${url.origin}/`;
+      } catch { throw new Error('Saved CalDAV configuration contains an invalid URL.'); }
+    }
+    try {
+      db.exec(`
+        BEGIN;
+        ALTER TABLE caldav_config RENAME TO caldav_config_legacy;
+        CREATE TABLE caldav_config (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          base_url TEXT NOT NULL,
+          username TEXT NOT NULL,
+          password_ciphertext TEXT NOT NULL,
+          password_iv TEXT NOT NULL,
+          password_tag TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+      `);
+      if (legacy) db.prepare('INSERT INTO caldav_config (id, base_url, username, password_ciphertext, password_iv, password_tag, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(legacy.id, baseUrl, legacy.username, legacy.password_ciphertext, legacy.password_iv, legacy.password_tag, legacy.created_at, legacy.updated_at);
+      db.exec('DROP TABLE caldav_config_legacy; COMMIT;');
+    } catch (error) {
+      try { db.exec('ROLLBACK;'); } catch { /* Preserve the migration error. */ }
+      throw error;
+    }
+  }
 
   const mapDevice = (row) => row && ({
     id: row.id,
@@ -102,12 +135,12 @@ export function createStore(databasePath) {
     saveHomeAssistant: db.prepare("INSERT INTO home_assistant_config (id, base_url, token_ciphertext, token_iv, token_tag) VALUES (1, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET base_url = excluded.base_url, token_ciphertext = excluded.token_ciphertext, token_iv = excluded.token_iv, token_tag = excluded.token_tag, updated_at = CURRENT_TIMESTAMP"),
     removeHomeAssistant: db.prepare('DELETE FROM home_assistant_config WHERE id = 1'),
     getCalDav: db.prepare('SELECT * FROM caldav_config WHERE id = 1'),
-    saveCalDav: db.prepare("INSERT INTO caldav_config (id, collection_url, username, password_ciphertext, password_iv, password_tag) VALUES (1, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET collection_url = excluded.collection_url, username = excluded.username, password_ciphertext = excluded.password_ciphertext, password_iv = excluded.password_iv, password_tag = excluded.password_tag, updated_at = CURRENT_TIMESTAMP"),
+    saveCalDav: db.prepare("INSERT INTO caldav_config (id, base_url, username, password_ciphertext, password_iv, password_tag) VALUES (1, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET base_url = excluded.base_url, username = excluded.username, password_ciphertext = excluded.password_ciphertext, password_iv = excluded.password_iv, password_tag = excluded.password_tag, updated_at = CURRENT_TIMESTAMP"),
     removeCalDav: db.prepare('DELETE FROM caldav_config WHERE id = 1')
   };
   const mapLinkwarden = (row) => row && ({ baseUrl: row.base_url, username: row.username, encryptedAccessToken: { ciphertext: row.key_ciphertext, iv: row.key_iv, tag: row.key_tag }, updatedAt: row.updated_at });
   const mapHomeAssistant = (row) => row && ({ baseUrl: row.base_url, encryptedAccessToken: { ciphertext: row.token_ciphertext, iv: row.token_iv, tag: row.token_tag }, updatedAt: row.updated_at });
-  const mapCalDav = (row) => row && ({ collectionUrl: row.collection_url, username: row.username, encryptedPassword: { ciphertext: row.password_ciphertext, iv: row.password_iv, tag: row.password_tag }, updatedAt: row.updated_at });
+  const mapCalDav = (row) => row && ({ serverUrl: row.base_url, username: row.username, encryptedPassword: { ciphertext: row.password_ciphertext, iv: row.password_iv, tag: row.password_tag }, updatedAt: row.updated_at });
   return {
     list: () => queries.list.all().map(mapDevice),
     get: (id) => mapDevice(queries.get.get(id)),
@@ -123,7 +156,7 @@ export function createStore(databasePath) {
     saveHomeAssistant: ({ baseUrl, encryptedAccessToken }) => queries.saveHomeAssistant.run(baseUrl, encryptedAccessToken.ciphertext, encryptedAccessToken.iv, encryptedAccessToken.tag),
     removeHomeAssistant: () => queries.removeHomeAssistant.run().changes > 0,
     getCalDav: () => mapCalDav(queries.getCalDav.get()),
-    saveCalDav: ({ collectionUrl, username, encryptedPassword }) => queries.saveCalDav.run(collectionUrl, username, encryptedPassword.ciphertext, encryptedPassword.iv, encryptedPassword.tag),
+    saveCalDav: ({ serverUrl, username, encryptedPassword }) => queries.saveCalDav.run(serverUrl, username, encryptedPassword.ciphertext, encryptedPassword.iv, encryptedPassword.tag),
     removeCalDav: () => queries.removeCalDav.run().changes > 0,
     close: () => db.close()
   };
