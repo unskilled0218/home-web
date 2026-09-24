@@ -158,7 +158,7 @@ export function createCalendarController({
   }
   function scheduleRefresh() {
     clearTimer();
-    if (!disposed && active() && state.configured && !state.needsReauthentication) timer = schedule(() => { timer = undefined; void refresh(); }, refreshMs);
+    if (!disposed && active() && state.configured && !state.needsReauthentication && !state.accessDenied) timer = schedule(() => { timer = undefined; void refresh(); }, refreshMs);
   }
   function begin(kind) {
     invalidate();
@@ -186,12 +186,12 @@ export function createCalendarController({
   function applyEvents(data) {
     const result = eventFields(data);
     hasSnapshot = true;
-    emit({ configured: result.configured, events: result.events, stale: result.stale, loading: false, unavailable: false, needsReauthentication: false, error: '' });
+    emit({ configured: result.configured, events: result.events, stale: result.stale, loading: false, unavailable: false, needsReauthentication: false, accessDenied: false, error: '' });
   }
   function applyRequestFailure(error) {
-    if (error.status === 401) {
+    if (error.status === 401 || error.status === 403) {
       hasSnapshot = false;
-      emit({ events: [], stale: false, loading: false, unavailable: false, needsReauthentication: true, error: safeText(error.message) || 'Calendar needs re-authentication.' });
+      emit({ events: [], stale: false, loading: false, unavailable: false, needsReauthentication: error.status === 401, accessDenied: error.status === 403, error: safeText(error.message) || (error.status === 401 ? 'Calendar needs re-authentication.' : 'Calendar access was denied.') });
     } else emit({ loading: false, stale: hasSnapshot, unavailable: !hasSnapshot, error: safeText(error.message) || 'Calendar unavailable.' });
   }
 
@@ -225,7 +225,7 @@ export function createCalendarController({
   function refresh(force = false) {
     if (disposed || !active()) return;
     if (!statusLoaded) return start();
-    if (!state.configured || state.needsReauthentication) return;
+    if (!state.configured || state.needsReauthentication || state.accessDenied) return;
     if (pending && pendingKind === 'events' && !force) return pending;
     const { request, signal } = begin('events');
     emit({ loading: true, error: '' });

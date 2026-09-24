@@ -187,3 +187,22 @@ test('clears private browser snapshots when CalDAV requires re-authentication', 
   assert.equal(timers.tasks.size, 0);
   initial.dispose();
 });
+
+test('stops retries and clears snapshots when Baikal denies calendar access', async () => {
+  const timers = scheduler();
+  let denied = false;
+  let latest;
+  const controller = createCalendarController({ ...timers, onChange: (state) => { latest = state; }, fetchImpl: async (url) => {
+    if (url === '/api/calendar') return json({ configured: true });
+    return denied ? json({ configured: true, accessDenied: true, error: 'Baikal denied calendar access.' }, 403) : json({ configured: true, events: [event] });
+  } });
+  await tick();
+  assert.equal(latest.events.length, 1);
+  denied = true;
+  await controller.forceRefresh();
+  assert.equal(latest.accessDenied, true);
+  assert.equal(latest.needsReauthentication, false);
+  assert.deepEqual(latest.events, []);
+  assert.equal(timers.tasks.size, 0);
+  controller.dispose();
+});

@@ -273,6 +273,7 @@ export function createDashboardServer({ runtimeConfig, store, linkwarden, homeAs
         return json(response, 200, { configured: true, events: publicCalendarEvents(result.events), stale: result.stale === true });
       } catch (error) {
         if (isCalDavClientError(error) && error.kind === 'authentication') return json(response, 401, { configured: true, needsReauthentication: true, error: 'Calendar needs re-authentication.' });
+        if (isCalDavClientError(error) && error.kind === 'authorization') return json(response, 403, { configured: true, accessDenied: true, error: error.message });
         return json(response, 503, { configured: true, error: CALENDAR_UNAVAILABLE });
       }
     }

@@ -582,7 +582,8 @@ async function boundedText(response) {
 }
 
 function statusError(status) {
-  if (status === 401 || status === 403) return clientError('CalDAV rejected the username or password.', { kind: 'authentication' });
+  if (status === 401) return clientError('CalDAV rejected the username or password.', { kind: 'authentication' });
+  if (status === 403) return clientError('Baikal denied access to this calendar (HTTP 403). Check the account calendar permissions and exact collection URL.', { kind: 'authorization' });
   if (status === 405) return clientError('The configured endpoint does not accept CalDAV REPORT requests (HTTP 405). Check the exact calendar collection URL and reverse-proxy method rules.');
   if ([400, 415, 422, 501].includes(status)) return clientError(`Baikal rejected the calendar query (HTTP ${status}). Check that the URL identifies an exact CalDAV calendar collection.`);
   if (status === 429 || status >= 500) return clientError('CalDAV is currently unavailable.', { transient: true });

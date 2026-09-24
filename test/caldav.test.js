@@ -227,6 +227,7 @@ test('classifies timeout, status, content type, and response-size failures safel
   const settings = { collectionUrl: 'https://baikal.test/calendar/', username: 'user', password: 'secret' };
   const cases = [
     [async () => new Response('', { status: 401 }), /username or password/],
+    [async () => new Response('', { status: 403 }), /calendar permissions.*exact collection URL/],
     [async () => new Response('', { status: 400 }), /exact CalDAV calendar collection/],
     [async () => new Response('', { status: 405 }), /reverse-proxy method rules/],
     [async () => new Response('', { status: 503 }), /currently unavailable/],
