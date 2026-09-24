@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { rootCertificates } from 'node:tls';
-import { validateCaFile } from '../src/ca-file.js';
+import { loadScopedCa, validateCaFile } from '../src/ca-file.js';
 
 test('validates certificate-only CA bundles', async () => {
   const directory = mkdtempSync(path.join(tmpdir(), 'dashboard-extra-ca-'));
@@ -19,6 +19,10 @@ test('validates certificate-only CA bundles', async () => {
   try {
     await assert.doesNotReject(validateCaFile());
     await assert.doesNotReject(validateCaFile(valid));
+    const scoped = await loadScopedCa(valid, 'CALDAV_CA_FILE');
+    assert.equal(scoped.at(-1), `${rootCertificates[0]}\n${rootCertificates[1]}\n`);
+    assert.ok(scoped.length > 2);
+    await assert.rejects(loadScopedCa(privateKey, 'CALDAV_CA_FILE'), /CALDAV_CA_FILE must contain certificates only/);
     await assert.rejects(validateCaFile(path.join(directory, 'missing.pem')), /Unable to read NODE_EXTRA_CA_CERTS/);
     await assert.rejects(validateCaFile(directory), /Unable to read NODE_EXTRA_CA_CERTS/);
     await assert.rejects(validateCaFile(empty), /must not be empty/);

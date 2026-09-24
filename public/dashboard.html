@@ -22,6 +22,11 @@
         <details id="forecast-details"><summary>Hourly and seven-day forecast</summary><h3>Next 24 hours</h3><ul id="hourly"></ul><h3>Next seven days</h3><ul id="daily"></ul></details>
         <p class="attribution">Weather: <a href="https://open-meteo.com/">Open-Meteo</a> · Air quality: <a href="https://ads.atmosphere.copernicus.eu/">CAMS ENSEMBLE</a></p>
       </section>
+      <section id="calendar" aria-label="Calendar">
+        <div class="calendar-heading"><h2>Calendar</h2><button id="refresh-calendar" type="button">Refresh</button></div>
+        <p id="calendar-status" role="status">Checking calendar connection…</p>
+        <ol id="calendar-events"></ol>
+      </section>
       <p id="photo-caption"></p>
     </main>
     <dialog id="settings-dialog" aria-labelledby="settings-title">
@@ -46,6 +51,10 @@
           <label>Wind<select name="wind"><option value="kmh">km/h</option><option value="mph">mph</option><option value="ms">m/s</option><option value="kn">knots</option></select></label>
           <label>Precipitation<select name="precipitation"><option value="mm">mm</option><option value="inch">inches</option></select></label>
         </fieldset>
+        <fieldset><legend>Calendar</legend>
+          <label class="toggle"><input name="calendarVisible" type="checkbox">Show calendar</label>
+          <label>Calendar scale<input name="calendarScale" type="number" min="0.5" max="2" step="0.1"></label>
+        </fieldset>
         <fieldset><legend>Images</legend>
           <label>Order<select name="order"><option value="random">Shuffled</option><option value="name">Name</option><option value="date">Modification date</option></select></label>
           <label>Interval (seconds)<input name="interval" type="number" min="5" max="3600"></label>
@@ -60,6 +69,7 @@
       </form>
       <section aria-labelledby="photos-title"><h3 id="photos-title">Choose photos</h3><p>Photos stay in this browser session and are never uploaded. Reselect them after reload. JPEG, PNG, WebP, GIF; up to 100 files, 20 MiB each and 200 MiB total.</p><label>Photo files<input id="photo-files" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple></label><p id="photo-status" role="status">No photos selected. The clock works without photos.</p></section>
       <section aria-labelledby="location-title"><h3 id="location-title">Weather location</h3><p>Searches and selected coordinates are sent directly to Open-Meteo. Preferences are saved only in this browser.</p><form id="location-search"><label>City or place<input id="location-query" type="search" minlength="2" maxlength="120" required></label><button type="submit">Search</button><button id="clear-location" type="button">Clear location</button></form><p id="search-status" role="status"></p><ul id="location-results"></ul></section>
+      <section aria-labelledby="calendar-settings-title"><h3 id="calendar-settings-title">Baikal calendar</h3><p>Enter the exact CalDAV calendar collection URL. The password is encrypted on this server and never shown again; leave it blank to retain it when the URL and username are unchanged.</p><form id="calendar-connection"><label>Calendar collection URL<input id="calendar-url" name="collectionUrl" type="url" maxlength="2048" placeholder="https://baikal.example.test/dav.php/calendars/user/default/" autocomplete="url" required></label><label>Username<input id="calendar-username" name="username" maxlength="120" autocomplete="username" required></label><label>Password<input id="calendar-password" name="password" type="password" maxlength="2000" autocomplete="current-password"></label><div class="calendar-settings-actions"><button id="connect-calendar" type="submit">Connect calendar</button><button id="disconnect-calendar" type="button">Disconnect calendar</button></div></form><p id="calendar-settings-status" role="status"></p></section>
     </dialog>
     <script type="module" src="/dashboard.js"></script>
   </body>

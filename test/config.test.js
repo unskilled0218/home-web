@@ -22,3 +22,10 @@ test('loads Home Assistant runtime configuration', async () => {
   assert.equal(config.homeAssistantCacheSeconds, 45);
   assert.equal(config.nodeExtraCaFile, path.resolve('./certs/home-assistant-ca.pem'));
 });
+
+test('loads scoped CalDAV runtime configuration', async () => {
+  const { loadConfig } = await import('../src/config.js');
+  const config = loadConfig({ HOST: '127.0.0.1', CALDAV_CACHE_SECONDS: '450', CALDAV_CA_FILE: './certs/baikal-ca.pem' });
+  assert.equal(config.calDavCacheSeconds, 450);
+  assert.equal(config.calDavCaFile, path.resolve('./certs/baikal-ca.pem'));
+});

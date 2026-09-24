@@ -46,6 +46,16 @@ export function createStore(databasePath) {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE TABLE IF NOT EXISTS caldav_config (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      collection_url TEXT NOT NULL,
+      username TEXT NOT NULL,
+      password_ciphertext TEXT NOT NULL,
+      password_iv TEXT NOT NULL,
+      password_tag TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
   `);
   let columns = new Set(db.prepare('PRAGMA table_info(linkwarden_config)').all().map((column) => column.name));
   if (!columns.has('username')) { db.exec('ALTER TABLE linkwarden_config ADD COLUMN username TEXT'); columns.add('username'); }
@@ -90,10 +100,14 @@ export function createStore(databasePath) {
     removeLinkwarden: db.prepare('DELETE FROM linkwarden_config WHERE id = 1'),
     getHomeAssistant: db.prepare('SELECT * FROM home_assistant_config WHERE id = 1'),
     saveHomeAssistant: db.prepare("INSERT INTO home_assistant_config (id, base_url, token_ciphertext, token_iv, token_tag) VALUES (1, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET base_url = excluded.base_url, token_ciphertext = excluded.token_ciphertext, token_iv = excluded.token_iv, token_tag = excluded.token_tag, updated_at = CURRENT_TIMESTAMP"),
-    removeHomeAssistant: db.prepare('DELETE FROM home_assistant_config WHERE id = 1')
+    removeHomeAssistant: db.prepare('DELETE FROM home_assistant_config WHERE id = 1'),
+    getCalDav: db.prepare('SELECT * FROM caldav_config WHERE id = 1'),
+    saveCalDav: db.prepare("INSERT INTO caldav_config (id, collection_url, username, password_ciphertext, password_iv, password_tag) VALUES (1, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET collection_url = excluded.collection_url, username = excluded.username, password_ciphertext = excluded.password_ciphertext, password_iv = excluded.password_iv, password_tag = excluded.password_tag, updated_at = CURRENT_TIMESTAMP"),
+    removeCalDav: db.prepare('DELETE FROM caldav_config WHERE id = 1')
   };
   const mapLinkwarden = (row) => row && ({ baseUrl: row.base_url, username: row.username, encryptedAccessToken: { ciphertext: row.key_ciphertext, iv: row.key_iv, tag: row.key_tag }, updatedAt: row.updated_at });
   const mapHomeAssistant = (row) => row && ({ baseUrl: row.base_url, encryptedAccessToken: { ciphertext: row.token_ciphertext, iv: row.token_iv, tag: row.token_tag }, updatedAt: row.updated_at });
+  const mapCalDav = (row) => row && ({ collectionUrl: row.collection_url, username: row.username, encryptedPassword: { ciphertext: row.password_ciphertext, iv: row.password_iv, tag: row.password_tag }, updatedAt: row.updated_at });
   return {
     list: () => queries.list.all().map(mapDevice),
     get: (id) => mapDevice(queries.get.get(id)),
@@ -108,6 +122,9 @@ export function createStore(databasePath) {
     getHomeAssistant: () => mapHomeAssistant(queries.getHomeAssistant.get()),
     saveHomeAssistant: ({ baseUrl, encryptedAccessToken }) => queries.saveHomeAssistant.run(baseUrl, encryptedAccessToken.ciphertext, encryptedAccessToken.iv, encryptedAccessToken.tag),
     removeHomeAssistant: () => queries.removeHomeAssistant.run().changes > 0,
+    getCalDav: () => mapCalDav(queries.getCalDav.get()),
+    saveCalDav: ({ collectionUrl, username, encryptedPassword }) => queries.saveCalDav.run(collectionUrl, username, encryptedPassword.ciphertext, encryptedPassword.iv, encryptedPassword.tag),
+    removeCalDav: () => queries.removeCalDav.run().changes > 0,
     close: () => db.close()
   };
 }

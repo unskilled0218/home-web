@@ -27,7 +27,7 @@ test('serves dashboard aliases and assets while preserving home and static conta
     const html = await result.text(); assert.match(html, /src="\/dashboard.js"/); assert.doesNotMatch(html, /src="\/app.js"/);
     if (previous) assert.equal(html, previous); previous = html;
   }
-  for (const name of ['dashboard.js', 'dashboard-helpers.js', 'dashboard-weather.js', 'dashboard-photos.js', 'dashboard.css']) {
+  for (const name of ['dashboard.js', 'dashboard-helpers.js', 'dashboard-weather.js', 'dashboard-photos.js', 'dashboard-calendar.js', 'dashboard.css']) {
     const result = await fetch(`${base}/${name}`); assert.equal(result.status, 200); assert.match(result.headers.get('content-type'), name.endsWith('.css') ? /text\/css/ : /text\/javascript/);
   }
   const iconFiles = ['weather-cloudy.svg', 'weather-fog.svg', 'weather-lightning-rainy.svg', 'weather-lightning.svg', 'weather-night-partly-cloudy.svg', 'weather-night.svg', 'weather-partly-cloudy.svg', 'weather-pouring.svg', 'weather-rainy.svg', 'weather-snowy-rainy.svg', 'weather-snowy.svg', 'weather-sunny.svg'];
@@ -38,10 +38,12 @@ test('serves dashboard aliases and assets while preserving home and static conta
   }
   assert.equal((await fetch(`${base}/weather-icons.svg`)).status, 404); assert.equal((await fetch(`${base}/weather-icons/snowflake.svg`)).status, 404);
   const dashboardHtml = await (await fetch(`${base}/dashboard.html`)).text(); assert.match(dashboardHtml, /<img id="weather-icon"[^>]*alt=""[^>]*aria-hidden="true"[^>]*hidden>/);
+  assert.match(dashboardHtml, /id="calendar-events"/); assert.match(dashboardHtml, /id="calendar-password"[^>]*type="password"[^>]*autocomplete="current-password"/);
   const dashboardCss = await (await fetch(`${base}/dashboard.css`)).text(); assert.match(dashboardCss, /#weather \{[^}]*background: transparent;[^}]*border-radius: 0;/); assert.doesNotMatch(dashboardCss, /#weather \{[^}]*#08101bcc/);
   assert.match(dashboardCss, /#hourly li, #daily li \{[^}]*background: transparent;/);
   assert.match(dashboardCss, /\.weather-icon \{[^}]*filter: brightness\(0\) invert\(1\) drop-shadow/);
   assert.match(dashboardCss, /\.forecast-icon \{[^}]*width: clamp[^}]*filter: brightness\(0\) invert\(1\) drop-shadow/);
+  assert.match(dashboardCss, /#calendar \{[^}]*background: transparent;/); assert.match(dashboardCss, /\.calendar-event \{[^}]*background: transparent;/);
   const dashboardJs = await (await fetch(`${base}/dashboard.js`)).text(); assert.match(dashboardJs, /`\/weather-icons\/\$\{weatherIconFile\(/); assert.match(dashboardJs, /icon\.hidden = true; icon\.removeAttribute\('src'\)/); assert.match(dashboardJs, /icon\.alt = ''; icon\.setAttribute\('aria-hidden', 'true'\)/); assert.match(dashboardJs, /forecastItem\(\{ code: hour\.code, day: hour\.day/); assert.match(dashboardJs, /forecastItem\(\{ code: day\.code, label/); assert.match(dashboardJs, /weatherDescription\(code, day\)/); assert.doesNotMatch(dashboardJs, /innerHTML|weather-icons\.svg/);
   assert.match(await (await fetch(base)).text(), /href="\/dashboard"/);
   for (const route of ['/missing', '/dashboard/missing', '/%2e%2e/package.json', '/..%2fpackage.json', '/src/app.js']) assert.equal((await fetch(base + route)).status, 404);
@@ -61,8 +63,8 @@ test('maps bounded WMO conditions to local weather icons', () => {
 
 test('recovers preferences and constrains untrusted persisted settings', () => {
   for (const storage of [undefined, { getItem() { throw new Error('blocked'); } }, { getItem: () => '{bad' }, { getItem: () => 'null' }]) assert.equal(loadSettings(storage).interval, 60);
-  const result = normalizeSettings({ scale: 100, duration: 50, interval: 5, timeScale: NaN, opacity: -1, timezone: 'not/a/zone', location: { latitude: 999, longitude: 0 }, color: 'url(x)', extra: 'discard', weatherVisible: 'false' }, 'UTC');
-  assert.equal(result.scale, 2); assert.equal(result.duration, 4); assert.equal(result.timeScale, 1); assert.equal(result.opacity, 0); assert.equal(result.timezone, 'UTC'); assert.equal(result.location, null); assert.equal(result.color, '#000000'); assert.equal(result.weatherVisible, true); assert.equal(result.extra, undefined);
+  const result = normalizeSettings({ scale: 100, duration: 50, interval: 5, timeScale: NaN, calendarScale: 9, opacity: -1, timezone: 'not/a/zone', location: { latitude: 999, longitude: 0 }, color: 'url(x)', extra: 'discard', weatherVisible: 'false', calendarVisible: 'false' }, 'UTC');
+  assert.equal(result.scale, 2); assert.equal(result.duration, 4); assert.equal(result.timeScale, 1); assert.equal(result.calendarScale, 2); assert.equal(result.opacity, 0); assert.equal(result.timezone, 'UTC'); assert.equal(result.location, null); assert.equal(result.color, '#000000'); assert.equal(result.weatherVisible, true); assert.equal(result.calendarVisible, true); assert.equal(result.extra, undefined);
 });
 
 test('formats clock across timezone date boundaries and daylight saving', () => {

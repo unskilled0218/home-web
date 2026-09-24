@@ -1,12 +1,13 @@
 import { SETTINGS_KEY, clockText, loadSettings, normalizeSettings, sampleHours, weatherDescription, weatherIconFile } from './dashboard-helpers.js';
 import { createWeatherController, searchLocations } from './dashboard-weather.js';
 import { createPhotoController } from './dashboard-photos.js';
+import { createCalendarController, formatCalendarEvent } from './dashboard-calendar.js';
 
 const $ = (id) => document.getElementById(id);
 let storage;
 try { storage = window.localStorage; } catch { /* Defaults work when browser storage is blocked. */ }
 let settings = loadSettings(storage);
-let clockTimer; let searchController; let searchGeneration = 0; let weatherState = {}; let animations = [];
+let clockTimer; let searchController; let searchGeneration = 0; let weatherState = {}; let calendarState = {}; let animations = [];
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 const preferences = $('preferences');
 const dialog = $('settings-dialog');
@@ -67,6 +68,33 @@ function renderWeather(state = weatherState) {
 }
 
 const weather = createWeatherController({ onChange: renderWeather });
+function renderCalendar(state = calendarState) {
+  calendarState = state;
+  const list = $('calendar-events');
+  list.replaceChildren();
+  $('refresh-calendar').disabled = !state.configured || state.loading;
+  let status = '';
+  if (state.needsReauthentication) status = 'Calendar needs re-authentication. Open Settings and enter the Baikal password.';
+  else if (!state.configured) status = state.encryptionReady === false ? 'Calendar credential encryption is not configured on this server.' : 'Connect a Baikal calendar in Settings.';
+  else if (state.loading && !state.events?.length) status = 'Loading upcoming events…';
+  else if (state.error && state.events?.length) status = `${state.error} Showing the last successful calendar snapshot.`;
+  else if (state.error) status = state.error;
+  else if (state.stale) status = 'Showing stale calendar events; the latest refresh failed.';
+  else if (!state.events?.length) status = 'No events in the next 14 days.';
+  $('calendar-status').textContent = status;
+  for (const event of state.events ?? []) {
+    const formatted = formatCalendarEvent(event, settings);
+    if (!formatted) continue;
+    const item = document.createElement('li'); item.className = `calendar-event ${formatted.timing}`;
+    const date = element('span', formatted.date, 'calendar-event-date');
+    const title = element('strong', event.title, 'calendar-event-title');
+    const time = element('span', formatted.timing === 'current' ? `Now · ${formatted.time}` : formatted.time, 'calendar-event-time');
+    item.append(date, title, time);
+    if (event.location) item.append(element('span', event.location, 'calendar-event-location'));
+    list.append(item);
+  }
+}
+const calendar = createCalendarController({ onChange: renderCalendar });
 function stopAnimations() { animations.forEach((animation) => animation.cancel()); animations = []; }
 function clearPhotos() { stopAnimations(); $('photos').replaceChildren(); $('photo-caption').textContent = ''; }
 const photos = createPhotoController({
@@ -98,8 +126,9 @@ function apply() {
   $('information').style.setProperty('--scale', settings.scale);
   $('clock').style.setProperty('--time-scale', settings.timeScale);
   $('weather').style.setProperty('--weather-scale', settings.weatherScale);
-  $('clock').hidden = !settings.timeVisible; $('weather').hidden = !settings.weatherVisible;
-  startClock(); photos.configure(settings); weather.configure(settings); renderWeather();
+  $('calendar').style.setProperty('--calendar-scale', settings.calendarScale);
+  $('clock').hidden = !settings.timeVisible; $('weather').hidden = !settings.weatherVisible; $('calendar').hidden = !settings.calendarVisible;
+  startClock(); photos.configure(settings); weather.configure(settings); calendar.configure(settings); renderWeather(); renderCalendar();
 }
 
 preferences.addEventListener('submit', (event) => {
@@ -111,7 +140,18 @@ preferences.addEventListener('submit', (event) => {
   }
   settings = normalizeSettings(next); save(); fillForm(); apply();
 });
-$('open-settings').addEventListener('click', () => { fillForm(); dialog.showModal(); });
+function fillCalendarForm() {
+  const state = calendar.getState();
+  $('calendar-url').value = state.collectionUrl ?? '';
+  $('calendar-username').value = state.username ?? '';
+  $('calendar-password').value = '';
+  $('disconnect-calendar').disabled = !state.configured && !state.needsReauthentication;
+}
+function setCalendarMutationPending(pending) {
+  $('connect-calendar').disabled = pending;
+  $('disconnect-calendar').disabled = pending || (!calendar.getState().configured && !calendar.getState().needsReauthentication);
+}
+$('open-settings').addEventListener('click', () => { fillForm(); fillCalendarForm(); $('calendar-settings-status').textContent = ''; dialog.showModal(); });
 $('close-settings').addEventListener('click', () => dialog.close());
 dialog.addEventListener('close', () => $('open-settings').focus());
 $('photo-files').addEventListener('change', (event) => photos.select(event.target.files));
@@ -134,6 +174,28 @@ $('location-search').addEventListener('submit', async (event) => {
 });
 $('clear-location').addEventListener('click', () => { cancelSearch(); settings = normalizeSettings({ ...settings, location: null }); save(); apply(); $('location-results').replaceChildren(); $('search-status').textContent = 'Location cleared.'; });
 
+$('refresh-calendar').addEventListener('click', () => { void calendar.forceRefresh(); });
+$('calendar-connection').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  setCalendarMutationPending(true); $('calendar-settings-status').textContent = 'Connecting to Baikal…';
+  try {
+    await calendar.connect({ collectionUrl: $('calendar-url').value, username: $('calendar-username').value, password: $('calendar-password').value });
+    const state = calendar.getState();
+    if (state.configured && !state.error) { $('calendar-settings-status').textContent = 'Calendar connected.'; fillCalendarForm(); dialog.close(); }
+    else $('calendar-settings-status').textContent = state.error || 'Calendar could not be connected.';
+  } finally { setCalendarMutationPending(false); }
+});
+$('disconnect-calendar').addEventListener('click', async () => {
+  if (!confirm('Disconnect the Baikal calendar and delete its saved credentials?')) return;
+  setCalendarMutationPending(true); $('calendar-settings-status').textContent = 'Disconnecting calendar…';
+  try {
+    await calendar.disconnect();
+    const state = calendar.getState();
+    $('calendar-settings-status').textContent = state.configured ? (state.error || 'Calendar could not be disconnected.') : 'Calendar disconnected.';
+    fillCalendarForm();
+  } finally { setCalendarMutationPending(false); }
+});
+
 function fullscreenState() { $('fullscreen').textContent = document.fullscreenElement ? 'Exit fullscreen' : 'Enter fullscreen'; }
 if (!document.fullscreenEnabled) { $('fullscreen').disabled = true; $('fullscreen').textContent = 'Fullscreen unavailable'; }
 $('fullscreen').addEventListener('click', async () => {
@@ -141,9 +203,9 @@ $('fullscreen').addEventListener('click', async () => {
   catch { $('page-status').textContent = 'Fullscreen could not be enabled in this browser.'; }
 });
 document.addEventListener('fullscreenchange', fullscreenState);
-document.addEventListener('visibilitychange', () => { startClock(); photos.setVisible(!document.hidden); weather.setVisible(!document.hidden); if (document.hidden) stopAnimations(); });
+document.addEventListener('visibilitychange', () => { startClock(); photos.setVisible(!document.hidden); weather.setVisible(!document.hidden); calendar.setVisible(!document.hidden); if (document.hidden) stopAnimations(); });
 reducedMotion.addEventListener('change', () => { stopAnimations(); photos.configure(settings); });
-window.addEventListener('pagehide', () => { clearInterval(clockTimer); cancelSearch(); weather.dispose(); photos.dispose(); });
-window.addEventListener('pageshow', (event) => { if (event.persisted) { $('photo-status').textContent = 'Reselect photos after returning to this page.'; startClock(); void weather.refresh(); } });
-photos.setVisible(!document.hidden); weather.setVisible(!document.hidden);
+window.addEventListener('pagehide', (event) => { clearInterval(clockTimer); cancelSearch(); weather.dispose(); photos.dispose(); if (!event.persisted) calendar.dispose(); });
+window.addEventListener('pageshow', (event) => { if (event.persisted) { $('photo-status').textContent = 'Reselect photos after returning to this page.'; startClock(); void weather.refresh(); void calendar.refresh(); } });
+photos.setVisible(!document.hidden); weather.setVisible(!document.hidden); calendar.setVisible(!document.hidden);
 fillForm(); apply();

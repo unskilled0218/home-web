@@ -11,11 +11,13 @@ import { normalizeLinkwardenCredentials } from './linkwarden.js';
 import { createCollectionSelectionStore } from './collection-selections.js';
 import { isHomeAssistantClientError, normalizeHomeAssistantCredentials } from './home-assistant.js';
 import { createHomeAssistantControlStore } from './home-assistant-controls.js';
+import { isCalDavClientError, normalizeCalDavCredentials } from './caldav.js';
 
 export const MAX_JSON_BODY_BYTES = 16_384;
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const defaultPublicRoot = path.join(root, 'public');
 const HOME_ASSISTANT_UNAVAILABLE = 'Home Assistant devices are currently unavailable.';
+const CALENDAR_UNAVAILABLE = 'Calendar events are currently unavailable.';
 const HOME_ASSISTANT_CONTROL_TTL_MS = 10 * 60_000;
 const MIME_TYPES = { '.css': 'text/css; charset=utf-8', '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml' };
 
@@ -90,14 +92,20 @@ function selectionFingerprint(settings) {
   return createHash('sha256').update(`${settings.baseUrl}\0${settings.username}\0${settings.accessToken}`).digest('base64url');
 }
 
-export function createDashboardServer({ runtimeConfig, store, linkwarden, homeAssistant, homeAssistantControls = createHomeAssistantControlStore(), wakeExecutor = executeWakeRequest, collectionSelections = createCollectionSelectionStore(), now = Date.now, publicRoot = defaultPublicRoot }) {
+export function createDashboardServer({ runtimeConfig, store, linkwarden, homeAssistant, calDav, homeAssistantControls = createHomeAssistantControlStore(), wakeExecutor = executeWakeRequest, collectionSelections = createCollectionSelectionStore(), now = Date.now, publicRoot = defaultPublicRoot }) {
   const wakeRequests = new Map();
   const integrationEncryptionKey = runtimeConfig.integrationEncryptionKey ?? runtimeConfig.linkwardenEncryptionKey;
   let homeAssistantMutation = Promise.resolve();
+  let calDavMutation = Promise.resolve();
   const homeAssistantActions = new Set();
   const queueHomeAssistantMutation = (operation) => {
     const result = homeAssistantMutation.then(operation, operation);
     homeAssistantMutation = result.catch(() => {});
+    return result;
+  };
+  const queueCalDavMutation = (operation) => {
+    const result = calDavMutation.then(operation, operation);
+    calDavMutation = result.catch(() => {});
     return result;
   };
 
@@ -200,6 +208,43 @@ export function createDashboardServer({ runtimeConfig, store, linkwarden, homeAs
     return settings;
   }
 
+  function calDavStatus() {
+    const saved = store.getCalDav();
+    let encryptionReady = false;
+    let credentialsReadable = false;
+    try { encryptionKey(integrationEncryptionKey); encryptionReady = true; if (saved) { decryptApiKey(saved.encryptedPassword, integrationEncryptionKey); credentialsReadable = true; } } catch { /* Re-authentication is required when saved credentials cannot be decrypted. */ }
+    const configured = Boolean(saved && credentialsReadable);
+    return { configured, passwordPresent: Boolean(saved), encryptionReady, needsReauthentication: Boolean(saved) && !configured, ...(saved && { collectionUrl: saved.collectionUrl, username: saved.username, updatedAt: saved.updatedAt }) };
+  }
+
+  function savedCalDavSettings() {
+    const saved = store.getCalDav();
+    if (!saved) throw new Error('Calendar is not configured.');
+    try { return { collectionUrl: saved.collectionUrl, username: saved.username, password: decryptApiKey(saved.encryptedPassword, integrationEncryptionKey) }; }
+    catch { throw new Error('Calendar needs re-authentication.'); }
+  }
+
+  function calDavCredentialsFromInput(input) {
+    const existing = store.getCalDav();
+    const settings = normalizeCalDavCredentials(input, existing);
+    if (!settings.password && existing) {
+      if (settings.collectionUrl !== existing.collectionUrl || settings.username !== existing.username) throw new Error('A new CalDAV password is required when changing the collection URL or username.');
+      try { settings.password = decryptApiKey(existing.encryptedPassword, integrationEncryptionKey); }
+      catch { throw new Error('Calendar needs re-authentication.'); }
+    }
+    return settings;
+  }
+
+  function publicCalendarEvents(events) {
+    if (!Array.isArray(events)) return [];
+    return events.slice(0, 10).flatMap((event) => {
+      if (!event || typeof event.title !== 'string' || typeof event.start !== 'string' || typeof event.end !== 'string' || typeof event.allDay !== 'boolean') return [];
+      const title = event.title.trim().slice(0, 300) || 'Untitled event';
+      const location = typeof event.location === 'string' ? event.location.trim().slice(0, 300) : '';
+      return [{ title, start: event.start.slice(0, 40), end: event.end.slice(0, 40), allDay: event.allDay, ...(location && { location }) }];
+    });
+  }
+
   async function serveStatic(request, response, pathname) {
     const requested = pathname === '/' ? '/index.html' : ['/dashboard', '/dashboard/'].includes(pathname) ? '/dashboard.html' : pathname;
     const target = path.resolve(publicRoot, `.${requested}`);
@@ -218,6 +263,19 @@ export function createDashboardServer({ runtimeConfig, store, linkwarden, homeAs
     if (request.method === 'GET' && pathname === '/api/devices') return json(response, 200, { devices: store.list() });
     if (request.method === 'GET' && pathname === '/api/linkwarden') return json(response, 200, { linkwarden: linkwardenStatus() });
     if (request.method === 'GET' && pathname === '/api/home-assistant') return json(response, 200, { homeAssistant: homeAssistantStatus() });
+    if (request.method === 'GET' && pathname === '/api/calendar') return json(response, 200, calDavStatus());
+    if (request.method === 'GET' && pathname === '/api/calendar/events') {
+      const status = calDavStatus();
+      if (!status.configured) return json(response, 200, { configured: false, events: [], ...(status.needsReauthentication && { needsReauthentication: true }) });
+      try {
+        const url = new URL(request.url, 'http://localhost');
+        const result = await calDav.listEvents(savedCalDavSettings(), { force: url.searchParams.get('refresh') === '1' });
+        return json(response, 200, { configured: true, events: publicCalendarEvents(result.events), stale: result.stale === true });
+      } catch (error) {
+        if (isCalDavClientError(error) && error.kind === 'authentication') return json(response, 401, { configured: true, needsReauthentication: true, error: 'Calendar needs re-authentication.' });
+        return json(response, 503, { configured: true, error: CALENDAR_UNAVAILABLE });
+      }
+    }
     if (request.method === 'GET' && pathname === '/api/home-assistant/devices') {
       const status = homeAssistantStatus();
       if (!status.configured) return json(response, 200, { configured: false, devices: [], ...(status.needsReauthentication && { needsReauthentication: true }) });
@@ -297,6 +355,23 @@ export function createDashboardServer({ runtimeConfig, store, linkwarden, homeAs
       }
       if (request.method === 'DELETE' && pathname === '/api/home-assistant') {
         return await queueHomeAssistantMutation(async () => { store.removeHomeAssistant(); homeAssistant.clearCache(); homeAssistantControls.clear(); return json(response, 204, {}); });
+      }
+      if (request.method === 'PUT' && pathname === '/api/calendar') {
+        return await queueCalDavMutation(async () => {
+          const settings = calDavCredentialsFromInput(await readJson(request));
+          try { encryptionKey(integrationEncryptionKey); }
+          catch { throw new Error('Calendar credential encryption is not configured.'); }
+          let result;
+          try { result = await calDav.test(settings); }
+          catch (error) { throw new Error(isCalDavClientError(error) ? error.message : CALENDAR_UNAVAILABLE); }
+          const encryptedPassword = encryptApiKey(settings.password, integrationEncryptionKey);
+          store.saveCalDav({ ...settings, encryptedPassword });
+          calDav.clearCache();
+          return json(response, 200, { ...calDavStatus(), events: publicCalendarEvents(result.events), stale: false });
+        });
+      }
+      if (request.method === 'DELETE' && pathname === '/api/calendar') {
+        return await queueCalDavMutation(async () => { store.removeCalDav(); calDav.clearCache(); return json(response, 204, {}); });
       }
       if (request.method === 'PUT' && id) {
         if (!store.get(id)) return json(response, 404, { error: 'Device not found.' });

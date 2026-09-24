@@ -18,7 +18,7 @@ export function normalizeSettings(input = {}, fallbackZone = Intl.DateTimeFormat
   return {
     position: choice(value.position, ['left', 'right'], 'left'), scale: number(value.scale, 0.5, 2, 1),
     timezone, dateStyle: choice(value.dateStyle, ['short', 'medium', 'long', 'full'], 'medium'), hour12: boolean(value.hour12, false), seconds: boolean(value.seconds, true),
-    timeVisible: boolean(value.timeVisible, true), timeScale: number(value.timeScale, 0.5, 2, 1), weatherVisible: boolean(value.weatherVisible, true), weatherScale: number(value.weatherScale, 0.5, 2, 1),
+    timeVisible: boolean(value.timeVisible, true), timeScale: number(value.timeScale, 0.5, 2, 1), weatherVisible: boolean(value.weatherVisible, true), weatherScale: number(value.weatherScale, 0.5, 2, 1), calendarVisible: boolean(value.calendarVisible, true), calendarScale: number(value.calendarScale, 0.5, 2, 1),
     location: normalizeLocation(value.location), temperature: choice(value.temperature, ['celsius', 'fahrenheit'], 'celsius'), wind: choice(value.wind, ['kmh', 'mph', 'ms', 'kn'], 'kmh'), precipitation: choice(value.precipitation, ['mm', 'inch'], 'mm'),
     order: choice(value.order, ['name', 'date', 'random'], 'random'), interval, duration: number(value.duration, 0, Math.min(10, interval - 1), 3), animation: choice(value.animation, ['none', 'fade', 'slide'], 'fade'),
     opacity: number(value.opacity, 0, 1, 1), background: choice(value.background, ['color', 'blur'], 'color'), color: /^#[0-9a-f]{6}$/i.test(value.color) ? value.color : '#000000', blur: number(value.blur, 0, 100, 100), imageInfo: boolean(value.imageInfo, false)

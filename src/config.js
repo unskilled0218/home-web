@@ -49,7 +49,9 @@ export function loadConfig(environment = process.env) {
     linkwardenCacheSeconds: integer(environment.LINKWARDEN_CACHE_SECONDS, 60, 'LINKWARDEN_CACHE_SECONDS'),
     linkwardenCaFile: environment.LINKWARDEN_CA_FILE ? path.resolve(environment.LINKWARDEN_CA_FILE) : null,
     nodeExtraCaFile: environment.NODE_EXTRA_CA_CERTS ? path.resolve(environment.NODE_EXTRA_CA_CERTS) : null,
-    homeAssistantCacheSeconds: integer(environment.HOME_ASSISTANT_CACHE_SECONDS, 30, 'HOME_ASSISTANT_CACHE_SECONDS')
+    homeAssistantCacheSeconds: integer(environment.HOME_ASSISTANT_CACHE_SECONDS, 30, 'HOME_ASSISTANT_CACHE_SECONDS'),
+    calDavCacheSeconds: integer(environment.CALDAV_CACHE_SECONDS, 300, 'CALDAV_CACHE_SECONDS'),
+    calDavCaFile: environment.CALDAV_CA_FILE ? path.resolve(environment.CALDAV_CA_FILE) : null
   });
 }
 

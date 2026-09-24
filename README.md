@@ -1,6 +1,6 @@
 # dashboard
 
-dashboard is a small, self-hosted website for Home Assistant devices, Linkwarden bookmarks, and Wake-on-LAN controls on a trusted local network. It has no accounts or internet-facing use case. A successful wake request means the host sent the UDP magic packet; it does not prove that the target computer booted.
+dashboard is a small, self-hosted website for a Baikal CalDAV agenda, Home Assistant devices, Linkwarden bookmarks, and Wake-on-LAN controls on a trusted local network. It has no accounts or internet-facing use case. A successful wake request means the host sent the UDP magic packet; it does not prove that the target computer booted.
 
 ## Run locally
 
@@ -19,15 +19,36 @@ For another device on the LAN to reach the dashboard, set `HOST` to the server's
 
 ## Photo dashboard
 
-Open `/dashboard` (or `/dashboard/`) for a photo, clock, and weather display inspired by the `dash-board` desktop application. The home page links to it, and **Home** returns to your integrations. A clock and dark background work immediately without configuration.
+Open `/dashboard` (or `/dashboard/`) for a photo, clock, weather, and optional calendar display inspired by the `dash-board` desktop application. The home page links to it, and **Home** returns to your integrations. A clock and dark background work immediately without configuration.
 
-**Settings** controls the lower-left/right information position, overall and individual clock/weather scale, visibility, timezone, date style, 12/24-hour format, seconds, and weather units. Date styles use the browser's locale and `Intl` formatting rather than the desktop app's custom format strings. Preferences are saved per browser in localStorage; blocked or corrupt storage falls back to defaults, and save failures are reported without stopping the page.
+**Settings** controls the lower-left/right information position, overall and individual clock/weather/calendar scale, visibility, timezone, date style, 12/24-hour format, seconds, and weather units. Date styles use the browser's locale and `Intl` formatting rather than the desktop app's custom format strings. Preferences are saved per browser in localStorage; blocked or corrupt storage falls back to defaults, and save failures are reported without stopping the page.
 
 Select JPEG, PNG, WebP, or GIF photos using **Choose photos**. Photos stay in the browser session, are never uploaded, and must be reselected after reload or returning from a suspended page. Selection is limited to 100 files, 20 MiB per file, and 200 MiB total. Invalid or undecodable images are reported and skipped. Choose name, modification-date, or shuffled ordering; none/fade/slide transitions; interval and transition duration; opacity; a solid or blurred-image background; and optional filename display. Transitions respect reduced-motion preferences, and slideshow timers pause while the page is hidden.
 
 Search for a weather location in settings. Search terms and selected coordinates are sent directly from the browser to [Open-Meteo](https://open-meteo.com/). The transparent weather overlay pairs visible condition text with local SVG artwork for current conditions, three-hourly samples of the next 24 hours, and seven daily forecasts; it does not request icons from another service. Hourly icons follow Open-Meteo's day/night flag, while daily icons use daytime variants. The artwork is bundled from the sibling `dash-board` project. The page also shows the **US AQI**, with air-quality data attributed to [CAMS ENSEMBLE](https://ads.atmosphere.copernicus.eu/). Weather refreshes hourly while visible and when relevant settings change. Failed refreshes label retained data as stale; weather and air-quality failures are handled independently. The page uses the public provider endpoints and their usage terms, and requires internet access for weather only.
 
 **Enter fullscreen** uses the browser Fullscreen API and may be unavailable or denied by browser policy. Escape exits fullscreen. The dashboard uses native browser modules without a build step, Tauri, or a runtime dependency on the reference checkout.
+
+## Baikal calendar
+
+The calendar is optional. In `/dashboard` **Settings**, enter the exact Baikal CalDAV calendar collection URL, username, and password. A Baikal URL normally resembles `https://baikal.example.test/dav.php/calendars/user/default/`; a principal URL, calendar-home URL, WebDAV file URL, or direct `.ics` URL is not sufficient. Use a dedicated least-privilege account when practical.
+
+The server performs a bounded depth-1 CalDAV `calendar-query` for events overlapping the current instant through 14 days ahead. It displays at most 10 ordered events, including timed, all-day, multi-day, and recurring instances expanded by Baikal/SabreDAV. The integration is read-only: it does not discover multiple calendars, create or edit events, process invitations, display tasks, or execute alarms. A server that does not support the required RFC 4791 time-range and expansion report cannot be connected.
+
+Timed events are displayed in the dashboard's selected timezone; all-day dates remain calendar dates and do not drift across timezones. The browser refreshes every five minutes while the calendar is visible and supports an explicit refresh. A temporary network or server failure retains a clearly marked stale snapshot, but authentication, authorization, malformed-response, and unsupported-report failures do not serve cached private events.
+
+The Baikal password is sent only from the browser to this dashboard during connection, then encrypted in `data/wol.db` with the shared integration-credential key. It is never returned or prefilled. Leave it blank to retain the saved password only when the normalized collection URL and username are unchanged; changing either requires the password again. A failed reconnect preserves the previous working configuration, and **Disconnect calendar** deletes the saved URL, username, and encrypted password. Back up the database and encryption key together.
+
+Normal HTTPS certificate-chain, hostname, and validity checks apply. For a Baikal server using a private CA, place only the public CA/intermediate bundle under `certs/` and configure scoped trust:
+
+```sh
+mkdir -p certs
+cp /path/to/baikal-ca.pem certs/baikal-ca.pem
+printf '\nCALDAV_CA_FILE=./certs/baikal-ca.pem\n' >> .env
+npm start
+```
+
+`CALDAV_CA_FILE` affects only CalDAV requests and must contain valid certificates without private keys. It does not alter Linkwarden, Home Assistant, Open-Meteo, or other Node trust. The default `CALDAV_CACHE_SECONDS=300` matches the browser refresh interval. Plain `http://` collection URLs are supported only for trusted-LAN deployments and expose reusable Basic credentials to anyone able to observe that network path; prefer HTTPS even on the LAN.
 
 ## Container deployment
 
@@ -47,7 +68,7 @@ HOST=192.168.1.10 DASHBOARD_ALLOWED_HOSTS=home.lan docker compose up -d
 
 Restrict port 3000 at the host firewall to the trusted LAN. Host networking behaves differently on Docker Desktop; run the service directly on the LAN host there.
 
-To retain an existing externally managed key, set `LINKWARDEN_CONFIG_ENCRYPTION_KEY` in Compose's `.env` file before the first startup. The legacy variable name is retained for compatibility, but the key encrypts both Linkwarden and Home Assistant credentials. An explicit key takes precedence and the automatic key file is not created. Keep using the same value after every restart.
+To retain an existing externally managed key, set `LINKWARDEN_CONFIG_ENCRYPTION_KEY` in Compose's `.env` file before the first startup. The legacy variable name is retained for compatibility, but the key encrypts Linkwarden, Home Assistant, and CalDAV credentials. An explicit key takes precedence and the automatic key file is not created. Keep using the same value after every restart.
 
 The project directory is mounted read-only at `/app`, so optional CA bundles under `./certs` are available to both direct runs and Compose under the same relative paths. Keep these files out of version control; `certs/` is ignored. For a CA stored elsewhere, add a read-only bind mount in a Compose override and set the relevant CA variable to its container path.
 
@@ -60,7 +81,7 @@ The project directory is mounted read-only at `/app`, so optional CA bundles und
 - Enable Wake-on-LAN in each target's BIOS/UEFI and NIC/operating-system power settings.
 - VLANs and routed subnets commonly block broadcasts. Place the service appropriately or configure network forwarding deliberately.
 - Keep the dashboard on a trusted LAN. It intentionally has no authentication, so do not expose it on an untrusted network.
-- Back up `data/wol.db` and `data/linkwarden-config-encryption.key` together; the database contains the device inventory, wake attempt audit trail, and encrypted integration credentials.
+- Back up `data/wol.db` and `data/linkwarden-config-encryption.key` together; the database contains the device inventory, wake attempt audit trail, and encrypted integration credentials, including the Baikal password when configured.
 
 ## Checks
 
@@ -69,7 +90,7 @@ npm test
 npm run check
 ```
 
-The tests validate Home Assistant WebSocket handling, private-CA TLS, and encrypted credentials, Wake-on-LAN packet handling, Linkwarden credential storage and migration, collection trees, bookmark caching, API behavior, and scoped Linkwarden private-CA TLS. A safe packet-dispatch integration test requires a disposable UDP receiver on the deployment network.
+The tests validate CalDAV REPORT/XML/iCalendar handling, scoped private-CA TLS and encrypted credentials, Home Assistant WebSocket handling, Wake-on-LAN packet handling, Linkwarden credential storage and migration, collection trees, bookmark caching, and API behavior. A safe packet-dispatch integration test requires a disposable UDP receiver on the deployment network.
 
 ## Home Assistant devices
 
