@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 
 const MAX_MESSAGE_BYTES = 1_000_000;
 const MAX_REGISTRY_ENTRIES = 5_000;
+const CONTROL_DOMAINS = new Set(['light', 'switch', 'fan', 'input_boolean']);
+const CONTROL_ACTIONS = new Set(['turn_on', 'turn_off']);
 const TRUST_ERROR_CODES = new Set(['DEPTH_ZERO_SELF_SIGNED_CERT', 'SELF_SIGNED_CERT_IN_CHAIN', 'UNABLE_TO_GET_ISSUER_CERT', 'UNABLE_TO_GET_ISSUER_CERT_LOCALLY', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE', 'CERT_UNTRUSTED']);
 const CONNECTION_FAILED = 'Home Assistant connection failed. Check the URL and network; for a private certificate, configure NODE_EXTRA_CA_CERTS and restart the dashboard.';
 
@@ -37,17 +39,22 @@ function safeText(value, limit) {
   return typeof value === 'string' && value.trim() ? value.trim().slice(0, limit) : undefined;
 }
 
-export function normalizeHomeAssistantDevices(devices, areas, maxEntries = MAX_REGISTRY_ENTRIES) {
-  if (!Array.isArray(devices) || !Array.isArray(areas)) throw new Error('Home Assistant returned an invalid device registry.');
-  if (devices.length > maxEntries || areas.length > maxEntries) throw new Error('Home Assistant returned too many registry entries.');
+export function normalizeHomeAssistantDevices(devices, areas, entityRegistry = { entities: [] }, states = [], maxEntries = MAX_REGISTRY_ENTRIES) {
+  if (!Array.isArray(devices) || !Array.isArray(areas) || !entityRegistry || !Array.isArray(entityRegistry.entities) || !Array.isArray(states)) throw new Error('Home Assistant returned an invalid device registry.');
+  if ([devices, areas, entityRegistry.entities, states].some((entries) => entries.length > maxEntries)) throw new Error('Home Assistant returned too many registry entries.');
   const areaNames = new Map();
   for (const area of areas) {
     const id = safeText(area?.area_id, 128);
     const name = safeText(area?.name, 160);
     if (id && name && !areaNames.has(id)) areaNames.set(id, name);
   }
+  const stateByEntity = new Map();
+  for (const state of states) {
+    const entityId = safeText(state?.entity_id, 255);
+    if (entityId && !stateByEntity.has(entityId)) stateByEntity.set(entityId, state);
+  }
   const seen = new Set();
-  const normalized = [];
+  const byId = new Map();
   for (const device of devices) {
     const id = safeText(device?.id, 128);
     if (!id || seen.has(id)) continue;
@@ -56,11 +63,32 @@ export function normalizeHomeAssistantDevices(devices, areas, maxEntries = MAX_R
     const model = safeText(device?.model, 160);
     const name = safeText(device?.name_by_user, 160) ?? safeText(device?.name, 160) ?? model ?? 'Unnamed device';
     const area = areaNames.get(safeText(device?.area_id, 128)) ?? null;
-    normalized.push({ id, name, area, ...(manufacturer && { manufacturer }), ...(model && { model }), disabled: Boolean(device?.disabled_by) });
+    byId.set(id, { deviceId: id, name, area, ...(manufacturer && { manufacturer }), ...(model && { model }), disabled: Boolean(device?.disabled_by), controls: [] });
+  }
+  const seenEntities = new Set();
+  for (const entity of entityRegistry.entities) {
+    const entityId = safeText(entity?.ei, 255);
+    const deviceId = safeText(entity?.di, 128);
+    if (!entityId || !deviceId || seenEntities.has(entityId) || entity?.hb || entity?.ec !== undefined) continue;
+    seenEntities.add(entityId);
+    const device = byId.get(deviceId);
+    if (!device || device.disabled) continue;
+    const separator = entityId.indexOf('.');
+    const domain = separator > 0 ? entityId.slice(0, separator) : '';
+    if (!CONTROL_DOMAINS.has(domain) || !/^[a-z0-9_]+\.[a-z0-9_]+$/.test(entityId)) continue;
+    const current = stateByEntity.get(entityId);
+    if (!current) continue;
+    const rawState = safeText(current.state, 32);
+    const state = ['on', 'off', 'unavailable'].includes(rawState) ? rawState : 'unknown';
+    const objectName = entityId.slice(separator + 1).replaceAll('_', ' ');
+    const name = safeText(current?.attributes?.friendly_name, 160) ?? safeText(entity?.en, 160) ?? safeText(objectName, 160) ?? 'Unnamed control';
+    device.controls.push({ entityId, domain, name, state });
   }
   const compare = (left, right) => left.localeCompare(right, undefined, { sensitivity: 'base' });
-  normalized.sort((left, right) => compare(left.area ?? 'Unassigned', right.area ?? 'Unassigned') || compare(left.name, right.name) || compare(left.id, right.id));
-  return normalized.map(({ id: _id, ...device }) => device);
+  const normalized = [...byId.values()];
+  for (const device of normalized) device.controls.sort((left, right) => compare(left.name, right.name) || compare(left.entityId, right.entityId));
+  normalized.sort((left, right) => compare(left.area ?? 'Unassigned', right.area ?? 'Unassigned') || compare(left.name, right.name) || compare(left.deviceId, right.deviceId));
+  return normalized;
 }
 
 function webSocketUrl(baseUrl) {
@@ -76,8 +104,7 @@ function registrySnapshot(settings, { webSocketFactory, timeoutMs, maxMessageByt
     let settled = false;
     let phase = 'awaiting_auth_required';
     const pendingCommands = new Set();
-    let devices;
-    let areas;
+    const results = new Map();
     const finish = (error, result) => {
       if (settled) return;
       settled = true;
@@ -109,21 +136,21 @@ function registrySnapshot(settings, { webSocketFactory, timeoutMs, maxMessageByt
         if (phase === 'awaiting_auth_result' && message.type === 'auth_invalid') return finish(clientError('Home Assistant rejected the access token.'));
         if (phase === 'awaiting_auth_result' && message.type === 'auth_ok') {
           phase = 'commands';
-          pendingCommands.add(1); pendingCommands.add(2);
+          pendingCommands.add(1); pendingCommands.add(2); pendingCommands.add(3); pendingCommands.add(4);
           send({ id: 1, type: 'config/device_registry/list' });
           send({ id: 2, type: 'config/area_registry/list' });
+          send({ id: 3, type: 'config/entity_registry/list_for_display' });
+          send({ id: 4, type: 'get_states' });
           return;
         }
         return finish(clientError('Home Assistant returned an unexpected authentication response.'));
       }
       if (message.type !== 'result' || !pendingCommands.has(message.id) || typeof message.success !== 'boolean') return finish(clientError('Home Assistant returned an invalid command response.'));
       pendingCommands.delete(message.id);
-      if (!message.success) return finish(clientError('Home Assistant could not list its device registry.'));
-      if (!Array.isArray(message.result)) return finish(clientError('Home Assistant returned an invalid device registry.'));
-      if (message.id === 1) devices = message.result;
-      else areas = message.result;
+      if (!message.success) return finish(clientError('Home Assistant could not list its device controls.'));
+      results.set(message.id, message.result);
       if (pendingCommands.size === 0) {
-        try { finish(null, normalizeHomeAssistantDevices(devices, areas, maxEntries)); }
+        try { finish(null, normalizeHomeAssistantDevices(results.get(1), results.get(2), results.get(3), results.get(4), maxEntries)); }
         catch (error) { finish(clientError(error.message)); }
       }
     };
@@ -139,13 +166,62 @@ function registrySnapshot(settings, { webSocketFactory, timeoutMs, maxMessageByt
   });
 }
 
+function serviceCall(settings, target, action, { webSocketFactory, timeoutMs, maxMessageBytes }) {
+  return new Promise((resolve, reject) => {
+    let socket;
+    let settled = false;
+    let phase = 'awaiting_auth_required';
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      socket?.removeEventListener?.('message', onMessage);
+      socket?.removeEventListener?.('error', onError);
+      socket?.removeEventListener?.('close', onClose);
+      try { socket?.close(); } catch { /* Cleanup must not replace the action result. */ }
+      if (error) reject(error); else resolve();
+    };
+    const send = (message) => {
+      try { socket.send(JSON.stringify(message)); }
+      catch { finish(clientError(CONNECTION_FAILED)); }
+    };
+    const onMessage = (event) => {
+      if (settled || typeof event.data !== 'string' || Buffer.byteLength(event.data) > maxMessageBytes) return finish(clientError('Home Assistant returned an invalid action response.'));
+      let message;
+      try { message = JSON.parse(event.data); }
+      catch { return finish(clientError('Home Assistant returned an invalid action response.')); }
+      if (!message || typeof message !== 'object' || typeof message.type !== 'string') return finish(clientError('Home Assistant returned an invalid action response.'));
+      if (phase === 'awaiting_auth_required' && message.type === 'auth_required') {
+        phase = 'awaiting_auth_result'; send({ type: 'auth', access_token: settings.accessToken }); return;
+      }
+      if (phase === 'awaiting_auth_result' && message.type === 'auth_invalid') return finish(clientError('Home Assistant rejected the access token.'));
+      if (phase === 'awaiting_auth_result' && message.type === 'auth_ok') {
+        phase = 'awaiting_result'; send({ id: 1, type: 'call_service', domain: target.domain, service: action, target: { entity_id: target.entityId } }); return;
+      }
+      if (phase !== 'awaiting_result' || message.type !== 'result' || message.id !== 1 || typeof message.success !== 'boolean') return finish(clientError('Home Assistant returned an invalid action response.'));
+      if (!message.success) return finish(clientError('Home Assistant could not control this entity.'));
+      finish();
+    };
+    const onError = (event) => finish(homeAssistantWebSocketError(event));
+    const onClose = () => finish(clientError('Home Assistant closed the connection before completing the action.'));
+    const timer = setTimeout(() => finish(clientError('Home Assistant action timed out.')), timeoutMs);
+    try {
+      socket = webSocketFactory(webSocketUrl(settings.baseUrl));
+      socket.addEventListener('message', onMessage);
+      socket.addEventListener('error', onError);
+      socket.addEventListener('close', onClose);
+    } catch { finish(clientError(CONNECTION_FAILED)); }
+  });
+}
+
 export function createHomeAssistantClient({ webSocketFactory = (url) => new WebSocket(url), timeoutMs = 8_000, cacheSeconds = 30, maxMessageBytes = MAX_MESSAGE_BYTES, maxEntries = MAX_REGISTRY_ENTRIES, now = Date.now } = {}) {
   const cache = new Map();
   const inFlight = new Map();
   let cacheGeneration = 0;
   const keyFor = (settings) => createHash('sha256').update(`${settings.baseUrl}\0${settings.accessToken}`).digest('base64url');
+  const clearCache = () => { cacheGeneration += 1; cache.clear(); inFlight.clear(); };
   return {
-    clearCache() { cacheGeneration += 1; cache.clear(); inFlight.clear(); },
+    clearCache,
     async listDevices(settings, { force = false } = {}) {
       const key = keyFor(settings);
       const cached = cache.get(key);
@@ -160,6 +236,11 @@ export function createHomeAssistantClient({ webSocketFactory = (url) => new WebS
         if (generation === cacheGeneration) cache.set(key, { devices, fetchedAt: now() });
         return devices;
       } finally { if (inFlight.get(key) === request) inFlight.delete(key); }
+    },
+    async controlEntity(settings, target, action) {
+      if (!target || !CONTROL_DOMAINS.has(target.domain) || !CONTROL_ACTIONS.has(action) || typeof target.entityId !== 'string' || !target.entityId.startsWith(`${target.domain}.`) || !/^[a-z0-9_]+\.[a-z0-9_]+$/.test(target.entityId)) throw clientError('Home Assistant control target is invalid.');
+      await serviceCall(settings, target, action, { webSocketFactory, timeoutMs, maxMessageBytes });
+      clearCache();
     }
   };
 }

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { filterHomeDevices, groupHomeDevices, isLatestRequest, restoreCollectionFocus, runBulkWake, selectedButtonState, showDialogError, summarizeWakeResults, updateCollectionSelection, updateSelection } from '../public/app-helpers.js';
+import { filterHomeDevices, groupHomeDevices, homeControlPresentation, isLatestRequest, restoreCollectionFocus, runBulkWake, selectedButtonState, showDialogError, summarizeWakeResults, updateCollectionSelection, updateSelection } from '../public/app-helpers.js';
 
 test('summarizes complete, partial, and total Wake outcomes', () => {
   assert.deepEqual(summarizeWakeResults([{ status: 'fulfilled' }, { status: 'fulfilled' }]), { succeeded: 2, failed: 0, error: false, message: 'Wake packets sent to 2 device(s).' });
@@ -46,11 +46,12 @@ test('updates collection controls in place and restores the matching focus targe
 
 test('filters and groups Home Assistant devices without accepting stale responses', async () => {
   const devices = [
-    { name: 'Desk lamp', area: 'Office', manufacturer: 'Hue', model: 'Light' },
+    { name: 'Desk lamp', area: 'Office', manufacturer: 'Hue', model: 'Light', controls: [{ name: 'Reading light' }] },
     { name: 'Temperature', area: null, manufacturer: 'Acme', model: 'Sensor' }
   ];
   assert.deepEqual(filterHomeDevices(devices, ' hue '), [devices[0]]);
   assert.deepEqual(filterHomeDevices(devices, 'sensor'), [devices[1]]);
+  assert.deepEqual(filterHomeDevices(devices, 'reading'), [devices[0]]);
   assert.deepEqual([...groupHomeDevices(devices).keys()], ['Office', 'Unassigned']);
   assert.equal(isLatestRequest(3, 3), true);
   assert.equal(isLatestRequest(4, 3), false);
@@ -62,4 +63,7 @@ test('filters and groups Home Assistant devices without accepting stale response
   resolveOld('old');
   assert.equal(await newResponse, 'new');
   assert.equal(await oldResponse, 'ignored');
+  assert.deepEqual(homeControlPresentation({ state: 'on', available: true }), { action: 'turn_off', disabled: false, pressed: true, text: 'Turn off' });
+  assert.deepEqual(homeControlPresentation({ state: 'off', available: true }, true), { action: 'turn_on', disabled: true, pressed: false, text: 'Working…' });
+  assert.equal(homeControlPresentation({ state: 'unavailable', available: false }).disabled, true);
 });

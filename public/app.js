@@ -1,6 +1,6 @@
-import { filterHomeDevices, groupHomeDevices, isLatestRequest, restoreCollectionFocus, runBulkWake, selectedButtonState, showDialogError, updateCollectionSelection, updateSelection } from './app-helpers.js';
+import { filterHomeDevices, groupHomeDevices, homeControlPresentation, isLatestRequest, restoreCollectionFocus, runBulkWake, selectedButtonState, showDialogError, updateCollectionSelection, updateSelection } from './app-helpers.js';
 
-const state = { devices: [], selected: new Set(), bulkWakePending: false, bookmarks: [], linkwarden: null, collections: [], activeCollectionToken: null, collectionRequest: 0, homeAssistant: null, homeDevices: [], homeDeviceRequest: 0, homeAssistantRequest: 0 };
+const state = { devices: [], selected: new Set(), bulkWakePending: false, bookmarks: [], linkwarden: null, collections: [], activeCollectionToken: null, collectionRequest: 0, homeAssistant: null, homeDevices: [], homeDeviceRequest: 0, homeAssistantRequest: 0, pendingHomeControls: new Set() };
 const devicesElement = document.querySelector('#devices');
 const statusElement = document.querySelector('#status');
 const searchElement = document.querySelector('#search');
@@ -130,20 +130,54 @@ function renderHomeDevices(message = '', error = false) {
       const details = [device.manufacturer, device.model].filter(Boolean).join(' · ');
       if (details) { const metadata = document.createElement('p'); metadata.textContent = details; card.append(metadata); }
       if (device.disabled) { const disabled = document.createElement('p'); disabled.className = 'device-state'; disabled.textContent = 'Disabled in Home Assistant'; card.append(disabled); }
+      if (device.controls?.length) {
+        const controls = document.createElement('div'); controls.className = 'home-controls';
+        for (const control of device.controls) {
+          const row = document.createElement('div'); row.className = 'home-control';
+          const summary = document.createElement('div'); summary.className = 'home-control-summary';
+          const label = document.createElement('span'); label.className = 'home-control-name'; label.textContent = control.name;
+          const currentState = document.createElement('span'); currentState.className = `home-control-state ${control.state}`; currentState.textContent = control.state;
+          summary.append(label, currentState);
+          const pending = state.pendingHomeControls.has(control.controlToken);
+          const presentation = homeControlPresentation(control, pending);
+          const actionButton = button(presentation.text, 'button secondary home-control-button', () => controlHomeAssistant(control, presentation.action));
+          actionButton.disabled = presentation.disabled;
+          actionButton.ariaLabel = `${presentation.action === 'turn_on' ? 'Turn on' : 'Turn off'} ${control.name}`;
+          actionButton.setAttribute('aria-pressed', presentation.pressed ? 'true' : 'false');
+          row.append(summary, actionButton); controls.append(row);
+        }
+        card.append(controls);
+      }
       grid.append(card);
     }
     section.append(grid); homeAssistantDevicesElement.append(section);
   }
 }
 
-async function loadHomeDevices(refresh = false) {
+async function loadHomeDevices(refresh = false, actionMessage = '') {
   const request = ++state.homeDeviceRequest;
   setHomeAssistantStatus('Loading Home Assistant devices…');
   try {
     const result = await api(`/api/home-assistant/devices${refresh ? '?refresh=1' : ''}`);
     if (!isLatestRequest(state.homeDeviceRequest, request)) return;
-    state.homeDevices = result.devices; renderHomeDevices();
-  } catch (error) { if (isLatestRequest(state.homeDeviceRequest, request)) renderHomeDevices(error.message, true); }
+    state.homeDevices = result.devices; renderHomeDevices(actionMessage);
+  } catch (error) { if (isLatestRequest(state.homeDeviceRequest, request)) renderHomeDevices(actionMessage ? `${actionMessage} Refresh failed: ${error.message}` : error.message, true); }
+}
+
+async function controlHomeAssistant(control, action) {
+  if (!control.available || state.pendingHomeControls.has(control.controlToken)) return;
+  const connectionRequest = state.homeAssistantRequest;
+  state.pendingHomeControls.add(control.controlToken);
+  renderHomeDevices(`${action === 'turn_on' ? 'Turning on' : 'Turning off'} ${control.name}…`);
+  try {
+    const result = await api(`/api/home-assistant/controls/${encodeURIComponent(control.controlToken)}`, { method: 'POST', body: JSON.stringify({ action }) });
+    if (!isLatestRequest(state.homeAssistantRequest, connectionRequest)) return;
+    state.pendingHomeControls.delete(control.controlToken);
+    await loadHomeDevices(true, result.message);
+  } catch (error) {
+    state.pendingHomeControls.delete(control.controlToken);
+    if (isLatestRequest(state.homeAssistantRequest, connectionRequest)) renderHomeDevices(error.message, true);
+  }
 }
 
 async function loadHomeAssistant() {
@@ -305,7 +339,7 @@ disconnectHomeAssistantButton.addEventListener('click', async () => {
   try {
     await api('/api/home-assistant', { method: 'DELETE' });
     if (!isLatestRequest(state.homeAssistantRequest, request)) return;
-    state.homeDeviceRequest += 1; state.homeAssistant = { configured: false, accessTokenPresent: false, needsReauthentication: false, encryptionReady: state.homeAssistant?.encryptionReady }; state.homeDevices = []; homeDeviceSearch.value = ''; renderHomeDevices();
+    state.homeDeviceRequest += 1; state.pendingHomeControls.clear(); state.homeAssistant = { configured: false, accessTokenPresent: false, needsReauthentication: false, encryptionReady: state.homeAssistant?.encryptionReady }; state.homeDevices = []; homeDeviceSearch.value = ''; renderHomeDevices();
   } catch (error) { if (isLatestRequest(state.homeAssistantRequest, request)) renderHomeDevices(error.message, true); }
 });
 homeAssistantForm.addEventListener('submit', async (event) => {
@@ -314,7 +348,7 @@ homeAssistantForm.addEventListener('submit', async (event) => {
   try {
     const result = await api('/api/home-assistant', { method: 'PUT', body: JSON.stringify(Object.fromEntries(new FormData(homeAssistantForm))) });
     if (!isLatestRequest(state.homeAssistantRequest, request)) return;
-    state.homeDeviceRequest += 1; state.homeAssistant = result.homeAssistant; state.homeDevices = result.devices; homeDeviceSearch.value = '';
+    state.homeDeviceRequest += 1; state.pendingHomeControls.clear(); state.homeAssistant = result.homeAssistant; state.homeDevices = result.devices; homeDeviceSearch.value = '';
     homeAssistantDialog.close(); renderHomeDevices('Home Assistant connected.');
   } catch (error) { if (isLatestRequest(state.homeAssistantRequest, request)) showDialogError(homeAssistantError, error.message); }
   finally { homeAssistantSubmit.disabled = false; }

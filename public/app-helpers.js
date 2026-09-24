@@ -42,11 +42,16 @@ export function restoreCollectionFocus(root, key) {
 export function filterHomeDevices(devices, term) {
   const normalized = term.trim().toLowerCase();
   if (!normalized) return devices;
-  return devices.filter((device) => [device.name, device.area, device.manufacturer, device.model].filter(Boolean).join(' ').toLowerCase().includes(normalized));
+  return devices.filter((device) => [device.name, device.area, device.manufacturer, device.model, ...(device.controls ?? []).map((control) => control.name)].filter(Boolean).join(' ').toLowerCase().includes(normalized));
 }
 
 export function groupHomeDevices(devices) {
   return Map.groupBy(devices, (device) => device.area || 'Unassigned');
+}
+
+export function homeControlPresentation(control, pending = false) {
+  const action = control.state === 'on' ? 'turn_off' : 'turn_on';
+  return { action, disabled: !control.available || pending, pressed: control.state === 'on', text: pending ? 'Working…' : action === 'turn_on' ? 'Turn on' : 'Turn off' };
 }
 
 export function isLatestRequest(current, request) {

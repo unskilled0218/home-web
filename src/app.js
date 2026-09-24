@@ -10,11 +10,13 @@ import { decryptApiKey, encryptApiKey, encryptionKey } from './linkwarden-crypto
 import { normalizeLinkwardenCredentials } from './linkwarden.js';
 import { createCollectionSelectionStore } from './collection-selections.js';
 import { isHomeAssistantClientError, normalizeHomeAssistantCredentials } from './home-assistant.js';
+import { createHomeAssistantControlStore } from './home-assistant-controls.js';
 
 export const MAX_JSON_BODY_BYTES = 16_384;
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const defaultPublicRoot = path.join(root, 'public');
 const HOME_ASSISTANT_UNAVAILABLE = 'Home Assistant devices are currently unavailable.';
+const HOME_ASSISTANT_CONTROL_TTL_MS = 10 * 60_000;
 const MIME_TYPES = { '.css': 'text/css; charset=utf-8', '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml' };
 
 function json(response, status, body) {
@@ -79,14 +81,20 @@ function deviceId(pathname, suffix = '') {
   return match ? Number(match[1]) : null;
 }
 
+function homeAssistantControlToken(pathname) {
+  const match = /^\/api\/home-assistant\/controls\/([A-Za-z0-9_-]{16,128})$/.exec(pathname);
+  return match?.[1] ?? null;
+}
+
 function selectionFingerprint(settings) {
   return createHash('sha256').update(`${settings.baseUrl}\0${settings.username}\0${settings.accessToken}`).digest('base64url');
 }
 
-export function createDashboardServer({ runtimeConfig, store, linkwarden, homeAssistant, wakeExecutor = executeWakeRequest, collectionSelections = createCollectionSelectionStore(), now = Date.now, publicRoot = defaultPublicRoot }) {
+export function createDashboardServer({ runtimeConfig, store, linkwarden, homeAssistant, homeAssistantControls = createHomeAssistantControlStore(), wakeExecutor = executeWakeRequest, collectionSelections = createCollectionSelectionStore(), now = Date.now, publicRoot = defaultPublicRoot }) {
   const wakeRequests = new Map();
   const integrationEncryptionKey = runtimeConfig.integrationEncryptionKey ?? runtimeConfig.linkwardenEncryptionKey;
   let homeAssistantMutation = Promise.resolve();
+  const homeAssistantActions = new Set();
   const queueHomeAssistantMutation = (operation) => {
     const result = homeAssistantMutation.then(operation, operation);
     homeAssistantMutation = result.catch(() => {});
@@ -152,6 +160,27 @@ export function createDashboardServer({ runtimeConfig, store, linkwarden, homeAs
     catch { throw new Error('Home Assistant needs re-authentication.'); }
   }
 
+  function homeAssistantFingerprint(settings) {
+    return createHash('sha256').update(`${settings.baseUrl}\0${settings.accessToken}`).digest('base64url');
+  }
+
+  function publicHomeAssistantDevices(settings, devices) {
+    const fingerprint = homeAssistantFingerprint(settings);
+    const expiresAt = now() + HOME_ASSISTANT_CONTROL_TTL_MS;
+    return devices.map(({ name, area, manufacturer, model, disabled, controls = [] }) => ({
+      name,
+      area,
+      ...(manufacturer && { manufacturer }),
+      ...(model && { model }),
+      disabled: Boolean(disabled),
+      controls: controls.map(({ entityId, domain, name, state }) => {
+        const available = state === 'on' || state === 'off';
+        const controlToken = homeAssistantControls.issue({ entityId, domain, available, fingerprint, expiresAt });
+        return { controlToken, name, state, available };
+      })
+    }));
+  }
+
   function homeAssistantCredentialsFromInput(input) {
     const existing = store.getHomeAssistant();
     const settings = normalizeHomeAssistantCredentials(input, existing);
@@ -186,7 +215,9 @@ export function createDashboardServer({ runtimeConfig, store, linkwarden, homeAs
       if (!status.configured) return json(response, 200, { configured: false, devices: [], ...(status.needsReauthentication && { needsReauthentication: true }) });
       try {
         const url = new URL(request.url, 'http://localhost');
-        return json(response, 200, { configured: true, devices: await homeAssistant.listDevices(savedHomeAssistantSettings(), { force: url.searchParams.get('refresh') === '1' }) });
+        const settings = savedHomeAssistantSettings();
+        const devices = await homeAssistant.listDevices(settings, { force: url.searchParams.get('refresh') === '1' });
+        return json(response, 200, { configured: true, devices: publicHomeAssistantDevices(settings, devices) });
       } catch (error) { return json(response, 503, { configured: true, error: isHomeAssistantClientError(error) ? error.message : HOME_ASSISTANT_UNAVAILABLE }); }
     }
     if (request.method === 'GET' && pathname === '/api/linkwarden/collections') {
@@ -202,6 +233,27 @@ export function createDashboardServer({ runtimeConfig, store, linkwarden, homeAs
         const result = await linkwarden.getBookmarks({ ...settings, collectionId: collection.id }, { force: url.searchParams.get('refresh') === '1' });
         return json(response, 200, { configured: true, ...result });
       } catch (error) { return json(response, error.message.startsWith('Select a collection') ? 400 : 503, { configured: true, error: error.message.startsWith('Select a collection') ? error.message : 'Bookmarks are currently unavailable.' }); }
+    }
+
+    const controlToken = homeAssistantControlToken(pathname);
+    if (request.method === 'POST' && controlToken) {
+      let input;
+      try { input = await readJson(request); }
+      catch (error) { return json(response, 400, { error: error.message }); }
+      if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).length !== 1 || !['turn_on', 'turn_off'].includes(input.action)) return json(response, 400, { error: 'Home Assistant action must be turn_on or turn_off.' });
+      let settings;
+      try { settings = savedHomeAssistantSettings(); }
+      catch { return json(response, 503, { error: HOME_ASSISTANT_UNAVAILABLE }); }
+      const target = homeAssistantControls.resolve(controlToken, homeAssistantFingerprint(settings));
+      if (!target || !target.available) return json(response, 404, { error: 'Home Assistant control is no longer available. Refresh devices.' });
+      if (homeAssistantActions.has(controlToken)) return json(response, 409, { error: 'This Home Assistant control is already pending.' });
+      homeAssistantActions.add(controlToken);
+      try {
+        await homeAssistant.controlEntity(settings, { entityId: target.entityId, domain: target.domain }, input.action);
+        return json(response, 200, { message: `Home Assistant accepted the ${input.action === 'turn_on' ? 'turn on' : 'turn off'} action.` });
+      } catch (error) {
+        return json(response, 503, { error: isHomeAssistantClientError(error) ? error.message : 'Home Assistant could not complete the action.' });
+      } finally { homeAssistantActions.delete(controlToken); }
     }
 
     const id = deviceId(pathname);
@@ -231,11 +283,12 @@ export function createDashboardServer({ runtimeConfig, store, linkwarden, homeAs
           catch (error) { throw new Error(isHomeAssistantClientError(error) ? error.message : HOME_ASSISTANT_UNAVAILABLE); }
           const encryptedAccessToken = encryptApiKey(settings.accessToken, integrationEncryptionKey);
           store.saveHomeAssistant({ ...settings, encryptedAccessToken });
-          return json(response, 200, { homeAssistant: homeAssistantStatus(), devices });
+          homeAssistantControls.clear();
+          return json(response, 200, { homeAssistant: homeAssistantStatus(), devices: publicHomeAssistantDevices(settings, devices) });
         });
       }
       if (request.method === 'DELETE' && pathname === '/api/home-assistant') {
-        return await queueHomeAssistantMutation(async () => { store.removeHomeAssistant(); homeAssistant.clearCache(); return json(response, 204, {}); });
+        return await queueHomeAssistantMutation(async () => { store.removeHomeAssistant(); homeAssistant.clearCache(); homeAssistantControls.clear(); return json(response, 204, {}); });
       }
       if (request.method === 'PUT' && id) {
         if (!store.get(id)) return json(response, 404, { error: 'Device not found.' });

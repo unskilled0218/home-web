@@ -80,6 +80,14 @@ input:focus { outline: 3px solid #58c5bb66; border-color: #70d6cb; }
 .home-device h4 { margin: 0; font-size: 1rem; overflow-wrap: anywhere; }
 .home-device p { margin: .55rem 0 0; color: #9db5c9; line-height: 1.4; overflow-wrap: anywhere; }
 .home-device .device-state { color: #ffcf70; font-size: .78rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.home-controls { display: grid; gap: .55rem; margin-top: .9rem; padding-top: .8rem; border-top: 1px solid #294964; }
+.home-control { display: flex; align-items: center; justify-content: space-between; gap: .65rem; }
+.home-control-summary { display: grid; min-width: 0; }
+.home-control-name { overflow-wrap: anywhere; font-size: .88rem; font-weight: 700; }
+.home-control-state { color: #8ba5ba; font-size: .72rem; text-transform: uppercase; }
+.home-control-state.on { color: #70d6cb; }
+.home-control-state.unavailable, .home-control-state.unknown { color: #ffcf70; }
+.home-control-button { flex: 0 0 auto; padding: .55rem .7rem; }
 .empty { padding: 2rem; color: #b6c7d7; border: 1px dashed #31506a; border-radius: .8rem; text-align: center; }
 
 dialog { width: min(94vw, 470px); border: 1px solid #3d627e; border-radius: .9rem; padding: 0; color: #eff7ff; background: #102a43; box-shadow: 0 1rem 4rem #000a; }

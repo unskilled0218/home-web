@@ -10,6 +10,7 @@ import { createDashboardServer } from '../src/app.js';
 import { createStore } from '../src/db.js';
 import { decryptApiKey, encryptApiKey } from '../src/linkwarden-crypto.js';
 import { homeAssistantWebSocketError } from '../src/home-assistant.js';
+import { createHomeAssistantControlStore } from '../src/home-assistant-controls.js';
 
 test('connects Home Assistant atomically and exposes only safe configuration', async (context) => {
   const directory = mkdtempSync(path.join(tmpdir(), 'dashboard-home-assistant-api-'));
@@ -18,8 +19,12 @@ test('connects Home Assistant atomically and exposes only safe configuration', a
   const calls = [];
   let failure = null;
   let blockNext = false;
+  let blockControl = false;
   let releaseBlocked;
   let blockedStarted;
+  let releaseControl;
+  let controlStarted;
+  let actionFailure = null;
   const homeAssistant = {
     clearCache() { calls.push({ clear: true }); },
     async listDevices(settings, options) {
@@ -29,14 +34,26 @@ test('connects Home Assistant atomically and exposes only safe configuration', a
         blockNext = false;
         await new Promise((resolve) => { releaseBlocked = resolve; blockedStarted(); });
       }
-      return [{ name: 'Lamp', area: 'Office', disabled: false }];
+      return [{ deviceId: 'device-private', name: 'Lamp', area: 'Office', disabled: false, controls: [
+        { entityId: 'light.office', domain: 'light', name: 'Office lamp', state: 'off' },
+        { entityId: 'switch.unavailable', domain: 'switch', name: 'Unavailable switch', state: 'unavailable' }
+      ] }];
+    },
+    async controlEntity(settings, target, action) {
+      calls.push({ settings, target, action });
+      if (actionFailure) throw actionFailure;
+      if (blockControl) {
+        blockControl = false;
+        await new Promise((resolve) => { releaseControl = resolve; controlStarted(); });
+      }
     }
   };
   const server = createDashboardServer({
     runtimeConfig: { allowedHosts: ['127.0.0.1'], linkwardenEncryptionKey: secret, wakeCooldownSeconds: 20, wolPort: 9 },
     store,
     linkwarden: { clearCache() {}, listCollections: async () => [], getBookmarks: async () => ({ bookmarks: [], stale: false }) },
-    homeAssistant
+    homeAssistant,
+    homeAssistantControls: createHomeAssistantControlStore()
   });
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
@@ -52,14 +69,43 @@ test('connects Home Assistant atomically and exposes only safe configuration', a
   assert.equal(connected.status, 200);
   assert.equal(connected.body.homeAssistant.configured, true);
   assert.equal(JSON.stringify(connected.body).includes('private-token'), false);
+  assert.equal(JSON.stringify(connected.body).includes('device-private'), false);
+  assert.equal(JSON.stringify(connected.body).includes('light.office'), false);
+  const controlToken = connected.body.devices[0].controls[0].controlToken;
+  const unavailableToken = connected.body.devices[0].controls[1].controlToken;
+  assert.match(controlToken, /^[A-Za-z0-9_-]+$/);
+  assert.equal(connected.body.devices[0].controls[0].available, true);
+  assert.equal(connected.body.devices[0].controls[1].available, false);
   assert.equal(decryptApiKey(store.getHomeAssistant().encryptedAccessToken, secret), 'private-token');
   assert.equal((await api('/api/home-assistant')).body.homeAssistant.baseUrl, 'https://home.example.test');
+
+  assert.equal((await api(`/api/home-assistant/controls/${controlToken}`, { method: 'POST', body: { action: 'turn_on' } })).status, 200);
+  assert.deepEqual({ entityId: calls.at(-1).target.entityId, domain: calls.at(-1).target.domain }, { entityId: 'light.office', domain: 'light' });
+  assert.equal(calls.at(-1).action, 'turn_on');
+  assert.equal((await api(`/api/home-assistant/controls/${unavailableToken}`, { method: 'POST', body: { action: 'turn_on' } })).status, 404);
+  assert.equal((await api('/api/home-assistant/controls/forged-control-token', { method: 'POST', body: { action: 'turn_on' } })).status, 404);
+  assert.equal((await api(`/api/home-assistant/controls/${controlToken}`, { method: 'POST', body: { action: 'toggle', extra: true } })).status, 400);
+
+  blockControl = true;
+  const actionStarted = new Promise((resolve) => { controlStarted = resolve; });
+  const pendingAction = api(`/api/home-assistant/controls/${controlToken}`, { method: 'POST', body: { action: 'turn_off' } });
+  await actionStarted;
+  assert.equal((await api(`/api/home-assistant/controls/${controlToken}`, { method: 'POST', body: { action: 'turn_off' } })).status, 409);
+  releaseControl();
+  assert.equal((await pendingAction).status, 200);
+
+  actionFailure = homeAssistantWebSocketError({ error: { code: 'PRIVATE_UPSTREAM', message: 'private action detail' } });
+  const failedAction = await api(`/api/home-assistant/controls/${controlToken}`, { method: 'POST', body: { action: 'turn_on' } });
+  assert.equal(failedAction.status, 503);
+  assert.equal(JSON.stringify(failedAction.body).includes('private action detail'), false);
+  actionFailure = null;
 
   const listed = await api('/api/home-assistant/devices?refresh=1');
   assert.equal(listed.status, 200);
   assert.equal(calls.at(-1).options.force, true);
   assert.equal((await api('/api/home-assistant', { method: 'PUT', body: { url: 'https://changed.example.test', accessToken: '' } })).status, 400);
   assert.equal((await api('/api/home-assistant', { method: 'PUT', body: { url: 'https://home.example.test', accessToken: '' } })).status, 200);
+  assert.equal((await api(`/api/home-assistant/controls/${controlToken}`, { method: 'POST', body: { action: 'turn_on' } })).status, 404);
 
   failure = 'upstream private detail';
   const failedConnect = await api('/api/home-assistant', { method: 'PUT', body: { url: 'https://home.example.test', accessToken: 'replacement' } });
