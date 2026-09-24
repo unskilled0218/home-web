@@ -25,7 +25,7 @@ h2, h3, p { margin: .5em 0; }
 #current-weather { display: flex; gap: .8em; align-items: center; }
 #current-weather-values { display: flex; flex-wrap: wrap; gap: .5em 1em; align-items: baseline; min-width: 0; }
 .right #current-weather, .right #current-weather-values { justify-content: flex-end; }
-.weather-icon { flex: 0 0 auto; width: clamp(3rem, 6em, 6rem); height: clamp(3rem, 6em, 6rem); color: #fff; filter: drop-shadow(0 2px 3px #000); overflow: visible; }
+.weather-icon { flex: 0 0 auto; width: clamp(3rem, 6em, 6rem); height: clamp(3rem, 6em, 6rem); filter: brightness(0) invert(1) drop-shadow(1px 1px 2px rgb(0 0 0 / .5)); }
 .condition { font-weight: 600; }
 .temperature { font-size: 2em; }
 .attribution { font-size: .75em; }

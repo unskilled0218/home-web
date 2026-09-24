@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
+import { readdirSync } from 'node:fs';
 import { createDashboardServer } from '../src/app.js';
-import { clockText, loadSettings, normalizeSettings, orderPhotos, sampleHours, selectPhotos, weatherIconKey } from '../public/dashboard-helpers.js';
+import { clockText, loadSettings, normalizeSettings, orderPhotos, sampleHours, selectPhotos, weatherIconFile } from '../public/dashboard-helpers.js';
 import { createWeatherController, normalizeForecast, requestJson, searchLocations, weatherUrls } from '../public/dashboard-weather.js';
 import { createPhotoController } from '../public/dashboard-photos.js';
 
@@ -29,27 +30,31 @@ test('serves dashboard aliases and assets while preserving home and static conta
   for (const name of ['dashboard.js', 'dashboard-helpers.js', 'dashboard-weather.js', 'dashboard-photos.js', 'dashboard.css']) {
     const result = await fetch(`${base}/${name}`); assert.equal(result.status, 200); assert.match(result.headers.get('content-type'), name.endsWith('.css') ? /text\/css/ : /text\/javascript/);
   }
-  const spriteResponse = await fetch(`${base}/weather-icons.svg`); assert.equal(spriteResponse.status, 200); assert.match(spriteResponse.headers.get('content-type'), /image\/svg\+xml/);
-  const sprite = await spriteResponse.text();
-  const symbols = [...sprite.matchAll(/<symbol id="([^"]+)"/g)].map((match) => match[1]);
-  assert.deepEqual(symbols, ['clear-day', 'clear-night', 'partly-cloudy-day', 'partly-cloudy-night', 'cloudy', 'fog', 'drizzle', 'rain', 'sleet', 'snow', 'thunderstorm', 'unknown']);
-  assert.doesNotMatch(sprite, /<script|xlink:href|<text|\shref=/i);
-  const dashboardHtml = await (await fetch(`${base}/dashboard.html`)).text(); assert.match(dashboardHtml, /id="weather-icon"[^>]*aria-hidden="true"[^>]*hidden/);
+  const iconFiles = ['weather-cloudy.svg', 'weather-fog.svg', 'weather-lightning-rainy.svg', 'weather-lightning.svg', 'weather-night-partly-cloudy.svg', 'weather-night.svg', 'weather-partly-cloudy.svg', 'weather-pouring.svg', 'weather-rainy.svg', 'weather-snowy-rainy.svg', 'weather-snowy.svg', 'weather-sunny.svg'];
+  assert.deepEqual(readdirSync(new URL('../public/weather-icons/', import.meta.url)).sort(), iconFiles);
+  for (const name of iconFiles) {
+    const iconResponse = await fetch(`${base}/weather-icons/${name}`); assert.equal(iconResponse.status, 200); assert.match(iconResponse.headers.get('content-type'), /image\/svg\+xml/);
+    const icon = await iconResponse.text(); assert.match(icon, /^<svg[^>]*viewBox="0 0 24 24"><path d="[^"]+" \/><\/svg>$/); assert.doesNotMatch(icon, /<script|<text|<animate|<foreignObject|xlink:href|\shref=/i);
+  }
+  assert.equal((await fetch(`${base}/weather-icons.svg`)).status, 404); assert.equal((await fetch(`${base}/weather-icons/snowflake.svg`)).status, 404);
+  const dashboardHtml = await (await fetch(`${base}/dashboard.html`)).text(); assert.match(dashboardHtml, /<img id="weather-icon"[^>]*alt=""[^>]*aria-hidden="true"[^>]*hidden>/);
   const dashboardCss = await (await fetch(`${base}/dashboard.css`)).text(); assert.match(dashboardCss, /#weather \{[^}]*background: transparent;[^}]*border-radius: 0;/); assert.doesNotMatch(dashboardCss, /#weather \{[^}]*#08101bcc/);
-  const dashboardJs = await (await fetch(`${base}/dashboard.js`)).text(); assert.match(dashboardJs, /`\/weather-icons\.svg#\$\{weatherIconKey\(/); assert.doesNotMatch(dashboardJs, /innerHTML/);
+  assert.match(dashboardCss, /\.weather-icon \{[^}]*filter: brightness\(0\) invert\(1\) drop-shadow/);
+  const dashboardJs = await (await fetch(`${base}/dashboard.js`)).text(); assert.match(dashboardJs, /`\/weather-icons\/\$\{weatherIconFile\(/); assert.match(dashboardJs, /icon\.hidden = true; icon\.removeAttribute\('src'\)/); assert.doesNotMatch(dashboardJs, /innerHTML|weather-icons\.svg/);
   assert.match(await (await fetch(base)).text(), /href="\/dashboard"/);
   for (const route of ['/missing', '/dashboard/missing', '/%2e%2e/package.json', '/..%2fpackage.json', '/src/app.js']) assert.equal((await fetch(base + route)).status, 404);
 });
 
 test('maps bounded WMO conditions to local weather icons', () => {
   const cases = [
-    [0, 1, 'clear-day'], [0, 0, 'clear-night'], [1, 1, 'partly-cloudy-day'], [2, 0, 'partly-cloudy-night'], [3, 1, 'cloudy'],
-    [45, 1, 'fog'], [48, 1, 'fog'], [51, 1, 'drizzle'], [55, 1, 'drizzle'], [56, 1, 'sleet'], [67, 1, 'sleet'],
-    [61, 1, 'rain'], [65, 1, 'rain'], [80, 1, 'rain'], [82, 1, 'rain'], [71, 1, 'snow'], [77, 1, 'snow'], [85, 1, 'snow'], [86, 1, 'snow'],
-    [95, 1, 'thunderstorm'], [99, 1, 'thunderstorm'], [4, 1, 'unknown'], [null, 1, 'unknown'], ['0', 1, 'unknown'], [NaN, 1, 'unknown'], [Infinity, 1, 'unknown']
+    [0, 1, 'weather-sunny.svg'], [0, 0, 'weather-night.svg'], [1, 1, 'weather-partly-cloudy.svg'], [2, 0, 'weather-night-partly-cloudy.svg'], [3, 1, 'weather-cloudy.svg'],
+    [45, 1, 'weather-fog.svg'], [48, 1, 'weather-fog.svg'], [51, 1, 'weather-rainy.svg'], [55, 1, 'weather-rainy.svg'], [56, 1, 'weather-snowy-rainy.svg'], [67, 1, 'weather-snowy-rainy.svg'],
+    [61, 1, 'weather-rainy.svg'], [63, 1, 'weather-rainy.svg'], [65, 1, 'weather-pouring.svg'], [80, 1, 'weather-rainy.svg'], [81, 1, 'weather-rainy.svg'], [82, 1, 'weather-pouring.svg'],
+    [71, 1, 'weather-snowy.svg'], [77, 1, 'weather-snowy.svg'], [85, 1, 'weather-snowy.svg'], [86, 1, 'weather-snowy.svg'],
+    [95, 1, 'weather-lightning.svg'], [96, 1, 'weather-lightning-rainy.svg'], [99, 1, 'weather-lightning-rainy.svg'], [4, 1, 'weather-cloudy.svg'], [null, 1, 'weather-cloudy.svg'], ['0', 1, 'weather-cloudy.svg'], [NaN, 1, 'weather-cloudy.svg'], [Infinity, 1, 'weather-cloudy.svg']
   ];
-  for (const [code, day, expected] of cases) assert.equal(weatherIconKey(code, day), expected, `${code}/${day}`);
-  assert.equal(weatherIconKey(1, null), 'partly-cloudy-day');
+  for (const [code, day, expected] of cases) assert.equal(weatherIconFile(code, day), expected, `${code}/${day}`);
+  assert.equal(weatherIconFile(1, null), 'weather-partly-cloudy.svg');
 });
 
 test('recovers preferences and constrains untrusted persisted settings', () => {

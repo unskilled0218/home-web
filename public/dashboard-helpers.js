@@ -69,17 +69,18 @@ export function weatherDescription(code, day = 1) {
   return 'Conditions unavailable';
 }
 
-export function weatherIconKey(code, day = 1) {
-  if (!Number.isFinite(code)) return 'unknown';
-  const period = day === 0 ? 'night' : 'day';
-  if (code === 0) return `clear-${period}`;
-  if ([1, 2].includes(code)) return `partly-cloudy-${period}`;
-  if (code === 3) return 'cloudy';
-  if ([45, 48].includes(code)) return 'fog';
-  if ([51, 53, 55].includes(code)) return 'drizzle';
-  if ([56, 57, 66, 67].includes(code)) return 'sleet';
-  if ([61, 63, 65, 80, 81, 82].includes(code)) return 'rain';
-  if ([71, 73, 75, 77, 85, 86].includes(code)) return 'snow';
-  if ([95, 96, 99].includes(code)) return 'thunderstorm';
-  return 'unknown';
+export function weatherIconFile(code, day = 1) {
+  if (!Number.isFinite(code)) return 'weather-cloudy.svg';
+  const night = day === 0;
+  if (code === 0) return night ? 'weather-night.svg' : 'weather-sunny.svg';
+  if ([1, 2].includes(code)) return night ? 'weather-night-partly-cloudy.svg' : 'weather-partly-cloudy.svg';
+  if (code === 3) return 'weather-cloudy.svg';
+  if ([45, 48].includes(code)) return 'weather-fog.svg';
+  if ([51, 53, 55, 61, 63, 80, 81].includes(code)) return 'weather-rainy.svg';
+  if ([65, 82].includes(code)) return 'weather-pouring.svg';
+  if ([56, 57, 66, 67].includes(code)) return 'weather-snowy-rainy.svg';
+  if ([71, 73, 75, 77, 85, 86].includes(code)) return 'weather-snowy.svg';
+  if (code === 95) return 'weather-lightning.svg';
+  if ([96, 99].includes(code)) return 'weather-lightning-rainy.svg';
+  return 'weather-cloudy.svg';
 }

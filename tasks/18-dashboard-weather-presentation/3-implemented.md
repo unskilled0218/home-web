@@ -43,3 +43,7 @@ Made the `/dashboard` weather section transparent and added a responsive local c
 ## Plan Departures
 
 - None. Forecast-row icons remain intentionally out of scope, and no provider request or settings behavior changed.
+
+## Subsequent Change
+
+- Task 19 replaces this task's original SVG sprite with the explicitly requested assets from the sibling `dash-board` project. This record describes task 18 as implemented; see `tasks/19-reference-weather-icons/3-implemented.md` for the replacement details.
