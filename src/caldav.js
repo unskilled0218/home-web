@@ -67,8 +67,7 @@ function utcBasic(value) {
 export function buildCalDavReport(rangeStart, rangeEnd) {
   const start = utcBasic(rangeStart);
   const end = utcBasic(rangeEnd);
-  const properties = ['DTSTART', 'DTEND', 'DURATION', 'SUMMARY', 'LOCATION', 'STATUS', 'UID', 'RECURRENCE-ID'].map((name) => `          <c:prop name="${name}"/>`).join('\n');
-  return `<?xml version="1.0" encoding="utf-8"?>\n<c:calendar-query xmlns:d="DAV:" xmlns:c="${CALDAV_NAMESPACE}">\n  <d:prop>\n    <c:calendar-data>\n      <c:comp name="VCALENDAR">\n        <c:comp name="VEVENT">\n${properties}\n        </c:comp>\n      </c:comp>\n      <c:expand start="${start}" end="${end}"/>\n    </c:calendar-data>\n  </d:prop>\n  <c:filter>\n    <c:comp-filter name="VCALENDAR">\n      <c:comp-filter name="VEVENT">\n        <c:time-range start="${start}" end="${end}"/>\n      </c:comp-filter>\n    </c:comp-filter>\n  </c:filter>\n</c:calendar-query>`;
+  return `<?xml version="1.0" encoding="utf-8"?>\n<c:calendar-query xmlns:d="DAV:" xmlns:c="${CALDAV_NAMESPACE}">\n  <d:prop>\n    <c:calendar-data>\n      <c:expand start="${start}" end="${end}"/>\n    </c:calendar-data>\n  </d:prop>\n  <c:filter>\n    <c:comp-filter name="VCALENDAR">\n      <c:comp-filter name="VEVENT">\n        <c:time-range start="${start}" end="${end}"/>\n      </c:comp-filter>\n    </c:comp-filter>\n  </c:filter>\n</c:calendar-query>`;
 }
 
 function requestCalDav(url, options, redirects = 0) {
@@ -584,7 +583,8 @@ async function boundedText(response) {
 
 function statusError(status) {
   if (status === 401 || status === 403) return clientError('CalDAV rejected the username or password.', { kind: 'authentication' });
-  if ([400, 405, 415, 422, 501].includes(status)) return clientError('The CalDAV server does not support the required calendar report and expansion.');
+  if (status === 405) return clientError('The configured endpoint does not accept CalDAV REPORT requests (HTTP 405). Check the exact calendar collection URL and reverse-proxy method rules.');
+  if ([400, 415, 422, 501].includes(status)) return clientError(`Baikal rejected the calendar query (HTTP ${status}). Check that the URL identifies an exact CalDAV calendar collection.`);
   if (status === 429 || status >= 500) return clientError('CalDAV is currently unavailable.', { transient: true });
   return clientError('CalDAV returned an unexpected HTTP response.');
 }

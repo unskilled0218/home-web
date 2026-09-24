@@ -52,14 +52,15 @@ test('normalizes exact CalDAV collection credentials', () => {
   assert.throws(() => normalizeCalDavCredentials({ collectionUrl: 'https://baikal.test/calendar', username: 'user', password: '' }), /password/);
 });
 
-test('builds matching 14-day REPORT ranges and requests only agenda properties', () => {
+test('builds the minimal Baikal-compatible expanded REPORT from RFC 4791', () => {
   const report = buildCalDavReport(rangeStart, rangeEnd);
   assert.equal(report.match(/20260307T120000Z/g).length, 2);
   assert.equal(report.match(/20260321T120000Z/g).length, 2);
   assert.match(report, /calendar-query/);
   assert.match(report, /time-range/);
   assert.match(report, /<c:expand/);
-  for (const property of ['DTSTART', 'DTEND', 'DURATION', 'SUMMARY', 'LOCATION', 'STATUS', 'UID', 'RECURRENCE-ID']) assert.match(report, new RegExp(`name="${property}"`));
+  assert.match(report, /<c:calendar-data>\s*<c:expand[^>]*\/>\s*<\/c:calendar-data>/);
+  assert.doesNotMatch(report.match(/<c:calendar-data>([\s\S]*?)<\/c:calendar-data>/)[1], /<c:comp\s/);
 });
 
 test('extracts namespaced escaped and CDATA calendar data from bounded XML', () => {
@@ -203,7 +204,7 @@ test('does not serve stale events after authentication or protocol failures', as
   await assert.rejects(client.listEvents(settings, { force: true }), /username or password/);
   await assert.rejects(client.listEvents(settings), /username or password/);
   status = 405;
-  await assert.rejects(client.listEvents(settings, { force: true }), /does not support/);
+  await assert.rejects(client.listEvents(settings, { force: true }), /does not accept CalDAV REPORT/);
 });
 
 test('does not repopulate cache after clearCache during an obsolete request', async () => {
@@ -226,7 +227,8 @@ test('classifies timeout, status, content type, and response-size failures safel
   const settings = { collectionUrl: 'https://baikal.test/calendar/', username: 'user', password: 'secret' };
   const cases = [
     [async () => new Response('', { status: 401 }), /username or password/],
-    [async () => new Response('', { status: 405 }), /does not support/],
+    [async () => new Response('', { status: 400 }), /exact CalDAV calendar collection/],
+    [async () => new Response('', { status: 405 }), /reverse-proxy method rules/],
     [async () => new Response('', { status: 503 }), /currently unavailable/],
     [async () => new Response('not xml', { status: 207, headers: { 'content-type': 'text/plain' } }), /response type/],
     [async () => new Response('', { status: 207, headers: { 'content-type': 'application/xml', 'content-length': String(2 * 1024 * 1024 + 1) } }), /too large/],

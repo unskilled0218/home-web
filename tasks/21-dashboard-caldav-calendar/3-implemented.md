@@ -2,7 +2,7 @@
 
 ## Outcome
 
-Implemented the optional read-only Baikal CalDAV agenda on `/dashboard` and updated the project from version `0.12.3` to `0.13.0`. Users can connect one exact calendar collection with Basic authentication, display up to 10 events overlapping the next 14 days, refresh explicitly or every five minutes while visible, retain only transiently stale snapshots, and disconnect encrypted server-side credentials.
+Implemented the optional read-only Baikal CalDAV agenda on `/dashboard` and updated the project from version `0.12.3` to `0.13.1`. Users can connect one exact calendar collection with Basic authentication, display up to 10 events overlapping the next 14 days, refresh explicitly or every five minutes while visible, retain only transiently stale snapshots, and disconnect encrypted server-side credentials.
 
 ## Server and Protocol Changes
 
@@ -50,3 +50,9 @@ Implemented the optional read-only Baikal CalDAV agenda on `/dashboard` and upda
 - Docker Compose runtime verification: unavailable because `docker` is not installed in the environment.
 - Interactive desktop/mobile/browser verification: unavailable because Chromium, Chrome, and Firefox executables are not installed.
 - Live Baikal verification: unavailable because no Baikal endpoint or credentials were provided; compatibility is covered by deterministic RFC-shaped HTTP(S) fixtures.
+
+## Baikal Compatibility Follow-Up
+
+- Simplified the REPORT request in version `0.13.1` to match RFC 4791 section 7.8.3 and SabreDAV's documented expanded-query shape exactly: `calendar-data` now contains only `expand`, while the VEVENT time range remains in the query filter.
+- Removed partial component/property selection from the request because older Baikal/SabreDAV combinations can reject the otherwise valid combination of partial retrieval and expansion. Response parsing still allowlists and bounds every field exposed by the application.
+- Split HTTP rejection messages so HTTP 405 identifies a collection URL or reverse-proxy method problem, while HTTP 400/415/422/501 identifies a Baikal query rejection and reminds the user to supply an exact calendar collection URL.
