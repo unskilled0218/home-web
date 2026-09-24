@@ -33,6 +33,8 @@ Search for a weather location in settings. Search terms and selected coordinates
 
 The calendar is optional. In `/dashboard` **Settings**, enter the exact Baikal CalDAV calendar collection URL, username, and password. A Baikal URL normally resembles `https://baikal.example.test/dav.php/calendars/user/default/`; a principal URL, calendar-home URL, WebDAV file URL, or direct `.ics` URL is not sufficient. Use a dedicated least-privilege account when practical.
 
+The client supports Baikal installations configured for either HTTP Basic or HTTP Digest authentication. It follows a Digest challenge using MD5, MD5-sess, SHA-256, or SHA-256-sess with `qop=auth`; unsupported challenge modes fail without exposing the password.
+
 The server performs a bounded depth-1 CalDAV `calendar-query` for events overlapping the current instant through 14 days ahead. It displays at most 10 ordered events, including timed, all-day, multi-day, and recurring instances expanded by Baikal/SabreDAV. The integration is read-only: it does not discover multiple calendars, create or edit events, process invitations, display tasks, or execute alarms. A server that does not support the required RFC 4791 time-range and expansion report cannot be connected.
 
 Timed events are displayed in the dashboard's selected timezone; all-day dates remain calendar dates and do not drift across timezones. The browser refreshes every five minutes while the calendar is visible and supports an explicit refresh. A temporary network or server failure retains a clearly marked stale snapshot, but authentication, authorization, malformed-response, and unsupported-report failures do not serve cached private events.
@@ -48,7 +50,7 @@ printf '\nCALDAV_CA_FILE=./certs/baikal-ca.pem\n' >> .env
 npm start
 ```
 
-`CALDAV_CA_FILE` affects only CalDAV requests and must contain valid certificates without private keys. It does not alter Linkwarden, Home Assistant, Open-Meteo, or other Node trust. The default `CALDAV_CACHE_SECONDS=300` matches the browser refresh interval. Plain `http://` collection URLs are supported only for trusted-LAN deployments and expose reusable Basic credentials to anyone able to observe that network path; prefer HTTPS even on the LAN.
+`CALDAV_CA_FILE` affects only CalDAV requests and must contain valid certificates without private keys. It does not alter Linkwarden, Home Assistant, Open-Meteo, or other Node trust. The default `CALDAV_CACHE_SECONDS=300` matches the browser refresh interval. Plain `http://` collection URLs are supported only for trusted-LAN deployments and expose authentication traffic to anyone able to observe or alter that network path; prefer HTTPS even on the LAN.
 
 ## Container deployment
 

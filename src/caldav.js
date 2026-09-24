@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import http from 'node:http';
 import https from 'node:https';
 import { Readable } from 'node:stream';
@@ -49,6 +49,8 @@ export function normalizeCalDavCredentials(input, existing = null) {
     throw new Error('CalDAV collection URL must be an absolute http or https URL without credentials, a query, or a fragment.');
   }
   url.pathname = `${url.pathname.replace(/\/+$/, '')}/`;
+  const baikalPath = /\/dav\.php\/(.*)$/i.exec(url.pathname)?.[1].split('/').filter(Boolean);
+  if (baikalPath && (baikalPath[0]?.toLowerCase() !== 'calendars' || baikalPath.length < 3)) throw new Error('Enter an exact Baikal calendar collection URL, such as /dav.php/calendars/username/calendar/. The /dav.php/ server URL is not a calendar.');
   const username = typeof input?.username === 'string' ? input.username.trim() : '';
   if (!username || username.length > 120 || username.includes(':')) {
     throw new Error('CalDAV username is required, must be at most 120 characters, and cannot contain a colon.');
@@ -68,6 +70,50 @@ export function buildCalDavReport(rangeStart, rangeEnd) {
   const start = utcBasic(rangeStart);
   const end = utcBasic(rangeEnd);
   return `<?xml version="1.0" encoding="utf-8"?>\n<c:calendar-query xmlns:d="DAV:" xmlns:c="${CALDAV_NAMESPACE}">\n  <d:prop>\n    <c:calendar-data>\n      <c:expand start="${start}" end="${end}"/>\n    </c:calendar-data>\n  </d:prop>\n  <c:filter>\n    <c:comp-filter name="VCALENDAR">\n      <c:comp-filter name="VEVENT">\n        <c:time-range start="${start}" end="${end}"/>\n      </c:comp-filter>\n    </c:comp-filter>\n  </c:filter>\n</c:calendar-query>`;
+}
+
+function parseDigestChallenge(header) {
+  if (typeof header !== 'string') return null;
+  const digest = header.match(/(?:^|,\s*)Digest\s+(.+)$/i);
+  if (!digest || digest[1].length > 4_096) return null;
+  const values = new Map();
+  const pattern = /([A-Za-z][A-Za-z0-9_-]*)\s*=\s*("(?:[^"\\]|\\.)*"|[^,\s]+)/g;
+  let match;
+  while ((match = pattern.exec(digest[1]))) {
+    const key = match[1].toLowerCase();
+    if (values.has(key)) return null;
+    let value = match[2];
+    if (value.startsWith('"')) value = value.slice(1, -1).replace(/\\(["\\])/g, '$1');
+    values.set(key, value);
+  }
+  const realm = values.get('realm');
+  const nonce = values.get('nonce');
+  if (!realm || !nonce || realm.length > 1_000 || nonce.length > 1_000) return null;
+  const algorithm = (values.get('algorithm') ?? 'MD5').toUpperCase();
+  if (!['MD5', 'MD5-SESS', 'SHA-256', 'SHA-256-SESS'].includes(algorithm)) return null;
+  const qopValues = (values.get('qop') ?? '').split(',').map((value) => value.trim().toLowerCase()).filter(Boolean);
+  if (qopValues.length && !qopValues.includes('auth')) return null;
+  return { realm, nonce, algorithm, qop: qopValues.length ? 'auth' : null, opaque: values.get('opaque') };
+}
+
+const quoteDigest = (value) => `"${String(value).replace(/["\\]/g, '\\$&')}"`;
+
+export function buildDigestAuthorization(header, { username, password }, method, url, { cnonce = randomBytes(16).toString('hex'), nonceCount = 1 } = {}) {
+  const challenge = parseDigestChallenge(header);
+  if (!challenge) throw clientError('Baikal returned an unsupported HTTP Digest authentication challenge.');
+  const hashAlgorithm = challenge.algorithm.startsWith('SHA-256') ? 'sha256' : 'md5';
+  const hash = (value) => createHash(hashAlgorithm).update(value, 'utf8').digest('hex');
+  const parsed = new URL(url);
+  const uri = `${parsed.pathname}${parsed.search}`;
+  const nc = nonceCount.toString(16).padStart(8, '0');
+  const baseHa1 = hash(`${username}:${challenge.realm}:${password}`);
+  const ha1 = challenge.algorithm.endsWith('-SESS') ? hash(`${baseHa1}:${challenge.nonce}:${cnonce}`) : baseHa1;
+  const ha2 = hash(`${method}:${uri}`);
+  const response = challenge.qop ? hash(`${ha1}:${challenge.nonce}:${nc}:${cnonce}:${challenge.qop}:${ha2}`) : hash(`${ha1}:${challenge.nonce}:${ha2}`);
+  const fields = [`username=${quoteDigest(username)}`, `realm=${quoteDigest(challenge.realm)}`, `nonce=${quoteDigest(challenge.nonce)}`, `uri=${quoteDigest(uri)}`, `response=${quoteDigest(response)}`, `algorithm=${challenge.algorithm}`];
+  if (challenge.qop) fields.push(`qop=${challenge.qop}`, `nc=${nc}`, `cnonce=${quoteDigest(cnonce)}`);
+  if (challenge.opaque) fields.push(`opaque=${quoteDigest(challenge.opaque)}`);
+  return `Digest ${fields.join(', ')}`;
 }
 
 function requestCalDav(url, options, redirects = 0) {
@@ -601,7 +647,7 @@ function connectionError(error) {
   return clientError('CalDAV is currently unavailable.', { transient: true });
 }
 
-export function createCalDavClient({ fetchImpl = requestCalDav, timeoutMs = 8_000, cacheSeconds = 300, ca, now = Date.now } = {}) {
+export function createCalDavClient({ fetchImpl = requestCalDav, timeoutMs = 8_000, cacheSeconds = 300, ca, now = Date.now, randomBytesImpl = randomBytes } = {}) {
   const cache = new Map();
   const inFlight = new Map();
   let generation = 0;
@@ -614,10 +660,10 @@ export function createCalDavClient({ fetchImpl = requestCalDav, timeoutMs = 8_00
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     let response;
     try {
-      response = await fetchImpl(settings.collectionUrl, {
+      const request = (authorization) => fetchImpl(settings.collectionUrl, {
         method: 'REPORT',
         headers: {
-          Authorization: `Basic ${Buffer.from(`${settings.username}:${settings.password}`, 'utf8').toString('base64')}`,
+          Authorization: authorization,
           Depth: '1',
           Accept: 'application/xml, text/xml',
           'Content-Type': 'application/xml; charset=utf-8'
@@ -626,6 +672,13 @@ export function createCalDavClient({ fetchImpl = requestCalDav, timeoutMs = 8_00
         signal: controller.signal,
         ca
       });
+      response = await request(`Basic ${Buffer.from(`${settings.username}:${settings.password}`, 'utf8').toString('base64')}`);
+      const challenge = response?.status === 401 ? response.headers.get('www-authenticate') : null;
+      if (challenge && /(?:^|,\s*)Digest\s/i.test(challenge)) {
+        try { await response.body?.cancel(); } catch { /* The authentication retry does not need the challenge body. */ }
+        const authorization = buildDigestAuthorization(challenge, settings, 'REPORT', settings.collectionUrl, { cnonce: randomBytesImpl(16).toString('hex') });
+        response = await request(authorization);
+      }
       if (!response || response.status !== 207) throw statusError(response?.status);
       const contentType = response.headers.get('content-type')?.split(';', 1)[0].trim().toLowerCase();
       if (contentType !== 'application/xml' && contentType !== 'text/xml') throw clientError('CalDAV returned an invalid response type.');

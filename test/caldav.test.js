@@ -7,6 +7,7 @@ import https from 'node:https';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import {
+  buildDigestAuthorization,
   buildCalDavReport,
   createCalDavClient,
   extractCalendarData,
@@ -48,8 +49,21 @@ test('normalizes exact CalDAV collection credentials', () => {
   for (const collectionUrl of ['file:///tmp/calendar', 'https://user@baikal.test/calendar', 'https://baikal.test/calendar?q=1', 'https://baikal.test/calendar#fragment']) {
     assert.throws(() => normalizeCalDavCredentials({ collectionUrl, username: 'user', password: 'secret' }), /collection URL/);
   }
+  for (const collectionUrl of ['https://webdav.lan/dav.php/', 'https://webdav.lan/dav.php/calendars/user/']) {
+    assert.throws(() => normalizeCalDavCredentials({ collectionUrl, username: 'user', password: 'secret' }), /exact Baikal calendar collection URL/);
+  }
   assert.throws(() => normalizeCalDavCredentials({ collectionUrl: 'https://baikal.test/calendar', username: 'bad:user', password: 'secret' }), /colon/);
   assert.throws(() => normalizeCalDavCredentials({ collectionUrl: 'https://baikal.test/calendar', username: 'user', password: '' }), /password/);
+});
+
+test('builds RFC HTTP Digest authorization for Baikal challenges', () => {
+  const challenge = 'Digest realm="testrealm@host.com", qop="auth", nonce="dcd98b7102dd2f0e8b11d0f600bfb0c093", opaque="5ccc069c403ebaf9f0171e9517f40e41"';
+  const authorization = buildDigestAuthorization(challenge, { username: 'Mufasa', password: 'Circle Of Life' }, 'GET', 'http://www.example.com/dir/index.html', { cnonce: '0a4f113b', nonceCount: 1 });
+  assert.match(authorization, /^Digest /);
+  assert.match(authorization, /uri="\/dir\/index.html"/);
+  assert.match(authorization, /response="6629fae49393a05397450978507c4ef1"/);
+  assert.match(authorization, /qop=auth, nc=00000001, cnonce="0a4f113b"/);
+  assert.throws(() => buildDigestAuthorization('Digest realm="BaikalDAV", nonce="n", algorithm=SHA-512', { username: 'user', password: 'secret' }, 'REPORT', 'https://baikal.test/calendar/'), /unsupported HTTP Digest/);
 });
 
 test('builds the minimal Baikal-compatible expanded REPORT from RFC 4791', () => {
@@ -165,6 +179,25 @@ test('sends an exact authenticated REPORT and parses a safe result', async () =>
   assert.equal(requests[0].options.headers.Authorization, `Basic ${Buffer.from('üser:päss').toString('base64')}`);
   assert.match(requests[0].options.body, /20260307T120000Z/);
   assert.equal(JSON.stringify((await client.listEvents(settings)).events).includes('private-id'), false);
+});
+
+test('retries a Baikal Digest challenge with a valid Digest authorization header', async () => {
+  const requests = [];
+  const challenge = 'Digest realm="BaikalDAV",qop="auth",nonce="6ab558db803ce",opaque="d66d5f0524036afcb61420e358f990ce"';
+  const client = createCalDavClient({ now: () => rangeStart, randomBytesImpl: () => Buffer.alloc(16, 1), fetchImpl: async (url, options) => {
+    requests.push({ url, options });
+    if (requests.length === 1) return new Response('', { status: 401, headers: { 'www-authenticate': challenge } });
+    return xmlResponse([]);
+  } });
+  const settings = { collectionUrl: 'https://webdav.lan/dav.php/calendars/user/default/', username: 'user', password: 'private-password' };
+  assert.deepEqual(await client.test(settings), { events: [], stale: false });
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0].options.headers.Authorization, `Basic ${Buffer.from('user:private-password').toString('base64')}`);
+  assert.match(requests[1].options.headers.Authorization, /^Digest /);
+  assert.match(requests[1].options.headers.Authorization, /realm="BaikalDAV"/);
+  assert.match(requests[1].options.headers.Authorization, /uri="\/dav\.php\/calendars\/user\/default\/"/);
+  assert.match(requests[1].options.headers.Authorization, /qop=auth, nc=00000001/);
+  assert.equal(requests[1].options.body, requests[0].options.body);
 });
 
 test('caches, deduplicates, forces refresh, falls back stale, and clears generations', async () => {
