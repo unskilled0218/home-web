@@ -47,8 +47,8 @@ function handleFrames(socket) {
       if (message.type === 'auth') socket.write(frame({ type: 'auth_ok' }));
       if (message.id === 1) socket.write(frame({ id: 1, type: 'result', success: true, result: [{ id: 'lamp', name: 'Lamp', area_id: 'office' }] }));
       if (message.id === 2) socket.write(frame({ id: 2, type: 'result', success: true, result: [{ area_id: 'office', name: 'Office' }] }));
-      if (message.id === 3) socket.write(frame({ id: 3, type: 'result', success: true, result: { entities: [{ ei: 'light.lamp', di: 'lamp', en: 'Lamp' }] } }));
-      if (message.id === 4) socket.write(frame({ id: 4, type: 'result', success: true, result: [{ entity_id: 'light.lamp', state: 'off', attributes: { friendly_name: 'Lamp' } }] }));
+      if (message.id === 3) socket.write(frame({ id: 3, type: 'result', success: true, result: { entities: [{ ei: 'light.lamp', di: 'lamp', en: 'Lamp' }, { ei: 'sensor.temperature', di: 'lamp', en: 'Temperature' }] } }));
+      if (message.id === 4) socket.write(frame({ id: 4, type: 'result', success: true, result: [{ entity_id: 'light.lamp', state: 'off', attributes: { friendly_name: 'Lamp' } }, { entity_id: 'sensor.temperature', state: '22.5', attributes: { friendly_name: 'Temperature', unit_of_measurement: '°C', device_class: 'temperature' } }] }));
     }
   });
 }
@@ -120,7 +120,7 @@ test('trusts a configured private CA while preserving hostname verification', as
     assert.match(untrusted.message, /connection failed.*NODE_EXTRA_CA_CERTS/);
 
     const trusted = await runClient(`https://127.0.0.1:${port}`, caCertificate);
-    assert.deepEqual(trusted, { ok: true, devices: [{ deviceId: 'lamp', name: 'Lamp', area: 'Office', disabled: false, controls: [{ entityId: 'light.lamp', domain: 'light', name: 'Lamp', state: 'off' }] }] });
+    assert.deepEqual(trusted, { ok: true, devices: [{ deviceId: 'lamp', name: 'Lamp', area: 'Office', disabled: false, measurements: [{ name: 'Temperature', value: '22.5', status: 'available', available: true, unit: '°C', deviceClass: 'temperature' }], controls: [{ entityId: 'light.lamp', domain: 'light', name: 'Lamp', state: 'off' }] }] });
 
     const wrongHostname = await runClient(`https://localhost:${port}`, caCertificate);
     assert.equal(wrongHostname.ok, false);

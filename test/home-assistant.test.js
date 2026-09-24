@@ -6,7 +6,7 @@ function message(socket, data) {
   socket.dispatchEvent(new MessageEvent('message', { data: typeof data === 'string' ? data : JSON.stringify(data) }));
 }
 
-function successfulFactory({ devices = [{ id: 'device-1', name: 'Lamp', area_id: 'living' }], areas = [{ area_id: 'living', name: 'Living room' }], entityRegistry = { entities: [{ ei: 'light.lamp', di: 'device-1', en: 'Lamp power' }] }, states = [{ entity_id: 'light.lamp', state: 'off', attributes: { friendly_name: 'Desk lamp' } }], sockets = [] } = {}) {
+function successfulFactory({ devices = [{ id: 'device-1', name: 'Lamp', area_id: 'living' }], areas = [{ area_id: 'living', name: 'Living room' }], entityRegistry = { entities: [{ ei: 'light.lamp', di: 'device-1', en: 'Lamp power' }, { ei: 'sensor.temperature', di: 'device-1', en: 'Temperature' }] }, states = [{ entity_id: 'light.lamp', state: 'off', attributes: { friendly_name: 'Desk lamp' } }, { entity_id: 'sensor.temperature', state: '21.5', attributes: { friendly_name: 'Room temperature', unit_of_measurement: '°C', device_class: 'temperature' } }], sockets = [] } = {}) {
   return (url) => {
     const socket = new EventTarget();
     socket.url = url; socket.sent = []; socket.closed = false;
@@ -37,25 +37,32 @@ test('normalizes Home Assistant credentials and safe device metadata', () => {
     { id: '1', name: 'Duplicate' },
     { id: '', name: 'Invalid' },
     { id: '3', model: 'Fallback model' }
-  ], [{ area_id: 'area-1', name: ' Kitchen ' }], { entities: [
+  ], [{ area_id: 'area-1', name: ' Kitchen ' }], { entity_categories: { 0: 'config', 1: 'diagnostic' }, entities: [
     { ei: 'light.alpha', di: '1', en: 'Registry name' },
     { ei: 'switch.beta', di: '2', en: 'Beta switch' },
     { ei: 'fan.hidden', di: '1', hb: true },
     { ei: 'input_boolean.config', di: '1', ec: 0 },
     { ei: 'sensor.temperature', di: '1' },
+    { ei: 'sensor.humidity', di: '1', ec: 1 },
+    { ei: 'sensor.config', di: '1', ec: 0 },
     { ei: 'light.orphan', di: 'missing' }
   ] }, [
     { entity_id: 'light.alpha', state: 'on', attributes: { friendly_name: 'Alpha light', private: 'secret' } },
     { entity_id: 'switch.beta', state: 'unavailable', attributes: {} },
     { entity_id: 'fan.hidden', state: 'off', attributes: {} },
     { entity_id: 'input_boolean.config', state: 'on', attributes: {} },
-    { entity_id: 'sensor.temperature', state: '20', attributes: {} },
+    { entity_id: 'sensor.temperature', state: '20', attributes: { friendly_name: 'Temperature', unit_of_measurement: '°C', device_class: 'temperature', private: 'secret' }, context: { id: 'private-context' } },
+    { entity_id: 'sensor.humidity', state: '45', attributes: { friendly_name: 'Humidity', unit_of_measurement: '%', device_class: 'humidity' } },
+    { entity_id: 'sensor.config', state: '1', attributes: { friendly_name: 'Config value' } },
     { entity_id: 'light.orphan', state: 'off', attributes: {} }
   ]);
   assert.deepEqual(devices, [
-    { deviceId: '1', name: 'Alpha', area: 'Kitchen', disabled: false, controls: [{ entityId: 'light.alpha', domain: 'light', name: 'Alpha light', state: 'on' }] },
-    { deviceId: '2', name: 'Beta', area: null, manufacturer: 'Maker', model: 'Model', disabled: true, controls: [] },
-    { deviceId: '3', name: 'Fallback model', area: null, model: 'Fallback model', disabled: false, controls: [] }
+    { deviceId: '1', name: 'Alpha', area: 'Kitchen', disabled: false, measurements: [
+      { name: 'Humidity', value: '45', status: 'available', available: true, unit: '%', deviceClass: 'humidity' },
+      { name: 'Temperature', value: '20', status: 'available', available: true, unit: '°C', deviceClass: 'temperature' }
+    ], controls: [{ entityId: 'light.alpha', domain: 'light', name: 'Alpha light', state: 'on' }] },
+    { deviceId: '2', name: 'Beta', area: null, manufacturer: 'Maker', model: 'Model', disabled: true, measurements: [], controls: [] },
+    { deviceId: '3', name: 'Fallback model', area: null, model: 'Fallback model', disabled: false, measurements: [], controls: [] }
   ]);
   assert.equal(JSON.stringify(devices).includes('secret'), false);
   assert.throws(() => normalizeHomeAssistantDevices({}, []), /invalid device registry/);
@@ -66,7 +73,7 @@ test('authenticates and correlates Home Assistant device and area commands', asy
   const sockets = [];
   const client = createHomeAssistantClient({ webSocketFactory: successfulFactory({ sockets }) });
   const devices = await client.listDevices({ baseUrl: 'https://home.example.test', accessToken: 'private-token' });
-  assert.deepEqual(devices, [{ deviceId: 'device-1', name: 'Lamp', area: 'Living room', disabled: false, controls: [{ entityId: 'light.lamp', domain: 'light', name: 'Desk lamp', state: 'off' }] }]);
+  assert.deepEqual(devices, [{ deviceId: 'device-1', name: 'Lamp', area: 'Living room', disabled: false, measurements: [{ name: 'Room temperature', value: '21.5', status: 'available', available: true, unit: '°C', deviceClass: 'temperature' }], controls: [{ entityId: 'light.lamp', domain: 'light', name: 'Desk lamp', state: 'off' }] }]);
   assert.equal(sockets[0].url, 'wss://home.example.test/api/websocket');
   assert.deepEqual(sockets[0].sent, [
     { type: 'auth', access_token: 'private-token' },
@@ -97,6 +104,66 @@ test('normalizes every supported control domain and non-actionable state', () =>
     { domain: 'input_boolean', state: 'unavailable' },
     { domain: 'fan', state: 'unknown' }
   ]);
+});
+
+test('normalizes bounded numeric sensor readings and rejects unsafe states', () => {
+  const valid = [
+    ['sensor.temperature', '-1.25', 'Temperature', '°C', 'temperature'],
+    ['sensor.humidity', '45', 'Humidity', '%', 'humidity'],
+    ['sensor.pressure', '1e3', 'Pressure', 'hPa', 'pressure'],
+    ['sensor.battery', '+90', 'Battery', '%', 'battery'],
+    ['sensor.power', '.5', 'Power', 'W', 'power'],
+    ['sensor.unitless', '10.', 'Unitless', undefined, undefined],
+    ['sensor.offline', 'unavailable', 'Offline', 'V', 'voltage'],
+    ['sensor.pending', 'unknown', 'Pending', undefined, undefined]
+  ];
+  const invalid = [
+    ['sensor.text', 'home'], ['sensor.blank', '  '], ['sensor.hex', '0x10'], ['sensor.nan', 'NaN'],
+    ['sensor.infinity', 'Infinity'], ['sensor.negative_infinity', '-Infinity'], ['sensor.partial', '12 watts'], ['sensor.long', '1'.repeat(65)]
+  ];
+  const entityRegistry = {
+    entity_categories: { 0: 'config', 1: 'diagnostic' },
+    entities: [
+      ...valid.map(([entityId], index) => ({ ei: entityId, di: 'active', ...(index === 3 && { ec: 1 }) })),
+      ...invalid.map(([entityId]) => ({ ei: entityId, di: 'active' })),
+      { ei: 'sensor.config', di: 'active', ec: 0 },
+      { ei: 'sensor.hidden', di: 'active', hb: true },
+      { ei: 'sensor.orphan', di: 'missing' },
+      { ei: 'sensor.disabled', di: 'disabled' },
+      { ei: 'binary_sensor.motion', di: 'active' },
+      { ei: 'sensor.missing_state', di: 'active' },
+      { ei: 'sensor.bad-id!', di: 'active' }
+    ]
+  };
+  const states = [
+    ...valid.map(([entityId, state, name, unit, deviceClass]) => ({ entity_id: entityId, state, attributes: { friendly_name: name, ...(unit && { unit_of_measurement: unit }), ...(deviceClass && { device_class: deviceClass }), secret: 'private' }, context: { id: 'private' } })),
+    ...invalid.map(([entityId, state]) => ({ entity_id: entityId, state, attributes: { friendly_name: entityId } })),
+    { entity_id: 'sensor.config', state: '1', attributes: {} },
+    { entity_id: 'sensor.hidden', state: '2', attributes: {} },
+    { entity_id: 'sensor.orphan', state: '3', attributes: {} },
+    { entity_id: 'sensor.disabled', state: '4', attributes: {} },
+    { entity_id: 'binary_sensor.motion', state: '1', attributes: {} },
+    { entity_id: 'sensor.bad-id!', state: '5', attributes: {} }
+  ];
+  const devices = normalizeHomeAssistantDevices([{ id: 'active', name: 'Active' }, { id: 'disabled', name: 'Disabled', disabled_by: 'user' }], [], entityRegistry, states);
+  const readings = devices[0].measurements;
+  assert.equal(readings.length, valid.length);
+  const byName = Object.fromEntries(readings.map((reading) => [reading.name, reading]));
+  assert.deepEqual(byName.Temperature, { name: 'Temperature', value: '-1.25', status: 'available', available: true, unit: '°C', deviceClass: 'temperature' });
+  assert.deepEqual(byName.Pressure, { name: 'Pressure', value: '1e3', status: 'available', available: true, unit: 'hPa', deviceClass: 'pressure' });
+  assert.deepEqual(byName.Offline, { name: 'Offline', value: null, status: 'unavailable', available: false, unit: 'V', deviceClass: 'voltage' });
+  assert.deepEqual(byName.Pending, { name: 'Pending', value: null, status: 'unknown', available: false });
+  assert.equal(JSON.stringify(readings).includes('private'), false);
+  assert.deepEqual(devices[1].measurements, []);
+});
+
+test('caps sorted sensor readings per device', () => {
+  const entities = Array.from({ length: 105 }, (_, index) => ({ ei: `sensor.value_${String(index).padStart(3, '0')}`, di: 'device' }));
+  const states = entities.map(({ ei }, index) => ({ entity_id: ei, state: String(index), attributes: { friendly_name: `Reading ${String(index).padStart(3, '0')}` } }));
+  const [device] = normalizeHomeAssistantDevices([{ id: 'device', name: 'Many sensors' }], [], { entities }, states);
+  assert.equal(device.measurements.length, 100);
+  assert.equal(device.measurements[0].name, 'Reading 000');
+  assert.equal(device.measurements.at(-1).name, 'Reading 099');
 });
 
 test('classifies safe TLS failures without exposing upstream details', () => {

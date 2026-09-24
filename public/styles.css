@@ -80,6 +80,15 @@ input:focus { outline: 3px solid #58c5bb66; border-color: #70d6cb; }
 .home-device h4 { margin: 0; font-size: 1rem; overflow-wrap: anywhere; }
 .home-device p { margin: .55rem 0 0; color: #9db5c9; line-height: 1.4; overflow-wrap: anywhere; }
 .home-device .device-state { color: #ffcf70; font-size: .78rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.home-device .home-card-label { margin: 0 0 .45rem; color: #8ba5ba; font-size: .72rem; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
+.home-readings { margin-top: .9rem; padding-top: .8rem; border-top: 1px solid #294964; }
+.home-reading-list { display: grid; gap: .45rem; margin: 0; }
+.home-reading { display: flex; align-items: baseline; justify-content: space-between; gap: .8rem; }
+.home-reading dt { min-width: 0; overflow-wrap: anywhere; color: #b6c7d7; font-size: .82rem; }
+.home-reading dd { flex: 0 0 auto; margin: 0; text-align: right; }
+.home-reading-value { color: #eff7ff; font-weight: 750; }
+.home-reading-unit { color: #8ba5ba; font-size: .76rem; }
+.home-reading dd.unavailable .home-reading-value { color: #ffcf70; font-weight: 600; }
 .home-controls { display: grid; gap: .55rem; margin-top: .9rem; padding-top: .8rem; border-top: 1px solid #294964; }
 .home-control { display: flex; align-items: center; justify-content: space-between; gap: .65rem; }
 .home-control-summary { display: grid; min-width: 0; }

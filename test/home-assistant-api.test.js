@@ -25,6 +25,7 @@ test('connects Home Assistant atomically and exposes only safe configuration', a
   let releaseControl;
   let controlStarted;
   let actionFailure = null;
+  let readingValue = '20';
   const homeAssistant = {
     clearCache() { calls.push({ clear: true }); },
     async listDevices(settings, options) {
@@ -34,7 +35,10 @@ test('connects Home Assistant atomically and exposes only safe configuration', a
         blockNext = false;
         await new Promise((resolve) => { releaseBlocked = resolve; blockedStarted(); });
       }
-      return [{ deviceId: 'device-private', name: 'Lamp', area: 'Office', disabled: false, controls: [
+      return [{ deviceId: 'device-private', name: 'Lamp', area: 'Office', disabled: false, measurements: [
+        { entityId: 'sensor.private_temperature', name: 'Temperature', value: readingValue, unit: '°C', deviceClass: 'temperature', status: 'available', available: true, privateAttribute: 'private-reading-detail' },
+        { entityId: 'sensor.offline', name: 'Offline sensor', value: null, deviceClass: 'humidity', status: 'unavailable', available: false }
+      ], controls: [
         { entityId: 'light.office', domain: 'light', name: 'Office lamp', state: 'off' },
         { entityId: 'switch.unavailable', domain: 'switch', name: 'Unavailable switch', state: 'unavailable' }
       ] }];
@@ -46,6 +50,7 @@ test('connects Home Assistant atomically and exposes only safe configuration', a
         blockControl = false;
         await new Promise((resolve) => { releaseControl = resolve; controlStarted(); });
       }
+      readingValue = action === 'turn_on' ? '21' : '19';
     }
   };
   const server = createDashboardServer({
@@ -71,6 +76,13 @@ test('connects Home Assistant atomically and exposes only safe configuration', a
   assert.equal(JSON.stringify(connected.body).includes('private-token'), false);
   assert.equal(JSON.stringify(connected.body).includes('device-private'), false);
   assert.equal(JSON.stringify(connected.body).includes('light.office'), false);
+  assert.equal(JSON.stringify(connected.body).includes('sensor.private_temperature'), false);
+  assert.equal(JSON.stringify(connected.body).includes('private-reading-detail'), false);
+  assert.deepEqual(connected.body.devices[0].measurements, [
+    { name: 'Temperature', value: '20', unit: '°C', deviceClass: 'temperature', status: 'available', available: true },
+    { name: 'Offline sensor', value: null, deviceClass: 'humidity', status: 'unavailable', available: false }
+  ]);
+  assert.equal(Object.hasOwn(connected.body.devices[0].measurements[0], 'controlToken'), false);
   const controlToken = connected.body.devices[0].controls[0].controlToken;
   const unavailableToken = connected.body.devices[0].controls[1].controlToken;
   assert.match(controlToken, /^[A-Za-z0-9_-]+$/);
@@ -103,6 +115,7 @@ test('connects Home Assistant atomically and exposes only safe configuration', a
   const listed = await api('/api/home-assistant/devices?refresh=1');
   assert.equal(listed.status, 200);
   assert.equal(calls.at(-1).options.force, true);
+  assert.equal(listed.body.devices[0].measurements[0].value, '19');
   assert.equal((await api('/api/home-assistant', { method: 'PUT', body: { url: 'https://changed.example.test', accessToken: '' } })).status, 400);
   assert.equal((await api('/api/home-assistant', { method: 'PUT', body: { url: 'https://home.example.test', accessToken: '' } })).status, 200);
   assert.equal((await api(`/api/home-assistant/controls/${controlToken}`, { method: 'POST', body: { action: 'turn_on' } })).status, 404);

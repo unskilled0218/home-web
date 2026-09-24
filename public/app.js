@@ -1,4 +1,4 @@
-import { filterHomeDevices, groupHomeDevices, homeControlPresentation, isLatestRequest, restoreCollectionFocus, runBulkWake, selectedButtonState, showDialogError, updateCollectionSelection, updateSelection } from './app-helpers.js';
+import { filterHomeDevices, groupHomeDevices, homeControlPresentation, homeMeasurementPresentation, isLatestRequest, restoreCollectionFocus, runBulkWake, selectedButtonState, showDialogError, updateCollectionSelection, updateSelection } from './app-helpers.js';
 
 const state = { devices: [], selected: new Set(), bulkWakePending: false, bookmarks: [], linkwarden: null, collections: [], activeCollectionToken: null, collectionRequest: 0, homeAssistant: null, homeDevices: [], homeDeviceRequest: 0, homeAssistantRequest: 0, pendingHomeControls: new Set() };
 const devicesElement = document.querySelector('#devices');
@@ -130,8 +130,26 @@ function renderHomeDevices(message = '', error = false) {
       const details = [device.manufacturer, device.model].filter(Boolean).join(' · ');
       if (details) { const metadata = document.createElement('p'); metadata.textContent = details; card.append(metadata); }
       if (device.disabled) { const disabled = document.createElement('p'); disabled.className = 'device-state'; disabled.textContent = 'Disabled in Home Assistant'; card.append(disabled); }
+      if (device.measurements?.length) {
+        const readings = document.createElement('div'); readings.className = 'home-readings';
+        const readingsTitle = document.createElement('p'); readingsTitle.className = 'home-card-label'; readingsTitle.textContent = 'Readings';
+        const list = document.createElement('dl'); list.className = 'home-reading-list';
+        for (const measurement of device.measurements) {
+          const row = document.createElement('div'); row.className = 'home-reading';
+          const name = document.createElement('dt'); name.textContent = measurement.name;
+          const value = document.createElement('dd');
+          const presentation = homeMeasurementPresentation(measurement);
+          value.classList.toggle('unavailable', presentation.unavailable);
+          const readingValue = document.createElement('span'); readingValue.className = 'home-reading-value'; readingValue.textContent = presentation.text;
+          value.append(readingValue);
+          if (presentation.unit) { const unit = document.createElement('span'); unit.className = 'home-reading-unit'; unit.textContent = presentation.unit; value.append(' ', unit); }
+          row.append(name, value); list.append(row);
+        }
+        readings.append(readingsTitle, list); card.append(readings);
+      }
       if (device.controls?.length) {
         const controls = document.createElement('div'); controls.className = 'home-controls';
+        const controlsTitle = document.createElement('p'); controlsTitle.className = 'home-card-label'; controlsTitle.textContent = 'Controls'; controls.append(controlsTitle);
         for (const control of device.controls) {
           const row = document.createElement('div'); row.className = 'home-control';
           const summary = document.createElement('div'); summary.className = 'home-control-summary';

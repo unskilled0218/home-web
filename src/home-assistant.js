@@ -2,8 +2,11 @@ import { createHash } from 'node:crypto';
 
 const MAX_MESSAGE_BYTES = 1_000_000;
 const MAX_REGISTRY_ENTRIES = 5_000;
+const MAX_MEASUREMENTS_PER_DEVICE = 100;
+const MAX_SENSOR_STATE_BYTES = 64;
 const CONTROL_DOMAINS = new Set(['light', 'switch', 'fan', 'input_boolean']);
 const CONTROL_ACTIONS = new Set(['turn_on', 'turn_off']);
+const NUMERIC_SENSOR_STATE = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
 const TRUST_ERROR_CODES = new Set(['DEPTH_ZERO_SELF_SIGNED_CERT', 'SELF_SIGNED_CERT_IN_CHAIN', 'UNABLE_TO_GET_ISSUER_CERT', 'UNABLE_TO_GET_ISSUER_CERT_LOCALLY', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE', 'CERT_UNTRUSTED']);
 const CONNECTION_FAILED = 'Home Assistant connection failed. Check the URL and network; for a private certificate, configure NODE_EXTRA_CA_CERTS and restart the dashboard.';
 
@@ -39,6 +42,15 @@ function safeText(value, limit) {
   return typeof value === 'string' && value.trim() ? value.trim().slice(0, limit) : undefined;
 }
 
+function sensorState(value) {
+  if (typeof value !== 'string') return undefined;
+  const state = value.trim();
+  if (!state || Buffer.byteLength(state) > MAX_SENSOR_STATE_BYTES) return undefined;
+  if (state === 'unavailable' || state === 'unknown') return { value: null, status: state, available: false };
+  if (!NUMERIC_SENSOR_STATE.test(state) || !Number.isFinite(Number(state))) return undefined;
+  return { value: state, status: 'available', available: true };
+}
+
 export function normalizeHomeAssistantDevices(devices, areas, entityRegistry = { entities: [] }, states = [], maxEntries = MAX_REGISTRY_ENTRIES) {
   if (!Array.isArray(devices) || !Array.isArray(areas) || !entityRegistry || !Array.isArray(entityRegistry.entities) || !Array.isArray(states)) throw new Error('Home Assistant returned an invalid device registry.');
   if ([devices, areas, entityRegistry.entities, states].some((entries) => entries.length > maxEntries)) throw new Error('Home Assistant returned too many registry entries.');
@@ -63,30 +75,47 @@ export function normalizeHomeAssistantDevices(devices, areas, entityRegistry = {
     const model = safeText(device?.model, 160);
     const name = safeText(device?.name_by_user, 160) ?? safeText(device?.name, 160) ?? model ?? 'Unnamed device';
     const area = areaNames.get(safeText(device?.area_id, 128)) ?? null;
-    byId.set(id, { deviceId: id, name, area, ...(manufacturer && { manufacturer }), ...(model && { model }), disabled: Boolean(device?.disabled_by), controls: [] });
+    byId.set(id, { deviceId: id, name, area, ...(manufacturer && { manufacturer }), ...(model && { model }), disabled: Boolean(device?.disabled_by), measurements: [], controls: [] });
   }
+  const entityCategories = entityRegistry.entity_categories && typeof entityRegistry.entity_categories === 'object' && !Array.isArray(entityRegistry.entity_categories) ? entityRegistry.entity_categories : {};
   const seenEntities = new Set();
   for (const entity of entityRegistry.entities) {
     const entityId = safeText(entity?.ei, 255);
     const deviceId = safeText(entity?.di, 128);
-    if (!entityId || !deviceId || seenEntities.has(entityId) || entity?.hb || entity?.ec !== undefined) continue;
+    if (!entityId || !deviceId || seenEntities.has(entityId) || entity?.hb) continue;
     seenEntities.add(entityId);
     const device = byId.get(deviceId);
     if (!device || device.disabled) continue;
     const separator = entityId.indexOf('.');
     const domain = separator > 0 ? entityId.slice(0, separator) : '';
-    if (!CONTROL_DOMAINS.has(domain) || !/^[a-z0-9_]+\.[a-z0-9_]+$/.test(entityId)) continue;
+    if (!/^[a-z0-9_]+\.[a-z0-9_]+$/.test(entityId)) continue;
     const current = stateByEntity.get(entityId);
     if (!current) continue;
+    const objectName = entityId.slice(separator + 1).replaceAll('_', ' ');
+    if (domain === 'sensor') {
+      const category = safeText(entityCategories[entity?.ec], 32);
+      if (category === 'config') continue;
+      const normalizedState = sensorState(current.state);
+      if (!normalizedState) continue;
+      const name = safeText(current?.attributes?.friendly_name, 160) ?? safeText(entity?.en, 160) ?? safeText(objectName, 160) ?? 'Unnamed reading';
+      const unit = safeText(current?.attributes?.unit_of_measurement, 32);
+      const deviceClass = safeText(current?.attributes?.device_class, 64);
+      device.measurements.push({ name, ...normalizedState, ...(unit && { unit }), ...(deviceClass && { deviceClass }) });
+      continue;
+    }
+    if (!CONTROL_DOMAINS.has(domain) || entity?.ec !== undefined) continue;
     const rawState = safeText(current.state, 32);
     const state = ['on', 'off', 'unavailable'].includes(rawState) ? rawState : 'unknown';
-    const objectName = entityId.slice(separator + 1).replaceAll('_', ' ');
     const name = safeText(current?.attributes?.friendly_name, 160) ?? safeText(entity?.en, 160) ?? safeText(objectName, 160) ?? 'Unnamed control';
     device.controls.push({ entityId, domain, name, state });
   }
   const compare = (left, right) => left.localeCompare(right, undefined, { sensitivity: 'base' });
   const normalized = [...byId.values()];
-  for (const device of normalized) device.controls.sort((left, right) => compare(left.name, right.name) || compare(left.entityId, right.entityId));
+  for (const device of normalized) {
+    device.measurements.sort((left, right) => compare(left.name, right.name));
+    device.measurements.splice(MAX_MEASUREMENTS_PER_DEVICE);
+    device.controls.sort((left, right) => compare(left.name, right.name) || compare(left.entityId, right.entityId));
+  }
   normalized.sort((left, right) => compare(left.area ?? 'Unassigned', right.area ?? 'Unassigned') || compare(left.name, right.name) || compare(left.deviceId, right.deviceId));
   return normalized;
 }

@@ -165,7 +165,7 @@ test('renders Bookmarks before an accessible Wake-on-LAN section', () => {
   assert.match(html, /id="home-assistant-status" role="status" aria-live="polite"/);
   assert.match(html, /id="home-assistant-error" role="alert"/);
   assert.match(html, /id="home-assistant-token"[^>]*type="password"[^>]*autocomplete="new-password"/);
-  assert.match(html, /control supported lights, switches, fans, and input booleans/);
+  assert.match(html, /View current sensor readings and control supported lights, switches, fans, and input booleans/);
   assert.doesNotMatch(html, /id="(?:test-linkwarden|list-linkwarden-collections|linkwarden-collection)"/);
   const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map((match) => match[1]);
   assert.equal(new Set(ids).size, ids.length);

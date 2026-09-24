@@ -167,12 +167,20 @@ export function createDashboardServer({ runtimeConfig, store, linkwarden, homeAs
   function publicHomeAssistantDevices(settings, devices) {
     const fingerprint = homeAssistantFingerprint(settings);
     const expiresAt = now() + HOME_ASSISTANT_CONTROL_TTL_MS;
-    return devices.map(({ name, area, manufacturer, model, disabled, controls = [] }) => ({
+    return devices.map(({ name, area, manufacturer, model, disabled, measurements = [], controls = [] }) => ({
       name,
       area,
       ...(manufacturer && { manufacturer }),
       ...(model && { model }),
       disabled: Boolean(disabled),
+      measurements: measurements.map(({ name: readingName, value, unit, deviceClass, status, available }) => ({
+        name: readingName,
+        value,
+        ...(unit && { unit }),
+        ...(deviceClass && { deviceClass }),
+        status,
+        available: Boolean(available)
+      })),
       controls: controls.map(({ entityId, domain, name, state }) => {
         const available = state === 'on' || state === 'off';
         const controlToken = homeAssistantControls.issue({ entityId, domain, available, fingerprint, expiresAt });
