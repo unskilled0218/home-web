@@ -67,3 +67,7 @@ Updated the project from version `0.13.3` to `0.14.0`. Users now enter only a Ba
 
 - The plan required rejecting protocol-changing redirects. The live Baikal reverse proxy advertises an incorrect same-host HTTP location for its HTTPS well-known endpoint, so the implementation safely retains the configured HTTPS origin while accepting only that redirect's path. It never sends credentials over the advertised HTTP URL.
 - No browser was available for interactive visual verification. Static markup and browser-controller tests cover the changed settings workflow.
+
+## Follow-up
+
+- Version `0.14.1` replaces the generic “CalDAV is currently unavailable” response with safe stage-specific diagnostics for discovery and calendar queries. HTTP 429/5xx, DNS resolution, refused/reset connections, unreachable networks, and transport timeouts now remain actionable without exposing private upstream response bodies or credentials.

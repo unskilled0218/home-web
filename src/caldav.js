@@ -698,11 +698,12 @@ function statusError(status, operation = 'request') {
   if (status === 403) return clientError('Baikal denied access to the calendar account (HTTP 403). Check the account permissions.', { kind: 'authorization' });
   if (status === 405) return clientError(`The Baikal server does not accept the required CalDAV ${operation} request (HTTP 405). Check its WebDAV and reverse-proxy method rules.`);
   if ([400, 415, 422, 501].includes(status)) return clientError(`Baikal rejected the CalDAV ${operation} request (HTTP ${status}).`);
-  if (status === 429 || status >= 500) return clientError('CalDAV is currently unavailable.', { transient: true });
+  if (status === 429) return clientError(`Baikal rate-limited the CalDAV ${operation} request (HTTP 429).`, { transient: true });
+  if (status >= 500) return clientError(`Baikal returned HTTP ${status} during CalDAV ${operation}.`, { transient: true });
   return clientError('CalDAV returned an unexpected HTTP response.');
 }
 
-function connectionError(error) {
+function connectionError(error, operation = 'request') {
   if (isCalDavClientError(error)) return error;
   const candidates = [error, error?.cause];
   if (candidates.some((candidate) => candidate?.name === 'AbortError' || candidate?.code === 'ABORT_ERR')) return clientError('CalDAV connection timed out.', { transient: true });
@@ -710,7 +711,12 @@ function connectionError(error) {
   if (TRUST_ERROR_CODES.has(code)) return clientError('CalDAV certificate is not trusted. Configure its private CA bundle and restart the dashboard.');
   if (code === 'ERR_TLS_CERT_ALTNAME_INVALID') return clientError('CalDAV certificate does not match the configured hostname.');
   if (code === 'CERT_HAS_EXPIRED' || code === 'CERT_NOT_YET_VALID') return clientError('CalDAV certificate is expired or not yet valid.');
-  return clientError('CalDAV is currently unavailable.', { transient: true });
+  if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') return clientError('CalDAV server hostname could not be resolved.', { transient: true });
+  if (code === 'ECONNREFUSED') return clientError('CalDAV server refused the connection.', { transient: true });
+  if (code === 'ECONNRESET' || code === 'EPIPE') return clientError(`CalDAV connection closed during ${operation}.`, { transient: true });
+  if (code === 'EHOSTUNREACH' || code === 'ENETUNREACH') return clientError('CalDAV server network is unreachable.', { transient: true });
+  if (code === 'ETIMEDOUT') return clientError(`CalDAV ${operation} timed out.`, { transient: true });
+  return clientError(`CalDAV ${operation} failed before the server returned a usable response.`, { transient: true });
 }
 
 export function createCalDavClient({ fetchImpl = requestCalDav, timeoutMs = 8_000, cacheSeconds = 300, ca, now = Date.now, randomBytesImpl = randomBytes } = {}) {
@@ -731,6 +737,7 @@ export function createCalDavClient({ fetchImpl = requestCalDav, timeoutMs = 8_00
     const rangeEnd = rangeStart + RANGE_DAYS * 86_400_000;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
+    let operation = 'discovery';
     try {
       const origin = new URL(settings.serverUrl).origin;
       const nonceCounts = new Map();
@@ -773,6 +780,7 @@ export function createCalDavClient({ fetchImpl = requestCalDav, timeoutMs = 8_00
       if (collectionUrls.length > MAX_CALENDARS) throw clientError(`CalDAV discovery found more than ${MAX_CALENDARS} event calendars.`);
       const reportBody = buildCalDavReport(rangeStart, rangeEnd);
       const calendarData = [];
+      operation = 'calendar query';
       for (let offset = 0; offset < collectionUrls.length; offset += REPORT_CONCURRENCY) {
         const results = await Promise.all(collectionUrls.slice(offset, offset + REPORT_CONCURRENCY).map((url) => requestXml(url, { method: 'REPORT', depth: '1', body: reportBody, operation: 'calendar query' })));
         for (const result of results) calendarData.push(...extractCalendarData(result.xml));
@@ -783,7 +791,7 @@ export function createCalDavClient({ fetchImpl = requestCalDav, timeoutMs = 8_00
       if (requestGeneration === generation) cache.set(key, { events, fetchedAt: Number(now()) });
       return { events, stale: false };
     } catch (error) {
-      throw connectionError(error);
+      throw connectionError(error, operation);
     } finally {
       clearTimeout(timer);
     }

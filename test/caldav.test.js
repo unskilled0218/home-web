@@ -349,7 +349,7 @@ test('does not repopulate cache after clearCache during an obsolete request', as
   resolveRequest(xmlResponse([]));
   await pending;
   offline = true;
-  await assert.rejects(client.listEvents(settings), /currently unavailable/);
+  await assert.rejects(client.listEvents(settings), /calendar query failed/);
 });
 
 test('classifies timeout, status, content type, and response-size failures safely', async () => {
@@ -359,12 +359,14 @@ test('classifies timeout, status, content type, and response-size failures safel
     [async () => new Response('', { status: 403 }), /account permissions/],
     [async () => new Response('', { status: 400 }), /CalDAV discovery request/],
     [async () => new Response('', { status: 405 }), /reverse-proxy method rules/],
-    [async () => new Response('', { status: 503 }), /currently unavailable/],
+    [async () => new Response('', { status: 503 }), /HTTP 503 during CalDAV discovery/],
     [async () => new Response('not xml', { status: 207, headers: { 'content-type': 'text/plain' } }), /response type/],
     [async () => new Response('', { status: 207, headers: { 'content-type': 'application/xml', 'content-length': String(2 * 1024 * 1024 + 1) } }), /too large/],
     [async () => { throw Object.assign(new Error('private TLS detail'), { code: 'DEPTH_ZERO_SELF_SIGNED_CERT' }); }, /not trusted/],
     [async () => { throw Object.assign(new Error('private TLS detail'), { code: 'ERR_TLS_CERT_ALTNAME_INVALID' }); }, /hostname/],
-    [async () => { throw Object.assign(new Error('private TLS detail'), { code: 'CERT_HAS_EXPIRED' }); }, /expired/]
+    [async () => { throw Object.assign(new Error('private TLS detail'), { code: 'CERT_HAS_EXPIRED' }); }, /expired/],
+    [async () => { throw Object.assign(new Error('private DNS detail'), { code: 'ENOTFOUND' }); }, /hostname could not be resolved/],
+    [async () => { throw Object.assign(new Error('private connection detail'), { code: 'ECONNRESET' }); }, /closed during discovery/]
   ];
   for (const [fetchImpl, expected] of cases) {
     await assert.rejects(createCalDavClient({ fetchImpl, now: () => rangeStart }).test(settings), (error) => isCalDavClientError(error) && expected.test(error.message));
