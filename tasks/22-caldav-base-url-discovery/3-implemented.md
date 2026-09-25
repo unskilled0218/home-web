@@ -48,10 +48,10 @@ Updated the project from version `0.13.3` to `0.14.0`. Users now enter only a Ba
 
 ## Verification
 
-- `node --test test/caldav.test.js`: passed, 24 tests.
+- `node --test test/caldav.test.js`: passed, 25 tests.
 - `node --test test/calendar-api.test.js`: passed, 2 tests.
 - `node --test test/dashboard.test.js test/dashboard-calendar.test.js`: passed, 21 tests.
-- `npm test`: passed, 111 tests.
+- `npm test`: passed, 112 tests.
 - `npm run check`: passed.
 - `git diff --check`: passed.
 - Independent targeted review: all three reported protocol-hardening findings fixed; no remaining concrete correctness or security findings.
@@ -71,3 +71,5 @@ Updated the project from version `0.13.3` to `0.14.0`. Users now enter only a Ba
 ## Follow-up
 
 - Version `0.14.1` replaces the generic “CalDAV is currently unavailable” response with safe stage-specific diagnostics for discovery and calendar queries. HTTP 429/5xx, DNS resolution, refused/reset connections, unreachable networks, and transport timeouts now remain actionable without exposing private upstream response bodies or credentials.
+- Version `0.14.2` handles a live Baikal/SabreDAV 4.7.0 expansion defect. The test calendar advertises `calendar-timezone` as plain `Europe/Paris`; SabreDAV expects a serialized `VCALENDAR` and returns HTTP 500 while preparing expansion. The client now retries only a failed HTTP 500 expanded REPORT without `<c:expand>`, allowing the calendar to connect while documenting that recurring instances may be incomplete in fallback mode.
+- Authenticated live verification with the provided test account and `/home/ubuntu/workdir/webdav.lanCA.crt` passed discovery, Digest authentication, collection filtering, HTTP 500 fallback, the unexpanded REPORT, and safe empty-calendar parsing.

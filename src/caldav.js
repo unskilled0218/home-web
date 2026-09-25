@@ -28,10 +28,11 @@ const TRUST_ERROR_CODES = new Set([
 ]);
 
 class CalDavClientError extends Error {
-  constructor(message, { transient = false, kind = 'protocol' } = {}) {
+  constructor(message, { transient = false, kind = 'protocol', status = null } = {}) {
     super(message);
     this.transient = transient;
     this.kind = kind;
+    this.status = status;
   }
 }
 
@@ -68,10 +69,11 @@ function utcBasic(value) {
   return new Date(value).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
 }
 
-export function buildCalDavReport(rangeStart, rangeEnd) {
+export function buildCalDavReport(rangeStart, rangeEnd, { expand = true } = {}) {
   const start = utcBasic(rangeStart);
   const end = utcBasic(rangeEnd);
-  return `<?xml version="1.0" encoding="utf-8"?>\n<c:calendar-query xmlns:d="DAV:" xmlns:c="${CALDAV_NAMESPACE}">\n  <d:prop>\n    <c:calendar-data>\n      <c:expand start="${start}" end="${end}"/>\n    </c:calendar-data>\n  </d:prop>\n  <c:filter>\n    <c:comp-filter name="VCALENDAR">\n      <c:comp-filter name="VEVENT">\n        <c:time-range start="${start}" end="${end}"/>\n      </c:comp-filter>\n    </c:comp-filter>\n  </c:filter>\n</c:calendar-query>`;
+  const calendarData = expand ? `<c:calendar-data>\n      <c:expand start="${start}" end="${end}"/>\n    </c:calendar-data>` : '<c:calendar-data/>';
+  return `<?xml version="1.0" encoding="utf-8"?>\n<c:calendar-query xmlns:d="DAV:" xmlns:c="${CALDAV_NAMESPACE}">\n  <d:prop>\n    ${calendarData}\n  </d:prop>\n  <c:filter>\n    <c:comp-filter name="VCALENDAR">\n      <c:comp-filter name="VEVENT">\n        <c:time-range start="${start}" end="${end}"/>\n      </c:comp-filter>\n    </c:comp-filter>\n  </c:filter>\n</c:calendar-query>`;
 }
 
 const PRINCIPAL_PROPFIND = '<?xml version="1.0" encoding="utf-8"?>\n<d:propfind xmlns:d="DAV:"><d:prop><d:current-user-principal/></d:prop></d:propfind>';
@@ -694,13 +696,13 @@ async function boundedText(response) {
 }
 
 function statusError(status, operation = 'request') {
-  if (status === 401) return clientError('CalDAV rejected the username or password.', { kind: 'authentication' });
-  if (status === 403) return clientError('Baikal denied access to the calendar account (HTTP 403). Check the account permissions.', { kind: 'authorization' });
-  if (status === 405) return clientError(`The Baikal server does not accept the required CalDAV ${operation} request (HTTP 405). Check its WebDAV and reverse-proxy method rules.`);
-  if ([400, 415, 422, 501].includes(status)) return clientError(`Baikal rejected the CalDAV ${operation} request (HTTP ${status}).`);
-  if (status === 429) return clientError(`Baikal rate-limited the CalDAV ${operation} request (HTTP 429).`, { transient: true });
-  if (status >= 500) return clientError(`Baikal returned HTTP ${status} during CalDAV ${operation}.`, { transient: true });
-  return clientError('CalDAV returned an unexpected HTTP response.');
+  if (status === 401) return clientError('CalDAV rejected the username or password.', { kind: 'authentication', status });
+  if (status === 403) return clientError('Baikal denied access to the calendar account (HTTP 403). Check the account permissions.', { kind: 'authorization', status });
+  if (status === 405) return clientError(`The Baikal server does not accept the required CalDAV ${operation} request (HTTP 405). Check its WebDAV and reverse-proxy method rules.`, { status });
+  if ([400, 415, 422, 501].includes(status)) return clientError(`Baikal rejected the CalDAV ${operation} request (HTTP ${status}).`, { status });
+  if (status === 429) return clientError(`Baikal rate-limited the CalDAV ${operation} request (HTTP 429).`, { transient: true, status });
+  if (status >= 500) return clientError(`Baikal returned HTTP ${status} during CalDAV ${operation}.`, { transient: true, status });
+  return clientError('CalDAV returned an unexpected HTTP response.', { status });
 }
 
 function connectionError(error, operation = 'request') {
@@ -779,10 +781,18 @@ export function createCalDavClient({ fetchImpl = requestCalDav, timeoutMs = 8_00
       if (!collectionUrls.length) throw clientError('CalDAV discovery found no event calendars for this account.');
       if (collectionUrls.length > MAX_CALENDARS) throw clientError(`CalDAV discovery found more than ${MAX_CALENDARS} event calendars.`);
       const reportBody = buildCalDavReport(rangeStart, rangeEnd);
+      const fallbackReportBody = buildCalDavReport(rangeStart, rangeEnd, { expand: false });
       const calendarData = [];
       operation = 'calendar query';
+      const queryCalendar = async (url) => {
+        try { return await requestXml(url, { method: 'REPORT', depth: '1', body: reportBody, operation: 'calendar query' }); }
+        catch (error) {
+          if (error?.status !== 500) throw error;
+          return requestXml(url, { method: 'REPORT', depth: '1', body: fallbackReportBody, operation: 'calendar query fallback' });
+        }
+      };
       for (let offset = 0; offset < collectionUrls.length; offset += REPORT_CONCURRENCY) {
-        const results = await Promise.all(collectionUrls.slice(offset, offset + REPORT_CONCURRENCY).map((url) => requestXml(url, { method: 'REPORT', depth: '1', body: reportBody, operation: 'calendar query' })));
+        const results = await Promise.all(collectionUrls.slice(offset, offset + REPORT_CONCURRENCY).map(queryCalendar));
         for (const result of results) calendarData.push(...extractCalendarData(result.xml));
         if (calendarData.length > MAX_CALENDAR_OBJECTS || calendarData.reduce((total, value) => total + Buffer.byteLength(value), 0) > MAX_RESPONSE_BYTES) throw clientError('CalDAV calendar data exceeds parser limits.');
       }

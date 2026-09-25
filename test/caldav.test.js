@@ -96,6 +96,10 @@ test('builds the minimal Baikal-compatible expanded REPORT from RFC 4791', () =>
   assert.match(report, /<c:expand/);
   assert.match(report, /<c:calendar-data>\s*<c:expand[^>]*\/>\s*<\/c:calendar-data>/);
   assert.doesNotMatch(report.match(/<c:calendar-data>([\s\S]*?)<\/c:calendar-data>/)[1], /<c:comp\s/);
+  const fallback = buildCalDavReport(rangeStart, rangeEnd, { expand: false });
+  assert.match(fallback, /<c:calendar-data\/>/);
+  assert.doesNotMatch(fallback, /<c:expand/);
+  assert.equal(fallback.match(/20260307T120000Z/g).length, 1);
 });
 
 test('extracts namespaced escaped and CDATA calendar data from bounded XML', () => {
@@ -206,6 +210,23 @@ test('discovers calendars, sends authenticated reports, and parses a safe merged
   assert.equal(requests[0].options.headers.Authorization, `Basic ${Buffer.from('üser:päss').toString('base64')}`);
   assert.match(requests[3].options.body, /20260307T120000Z/);
   assert.equal(JSON.stringify((await client.listEvents(settings)).events).includes('private-id'), false);
+});
+
+test('retries a Baikal expansion failure with an unexpanded calendar query', async () => {
+  const reports = [];
+  const data = calendar([event(['UID:fallback', 'DTSTART:20260308T120000Z', 'SUMMARY:Fallback event'])]);
+  const client = createCalDavClient({ now: () => rangeStart, fetchImpl: discoveryFetch({ report: (_url, options) => {
+    reports.push(options.body);
+    return reports.length === 1 ? new Response('', { status: 500 }) : xmlResponse([data]);
+  } }) });
+  assert.deepEqual(await client.test({ serverUrl: 'https://baikal.test/', username: 'user', password: 'secret' }), {
+    events: [{ title: 'Fallback event', start: '2026-03-08T12:00:00.000Z', end: '2026-03-08T12:00:00.000Z', allDay: false }],
+    stale: false
+  });
+  assert.equal(reports.length, 2);
+  assert.match(reports[0], /<c:expand/);
+  assert.match(reports[1], /<c:calendar-data\/>/);
+  assert.doesNotMatch(reports[1], /<c:expand/);
 });
 
 test('retries a Baikal Digest discovery challenge with the actual request URI', async () => {
