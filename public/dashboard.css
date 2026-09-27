@@ -47,10 +47,12 @@ h2, h3, p { margin: .5em 0; }
 .attribution { font-size: .75em; }
 a { color: #b7e1ff; }
 summary { cursor: pointer; padding: .5rem 0; }
-#hourly, #daily { display: flex; gap: .7rem; overflow-x: auto; list-style: none; padding: .4rem 0; text-align: left; }
-#hourly li, #daily li { flex: 0 0 8em; padding: .5em; background: transparent; border-radius: .4rem; }
+#hourly, #daily { display: flex; flex-wrap: wrap; gap: .35rem; max-width: 100%; list-style: none; margin: .35rem 0; padding: 0; text-align: left; }
+#hourly li, #daily li { flex: 1 1 6.25em; min-width: min(6.25em, 100%); padding: .35em; background: transparent; border-radius: .4rem; }
+#hourly li:only-child, #daily li:only-child { flex-basis: 100%; max-width: none; }
 .forecast-item { display: flex; flex-direction: column; align-items: center; gap: .2em; text-align: center; }
 .forecast-icon { flex: 0 0 auto; width: clamp(2rem, 3em, 3rem); height: clamp(2rem, 3em, 3rem); filter: brightness(0) invert(1) drop-shadow(1px 1px 2px rgb(0 0 0 / .5)); }
+.forecast-label, .forecast-temperature, .forecast-condition { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .forecast-label, .forecast-temperature { font-weight: 700; }
 .forecast-condition { font-size: .85em; }
 #photo-caption { overflow-wrap: anywhere; }
@@ -68,5 +70,5 @@ dialog section { border-top: 1px solid #62758a; margin-top: 1.2rem; padding-top:
 #location-results button { margin: .3rem 0; text-align: left; }
 .calendar-settings-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .75rem; }
 #calendar-connection { display: grid; gap: .7rem; }
-@media (max-width: 600px) { #information { max-width: calc(100% - 1rem); margin-left: .5rem; margin-right: .5rem; } .page-tools { padding: .5rem; } fieldset { grid-template-columns: 1fr; } #weather, #calendar { font-size: min(1em, 1.25rem); } #current-weather { align-items: flex-start; } .weather-icon { width: clamp(2.75rem, 16vw, 4.5rem); height: clamp(2.75rem, 16vw, 4.5rem); } .calendar-event, .right .calendar-event { grid-template-columns: 1fr; } .calendar-event-date, .right .calendar-event-date, .right .calendar-event-title, .right .calendar-event-time, .right .calendar-event-location { grid-column: 1; grid-row: auto; } }
+@media (max-width: 600px) { #information { max-width: calc(100% - 1rem); margin-left: .5rem; margin-right: .5rem; } .page-tools { padding: .5rem; } fieldset { grid-template-columns: 1fr; } #weather, #calendar { font-size: min(1em, 1.25rem); } #current-weather { align-items: flex-start; } .weather-icon { width: clamp(2.75rem, 16vw, 4.5rem); height: clamp(2.75rem, 16vw, 4.5rem); } #hourly, #daily { gap: .2rem; } #hourly li, #daily li { flex-basis: 5.5em; min-width: min(5.5em, 100%); padding: .25em; } .forecast-icon { width: clamp(1.5rem, 10vw, 2.5rem); height: clamp(1.5rem, 10vw, 2.5rem); } .calendar-event, .right .calendar-event { grid-template-columns: 1fr; } .calendar-event-date, .right .calendar-event-date, .right .calendar-event-title, .right .calendar-event-time, .right .calendar-event-location { grid-column: 1; grid-row: auto; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
