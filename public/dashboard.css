@@ -47,7 +47,7 @@ h2, h3, p { margin: .5em 0; }
 .attribution { font-size: .75em; }
 a { color: #b7e1ff; }
 summary { cursor: pointer; padding: .5rem 0; }
-#hourly, #daily { display: flex; flex-wrap: wrap; gap: .15rem; max-width: 100%; list-style: none; margin: .35rem 0; padding: 0; text-align: left; }
+#hourly, #daily { display: flex; flex-wrap: wrap; gap: .15rem; max-width: 70%; list-style: none; margin: .35rem 0; padding: 0; text-align: left; }
 #hourly li, #daily li { flex: 1 1 6.25em; min-width: min(6.25em, 100%); padding: .35em .1em; background: transparent; border-radius: .4rem; }
 #hourly li:only-child, #daily li:only-child { flex-basis: 100%; max-width: none; }
 .forecast-item { display: flex; flex-direction: column; align-items: center; gap: .2em; text-align: center; }
