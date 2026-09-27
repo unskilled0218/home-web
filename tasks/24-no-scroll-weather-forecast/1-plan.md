@@ -1,78 +1,86 @@
-# Task 24: Fit Weather Forecast Rows without Scrolling
+# Task 24: Keep Forecast Text Unbroken without Scrolling
 
 ## Objective
 
-Keep every hourly forecast card on one horizontal row and every daily forecast card on a second horizontal row, fitting both rows within the dashboard's available width without wrapping or scrollbars.
+Prevent text inside each hourly and daily forecast item from breaking across lines, while removing forecast scroll regions and allowing the forecast cards themselves to reflow within the available dashboard width.
 
 ## Request and Interpretation
 
-- Updated request from `~/workdir/command.md`: “no line break and no scroll for hourly/daily weather”.
-- Interpret “no line break” as preventing the hourly cards from wrapping onto another row and preventing the daily cards from wrapping onto another row. Hourly and daily remain separate semantic lists.
-- Interpret “no scroll” as showing each complete forecast row within its available width without horizontal or vertical overflow regions, scrollbars, wheel interception, or drag controls.
-- Preserve the user's latest dashboard layout changes from commit `4a4cbd1`, including calendar-first ordering, hidden weather headings/attribution, compact current conditions, always-visible forecast lists, and the existing stacked content inside each forecast card.
+- Current request from `~/workdir/command.md`: “no line break and no scroll for hourly/daily weather”.
+- User clarification: “no line break” applies to text inside `.forecast-item`, not to the hourly or daily list as a whole.
+- Apply non-wrapping behavior to each forecast item's label, temperature, and condition text. Preserve the existing vertical stack between those separate fields; each field stays on one line but the card does not become one long inline sentence.
+- Remove horizontal and vertical scrolling from the hourly and daily forecast lists. Let forecast cards wrap/reflow into additional rows when the available width cannot contain every card at a readable size.
+- Preserve the user's latest dashboard layout changes from commit `4a4cbd1`, including calendar-first ordering, hidden weather headings/attribution, compact current conditions, always-visible forecast lists, and stacked forecast-card content.
 - Keep forecast data, hourly sampling, daily range, weather icons, settings, provider requests, refresh behavior, and fullscreen behavior unchanged.
 
 ## Inspected Context
 
 - `public/dashboard.html` places sibling `<ul id="hourly">` and `<ul id="daily">` elements directly inside `#forecast-details`; visible headings and the former `<details>` disclosure were removed by the latest UI-preference commit.
-- `public/dashboard.js` builds both forecast types with the same `forecastItem()` function. Each item contains an icon, label, temperature, and condition, and hourly rendering is capped at eight sampled entries while daily rendering contains seven normalized days.
-- `public/dashboard.css` already keeps each list on one flex line because flex wrapping defaults to `nowrap`, but every card has a fixed `8em` basis and the lists use `overflow-x: auto`. The fixed basis forces scrolling when all cards cannot fit.
-- `.forecast-item` intentionally stacks icon and text vertically. The corrected request does not require flattening each card's contents into one text line; changing that would make eight hourly cards substantially harder to fit at narrow widths.
-- `#information` is limited to `55rem` and supports configurable overall/weather scales from 0.5 through 2. The mobile breakpoint currently has no forecast-specific sizing rules.
-- Empty forecast states are inserted as a single plain `<li>`, so any equal-width card layout must allow a lone message to span the full row.
-- `test/dashboard.test.js` statically verifies transparent cards and icon styling but does not assert no-wrap flex behavior, flexible card widths, overflow removal, or narrow-screen sizing.
+- `public/dashboard.js` builds both forecast types with `forecastItem()`. Each item contains an icon, label, temperature, and condition, and hourly rendering is capped at eight sampled entries while daily rendering contains seven normalized days.
+- `public/dashboard.css` currently gives both lists a non-wrapping flex row, fixed-width `8em` cards, and `overflow-x: auto`. This creates horizontal scrolling instead of letting cards reflow.
+- `.forecast-item` uses `flex-direction: column`, intentionally placing icon, label, temperature, and condition on separate rows within the card. The user clarification requires protecting each text field from internal wrapping, not flattening this structure.
+- `#information` is limited to `55rem` and supports configurable overall/weather scales from 0.5 through 2. The mobile breakpoint currently has no forecast-specific layout rules.
+- Empty forecast states are inserted as a single plain `<li>`, so list-layout changes must keep those messages readable and avoid styling them as narrow cards.
+- `test/dashboard.test.js` statically verifies transparent cards and icon styling but does not assert text `white-space`, list wrapping, scrolling removal, empty states, or narrow-screen behavior.
 - The project is version `0.15.0`, uses native CSS/JavaScript without a build step, and verifies browser assets through `node:test` plus `npm run check`.
 
 ## Product and Layout Decisions
 
-- Keep hourly and daily as two separate list rows in their existing order. Do not combine all 15 entries into one row or reintroduce visible headings.
-- Add `aria-label="Hourly forecast"` and `aria-label="Daily forecast"` because the latest layout removed the headings that previously identified each list.
-- Keep both lists as non-wrapping flex rows. Replace each card's fixed width with `flex: 1 1 0` and `min-width: 0` so all entries share the available width and shrink together.
-- Remove scrolling from both axes. The lists should fit their own content box and clip only unavoidable text overflow; they must not become scroll containers.
-- Retain the existing icon/label/temperature/condition stack within each card. Use responsive gaps, padding, icon dimensions, and font sizes so the forecast remains legible at normal dashboard widths.
-- Apply `white-space: nowrap`, bounded width, and ellipsis to textual fields that can exceed their share. Prefer clipping a long condition or localized label over wrapping a card, widening the page, or adding a scrollbar.
-- Keep one-item empty states readable by allowing `li:only-child` to use the full row rather than one eighth or one seventh of it.
-- Preserve transparent backgrounds and the current image-overlay visual language. Do not add card fills, pagination, arrows, scroll controls, wheel handlers, hidden forecast entries, or viewport-dependent JavaScript sampling.
-- At narrow widths and high scale settings, continue showing every returned forecast item. Responsive compression and ellipsis are preferable to wrapping, scrolling, or silently reducing the existing eight-hour/seven-day datasets.
+- Keep hourly and daily as separate semantic lists in their current order. Add `aria-label="Hourly forecast"` and `aria-label="Daily forecast"` because visible headings no longer identify them.
+- Keep each `.forecast-item` as a centered vertical stack. Apply `white-space: nowrap` to `.forecast-label`, `.forecast-temperature`, and `.forecast-condition` so text within each field never breaks onto a second line.
+- Remove `overflow-x: auto` and do not introduce `overflow-y`, custom wheel handling, pagination, or carousel controls.
+- Allow list items to wrap as complete cards by enabling flex wrapping. A forecast card moves intact to the next row when needed; its internal text remains unbroken.
+- Retain a practical card basis/minimum width near the current `8em` presentation so text is not made unreadably narrow merely to force every card into one row.
+- Bound long localized labels, temperatures/units, and condition descriptions with `max-width`, `overflow: hidden`, and `text-overflow: ellipsis`. Ellipsis is preferable to internal text wrapping, list scrolling, or page-width overflow.
+- Use responsive gaps, card sizing, and icon sizing so desktop layouts use the available width efficiently and narrow screens reflow cards cleanly.
+- Let a single unavailable-message item span the full list width and render without ellipsis where practical.
+- Preserve transparent backgrounds and the current image-overlay visual language. Do not reintroduce headings, attribution, card fills, or the old disclosure UI.
 
 ## Implementation Plan
 
 ### 1. Clarify forecast list semantics
 
-- Update `public/dashboard.html` to give the hourly and daily `<ul>` elements explicit accessible labels while preserving their IDs, sibling order, and always-visible container.
-- Keep `#forecast-details` hidden as a unit when no forecast exists and avoid reintroducing the removed disclosure, headings, location title, or attribution.
+- Update `public/dashboard.html` to add explicit accessible labels to the hourly and daily `<ul>` elements while preserving their IDs, sibling order, and always-visible container.
+- Keep `#forecast-details` hidden as a unit when no forecast exists and avoid restoring removed visible copy.
 
-### 2. Fit each complete forecast list into one row
+### 2. Remove scrolling and let complete cards reflow
 
-- Update `#hourly` and `#daily` in `public/dashboard.css` to explicitly use `display: flex`, `flex-wrap: nowrap`, `max-width: 100%`, and bounded gaps/padding.
-- Remove `overflow-x: auto` and prohibit vertical overflow. Use non-scroll clipping only as a final containment guard so neither list exposes a scrollbar.
-- Replace `flex: 0 0 8em` on forecast list items with an equal flexible basis and `min-width: 0`, allowing eight hourly or seven daily cards to divide the row width evenly.
-- Keep `.forecast-item` as a vertical stack, but ensure every child can shrink within the card. Apply non-wrapping ellipsis to label, temperature, and condition text and prevent the icon from forcing a minimum card width.
-- Use responsive `clamp()` sizing for forecast icons, text, card padding, and gaps. Preserve the current icon artwork/filter while allowing smaller dimensions on narrow screens.
-- Add an `:only-child` rule for unavailable messages so a single item spans the complete list width and remains readable.
-- Keep forecast rows left-to-right in both left- and right-position modes; do not reverse item chronology when the information panel is right aligned.
+- Update `#hourly` and `#daily` in `public/dashboard.css` to use `display: flex`, `flex-wrap: wrap`, bounded gaps/padding, and `max-width: 100%`.
+- Remove `overflow-x: auto` and avoid creating overflow regions on either axis. The lists should expand vertically as cards wrap rather than scroll internally.
+- Retain a bounded card basis close to the current width, but allow cards to grow and shrink enough to distribute leftover row space cleanly.
+- Add `min-width: 0` and width containment where needed so intrinsic text width cannot widen the list or dashboard.
+- Add an `:only-child` rule for “Hourly forecast unavailable.” and “Daily forecast unavailable.” so those messages occupy the full row instead of one card-width slot.
+- Keep chronological order unchanged as cards wrap from left to right and then top to bottom, including when the information panel is right aligned.
 
-### 3. Handle responsive and scaling constraints
+### 3. Prevent line breaks inside forecast text
 
-- Add focused mobile rules that reduce gaps, padding, icon dimensions, and secondary condition text size without changing the single-row/no-scroll contract.
-- Verify weather scale and overall scale settings do not reintroduce page-width overflow. Constrain forecast list width relative to the scaled information panel rather than allowing intrinsic text width to expand it.
-- Ensure long locale-formatted labels, negative temperatures, multi-character units, and long weather descriptions ellipsize independently instead of wrapping neighboring content.
-- Preserve all eight sampled hourly records and seven daily records at every supported viewport; do not solve fitting by changing `sampleHours()` or slicing data in the renderer.
+- Keep `.forecast-item` as a vertical column and retain centered alignment.
+- Apply `white-space: nowrap`, `max-width: 100%`, `overflow: hidden`, and `text-overflow: ellipsis` to `.forecast-label`, `.forecast-temperature`, and `.forecast-condition`.
+- Keep icon dimensions bounded and non-shrinking, with responsive `clamp()` sizing where needed. Preserve the existing icon filter and transparent card background.
+- Add focused mobile rules for card basis, gap, padding, icon size, and secondary condition size while preserving no-wrap text and no-scroll lists.
+- Verify long weekday/month names, AM/PM labels, negative temperatures, wide units, and long descriptions truncate within their own field rather than wrapping or affecting neighboring cards.
 
-### 4. Add regression coverage
+### 4. Preserve rendering and empty states
+
+- Keep `forecastItem()` and its safe `textContent` construction unchanged unless a minimal class/attribute addition is required for styling.
+- Preserve all eight sampled hourly records and seven daily records; do not reduce data to avoid scrollbars.
+- Ensure empty, loading, stale, and unavailable weather states do not create empty scroll containers or narrow clipped messages.
+- Confirm current conditions and air-quality layout are unaffected by forecast-only selectors.
+
+### 5. Add regression coverage
 
 - Extend `test/dashboard.test.js` to require accessible labels on the hourly and daily lists.
-- Assert explicit `flex-wrap: nowrap`, flexible zero-basis cards, `min-width: 0`, and absence of the old fixed `8em` basis.
-- Assert that `overflow-x: auto` is removed and the forecast rows use non-scroll containment on both axes.
-- Assert bounded non-wrapping/ellipsis behavior for forecast text and the full-width `:only-child` empty state.
-- Assert responsive forecast sizing exists in the mobile media rule while retaining current transparent card and local icon assertions.
-- Keep renderer tests unchanged unless a small class/attribute addition is required; weather data, order, icon day/night selection, and safe `textContent` insertion must remain stable.
+- Assert forecast lists use wrapping layout and no longer contain `overflow-x: auto` or any vertical scroll declaration.
+- Assert forecast label, temperature, and condition selectors use `white-space: nowrap` plus bounded ellipsis behavior.
+- Assert `.forecast-item` remains a vertical stack so the clarification is not mistakenly implemented as one inline row.
+- Assert the `:only-child` empty-state treatment and responsive forecast sizing are present.
+- Retain existing assertions for transparent cards, local icons, safe text insertion, item ordering, and hourly day/night icon selection.
 
-### 5. Documentation, version, and implementation record
+### 6. Documentation, version, and implementation record
 
-- Update the README weather description only if needed to state that all hourly and daily cards fit into fixed no-scroll rows; avoid expanding operational documentation for a CSS-only behavior.
+- Update the README weather description only if needed to mention that forecast cards reflow without list scrolling and their text remains single-line.
 - Bump `package.json` from `0.15.0` to `0.15.1` for the focused user-visible layout fix.
-- Write `tasks/24-no-scroll-weather-forecast/3-implemented.md` before the implementation commit with final CSS choices, changed files, verification evidence, browser availability, and any departures from this revised plan.
+- Write `tasks/24-no-scroll-weather-forecast/3-implemented.md` before the implementation commit with final CSS choices, changed files, verification evidence, browser availability, and any departures from this clarified plan.
 
 ## Verification
 
@@ -87,25 +95,26 @@ git diff --check
 
 Also verify manually in a browser when available:
 
-1. Load `/dashboard` with all eight hourly and seven daily records; confirm each list uses exactly one row and neither list nor the page gains a forecast-related scrollbar.
-2. Confirm all cards remain present and chronologically ordered, with no hidden records, wrapping, pagination, or scroll controls.
-3. Check desktop and narrow mobile widths, left/right information positions, weather scales 0.5 and 2, overall scales 0.5 and 2, and 12/24-hour labels for overflow or overlap.
-4. Test long weekday/month names, AM/PM labels, negative temperatures, wide units, and long condition descriptions; confirm text ellipsizes within its own card instead of wrapping or widening the row.
-5. Confirm hourly and daily unavailable messages span the available row width and remain readable.
-6. Confirm current conditions, air quality, clock, calendar, photo slideshow, fullscreen-hidden controls, and settings behavior are unchanged.
+1. Load `/dashboard` with all eight hourly and seven daily records; confirm neither forecast list has horizontal or vertical scrolling.
+2. Resize from desktop to narrow mobile widths and confirm complete cards reflow onto additional rows while each label, temperature, and condition remains on one line.
+3. Check left/right information positions, weather scales 0.5 and 2, overall scales 0.5 and 2, and 12/24-hour labels for page-width overflow or overlap.
+4. Test long weekday/month names, AM/PM labels, negative temperatures, wide units, and long condition descriptions; confirm ellipsis occurs inside the relevant field without line breaks.
+5. Confirm all hourly and daily records remain visible in chronological left-to-right/top-to-bottom order after wrapping.
+6. Confirm unavailable messages use the full list width and remain readable.
+7. Confirm current conditions, air quality, clock, calendar, photo slideshow, fullscreen-hidden controls, and settings behavior are unchanged.
 
 ## Acceptance Criteria
 
-- All hourly forecast cards remain on one horizontal row and all daily forecast cards remain on one separate horizontal row.
-- Both complete forecast lists fit within the dashboard information panel without horizontal or vertical scrolling.
-- Every existing sampled hourly and daily record remains rendered in chronological order; fitting does not remove data.
-- Forecast cards shrink evenly, their internal text does not wrap, and unavoidable long text ellipsizes without widening the page.
-- Empty forecast messages use the full row, and hourly/daily lists remain semantically distinguishable without visible headings.
-- Existing weather data, icon, refresh/error, current-condition, and non-weather dashboard behavior remains unchanged.
+- Text inside every forecast label, temperature, and condition remains on one line; long values ellipsize instead of wrapping.
+- Hourly and daily lists have no horizontal or vertical scrolling and expose no scrollbar or custom scroll controls.
+- Forecast cards may wrap as whole units to additional rows, preserving chronological order and readable card widths.
+- Every existing sampled hourly and daily record remains rendered; no data is removed to fit the layout.
+- `.forecast-item` retains its icon-and-text vertical stack, and empty forecast messages remain readable across the available width.
+- Existing weather data, icons, refresh/error states, current conditions, and non-weather dashboard behavior remain unchanged.
 - Focused and full automated checks pass, version `0.15.1` is recorded, and browser-only verification is reported accurately.
 
 ## Planning Verification
 
-- Reread the corrected request, which now explicitly says “no scroll”, and removed the previous vertical-scrolling interpretation.
-- Reinspected the current fixed-width horizontal list implementation, forecast item structure, item counts, scaling settings, mobile breakpoint, relevant tests, package version, and latest UI-preference commit.
-- Renamed the task directory to match the corrected no-scroll scope. This planning update changes only Task 24's `1-plan.md`; implementation code remains unchanged.
+- Applied the user's clarification that “no line break” refers specifically to text inside `.forecast-item`, not to list wrapping or placing every card on one row.
+- Reinspected the current fixed-width horizontal-scroll implementation, card structure, item counts, scaling settings, mobile breakpoint, relevant tests, package version, and latest UI-preference commit.
+- This revision changes only `tasks/24-no-scroll-weather-forecast/1-plan.md`; implementation code remains unchanged.
