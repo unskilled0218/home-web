@@ -4,6 +4,9 @@ import { createPhotoController } from './dashboard-photos.js';
 import { createCalendarController, formatCalendarEvent } from './dashboard-calendar.js';
 
 const $ = (id) => document.getElementById(id);
+const currentWeatherSubValues = document.createElement('div');
+currentWeatherSubValues.id = 'current-weather-subvalues';
+
 let storage;
 try { storage = window.localStorage; } catch { /* Defaults work when browser storage is blocked. */ }
 let settings = loadSettings(storage);
@@ -42,17 +45,17 @@ function forecastItem({ code, day = 1, label, temperature }) {
 
 function renderWeather(state = weatherState) {
   weatherState = state;
-  $('location-name').textContent = settings.location?.label ?? 'Weather';
   const forecast = state.forecast;
-  $('weather-status').textContent = !settings.location ? 'Choose a location in Settings to show weather.' : state.forecastError ? (forecast ? 'Forecast is stale; refresh failed. Retrying hourly.' : 'Forecast unavailable. Retrying hourly.') : state.loading ? 'Updating weather…' : state.forecastUpdated ? `Updated ${new Date(state.forecastUpdated).toLocaleTimeString([], { timeZone: settings.timezone })}` : '';
+  $('weather-status').textContent = !settings.location ? 'Choose a location in Settings to show weather.' : state.forecastError ? (forecast ? 'Forecast is stale; refresh failed. Retrying hourly.' : 'Forecast unavailable. Retrying hourly.') : state.loading ? 'Updating weather…' : state.forecastUpdated ? '' /* Show nothing when successfully updated */ : '';
   const icon = $('weather-icon');
   icon.hidden = true; icon.removeAttribute('src');
-  $('current-weather-values').replaceChildren(); $('hourly').replaceChildren(); $('daily').replaceChildren();
+  $('current-weather-values').replaceChildren(); currentWeatherSubValues.replaceChildren(); $('hourly').replaceChildren(); $('daily').replaceChildren();
   $('forecast-details').hidden = !forecast;
   if (forecast) {
     const current = forecast.current; const units = forecast.units;
     icon.src = `/weather-icons/${weatherIconFile(current.weather_code, current.is_day)}`; icon.hidden = false;
-    $('current-weather-values').append(element('strong', reading(current.temperature_2m, units.temperature_2m), 'temperature'), element('span', weatherDescription(current.weather_code, current.is_day), 'condition'), element('span', `Wind ${reading(current.wind_speed_10m, units.wind_speed_10m)}`), element('span', `Humidity ${reading(current.relative_humidity_2m, units.relative_humidity_2m)}`), element('span', `Precipitation ${reading(current.precipitation, units.precipitation)}`));
+    $('current-weather-values').append(element('strong', reading(current.temperature_2m, units.temperature_2m), 'temperature'), element('span', weatherDescription(current.weather_code, current.is_day), 'condition'), currentWeatherSubValues);
+    currentWeatherSubValues.append(element('span', `Wind ${reading(current.wind_speed_10m, units.wind_speed_10m)}`), element('span', `Humidity ${reading(current.relative_humidity_2m, units.relative_humidity_2m)}`), element('span', `Precipitation ${reading(current.precipitation, units.precipitation)}`));
     for (const hour of sampleHours(forecast.hourly)) {
       const label = new Intl.DateTimeFormat(undefined, { timeZone: settings.timezone, weekday: 'short', hour: 'numeric', minute: '2-digit', hour12: settings.hour12 }).format(new Date(hour.time * 1000));
       $('hourly').append(forecastItem({ code: hour.code, day: hour.day, label, temperature: reading(hour.temperature, forecast.hourlyUnit) }));
@@ -64,7 +67,7 @@ function renderWeather(state = weatherState) {
     }
     if (!$('daily').children.length) $('daily').append(element('li', 'Daily forecast unavailable.'));
   }
-  $('air-quality').textContent = !settings.location ? '' : state.air ? `US AQI: ${state.air.aqi}${state.airError ? ' (stale; refresh failed)' : ''}` : state.airError ? 'Air quality unavailable.' : state.loading ? 'Loading air quality…' : '';
+  currentWeatherSubValues.append(element('span', `${!settings.location ? '' : state.air ? `US AQI: ${state.air.aqi}${state.airError ? ' (stale; refresh failed)' : ''}` : state.airError ? 'Air quality unavailable.' : state.loading ? 'Loading air quality…' : ''}`));
 }
 
 const weather = createWeatherController({ onChange: renderWeather });
