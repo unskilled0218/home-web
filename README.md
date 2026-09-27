@@ -17,9 +17,23 @@ Open `http://127.0.0.1:3000` to connect Home Assistant or Linkwarden, or to add 
 
 For another device on the LAN to reach the dashboard, set `HOST` to the server's explicit private address, such as `192.168.1.10`. That address is accepted automatically as an HTTP Host. If the browser uses a private DNS name instead, also set `DASHBOARD_ALLOWED_HOSTS` to that hostname. Do not bind the service to a public interface or expose its port through a router.
 
+## Home widgets
+
+The home page `/` has six widget types: **Time**, **Weather**, **Calendar**, **Wake-on-LAN**, **Bookmarks**, and **Home Assistant**. Open **Settings** to add widgets to the current layout, choose display preferences and a weather location, select Home Assistant devices/readings, or manage integration connections. Each type can appear once per layout. Removing a widget only removes it from that layout; saved connections, devices, and shared widget preferences remain available in Settings.
+
+Home configuration is saved on the server in `data/wol.db`, so other browsers and devices use the same settings and normal database backups include them. There are two independent layouts: **Desktop** at viewport widths of 768px or greater and **Mobile** below 768px. Each saves its own widget membership, placement, width, and height. Desktop uses a 12-column grid; mobile uses four columns with full-width defaults. Changing one layout never rearranges the other. Timezone/date/clock format, weather location/units, and Home Assistant selections are shared across both. The initial timezone is UTC; select your preferred IANA timezone in Settings.
+
+Choose **Edit widgets**, drag a **Move** handle, or drag the bottom-right resize dot. Arrow keys on a focused move/resize handle perform the same grid-snapped edits. Settings also offers numeric column, row, width, and height controls. Collisions move other widgets down; widget contents scroll within their saved sizes. **Save layouts** publishes your edits and **Cancel / reload** discards them. Switching between desktop and mobile while editing retains a separate draft for each; saving commits them together. Both layouts may be empty and still offer Settings to add widgets.
+
+In Settings, use **Apply display preferences** or **Apply selected devices and readings**, then **Save shared changes** to publish the draft. Catalog additions outside edit mode save immediately; additions while editing join the draft. New devices default to all their currently available readings. Home Assistant selections use stable device/reading identities, survive renames and token rotation, and show unavailable placeholders if a selected device or reading disappears. Controls always use fresh server-issued action tokens. Selection is bounded to 50 devices and 500 readings total.
+
+Visible home pages check for shared settings changes every 30 seconds and when focused or resumed. Updates apply automatically while you are not editing. If another device saves during your edits, a revision conflict preserves your draft and asks you to cancel/reload and reapply it; it never silently overwrites the other device's save. A failed save keeps unsaved changes available for retry. Initial load failures show a retry control rather than replacing the saved configuration with defaults. Home settings do not depend on localStorage.
+
+Time updates while visible, weather refreshes hourly, and calendar refreshes automatically every five minutes. Hidden or removed information widgets stop their refresh work and resume when active again. The calendar has no manual refresh button. Bookmarks retain collection navigation and explicit refresh; Wake-on-LAN retains device editing and bulk Wake; Home Assistant retains current controls and explicit refresh. Integration connections remain accessible through Settings even when their widget is absent.
+
 ## Photo dashboard
 
-Open `/dashboard` (or `/dashboard/`) for a photo, clock, weather, and optional calendar display inspired by the `dash-board` desktop application. The home page links to it, and **Home** returns to your integrations. A clock and dark background work immediately without configuration.
+Open `/dashboard` (or `/dashboard/`) for a photo, clock, weather, and optional calendar display inspired by the `dash-board` desktop application. The home page links to it, and **Home** returns to your widget dashboard. A clock and dark background work immediately without configuration. This separate photo view keeps its browser-local `dashboard.preferences.v1` preferences; they do not overwrite the server-shared home settings.
 
 **Settings** controls the lower-left/right information position, overall and individual clock/weather/calendar scale, visibility, timezone, date style, 12/24-hour format, seconds, and weather units. Date styles use the browser's locale and `Intl` formatting rather than the desktop app's custom format strings. Preferences are saved per browser in localStorage; blocked or corrupt storage falls back to defaults, and save failures are reported without stopping the page.
 
@@ -59,7 +73,7 @@ Search for a weather location in settings. Search terms and selected coordinates
 
 ## Baikal calendar
 
-The calendar is optional. In `/dashboard` **Settings**, enter only the Baikal server URL, such as `https://baikal.example.test`, plus a username and password. Do not add `/dav.php/` or a calendar path. The dashboard follows Baikal's same-origin CalDAV discovery flow to locate the authenticated principal, calendar home, and up to 20 event-capable calendars. Use a dedicated least-privilege account when practical.
+The calendar is optional. In home **Settings → Calendar connection**, or `/dashboard` **Settings**, enter only the Baikal server URL, such as `https://baikal.example.test`, plus a username and password. Do not add `/dav.php/` or a calendar path. The dashboard follows Baikal's same-origin CalDAV discovery flow to locate the authenticated principal, calendar home, and up to 20 event-capable calendars. Use a dedicated least-privilege account when practical.
 
 The client supports Baikal installations configured for either HTTP Basic or HTTP Digest authentication. It follows a Digest challenge using MD5, MD5-sess, SHA-256, or SHA-256-sess with `qop=auth`; unsupported challenge modes fail without exposing the password.
 

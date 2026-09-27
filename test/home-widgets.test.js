@@ -1,0 +1,80 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createWidgetEditor, createWidgetOwners, gestureLayout } from '../public/home-widgets.js';
+import { defaultHomeSettings, changeWidget } from '../public/home-layout.js';
+import { createHomeIntegrations, selectedHomeDevices } from '../public/home-integrations.js';
+
+// Minimal event/geometry surface: tests drive the real editor handlers, not a copy of its algorithm.
+class Element {
+  constructor(document) { this.document = document; this.children = []; this.dataset = {}; this.listeners = {}; this.style = { setProperty() {} }; this.classList = { add() {}, toggle() {} }; this.hidden = false; this.value = ''; }
+  get childNodes() { return this.children; }
+  append(...nodes) { for (const node of nodes) this.insertBefore(node, null); }
+  replaceChildren(...nodes) { this.children = []; this.append(...nodes); }
+  prepend(node) { this.insertBefore(node, this.children[0]); }
+  insertBefore(node, reference) { if (node.parent) node.parent.children.splice(node.parent.children.indexOf(node), 1); const index = reference ? this.children.indexOf(reference) : this.children.length; this.children.splice(index, 0, node); node.parent = this; }
+  querySelector() { return this.children.find((item) => item.className === 'widget-content'); }
+  setAttribute() {}
+  addEventListener(type, fn) { (this.listeners[type] ??= []).push(fn); }
+  dispatch(type, fields = {}) { for (const fn of this.listeners[type] ?? []) fn({ currentTarget: this, button: 0, pointerId: 1, clientX: 0, clientY: 0, preventDefault() {}, ...fields }); }
+  setPointerCapture(id) { this.capture = id; }
+  hasPointerCapture(id) { return this.capture === id; }
+  releasePointerCapture() { this.capture = null; this.dispatch('lostpointercapture'); }
+  getBoundingClientRect() { return { width: 1184 }; }
+  closest() { return this.hidden ? this : this.parent?.closest(); }
+  focus() { this.document.activeElement = this; }
+}
+function fixture() {
+  const document = { createElement: () => new Element(document), activeElement: null };
+  const grid = new Element(document); const root = new Element(document); grid.append(root);
+  let items = [{ id: 'time', type: 'time', x: 0, y: 0, w: 4, h: 3 }]; let changes = 0; let removed = 0;
+  const editor = createWidgetEditor({ document, grid, roots: { time: root }, onChange: (next) => { items = next; changes++; editor.render(items, 'desktop', true); }, onRemove: () => removed++, announce() {} });
+  editor.render(items, 'desktop', true);
+  return { editor, root, grid, get items() { return items; }, get changes() { return changes; }, get removed() { return removed; }, move: root.children[0].children[1], resize: root.children.at(-1) };
+}
+
+test('pointer movement previews and commits on release; cancel/breakpoint changes restore geometry', () => {
+  const f = fixture(); f.move.dispatch('pointerdown'); f.move.dispatch('pointermove', { clientX: 200, clientY: 80 });
+  assert.equal(f.changes, 0); assert.equal(f.root.style.gridColumn, '3 / span 4');
+  f.move.dispatch('pointerup', { clientX: 200, clientY: 80 }); assert.equal(f.items[0].x, 2); assert.equal(f.items[0].y, 1); assert.equal(f.changes, 1); assert.equal(f.move.capture, null);
+  f.move.dispatch('pointerdown'); f.move.dispatch('pointermove', { clientX: 400 }); f.move.dispatch('pointercancel'); assert.equal(f.changes, 1); assert.equal(f.root.style.gridColumn, '3 / span 4');
+  f.move.dispatch('pointerdown'); f.editor.render([{ ...f.items[0], x: 0, w: 4 }], 'mobile', true); assert.equal(f.move.capture, null); assert.equal(f.changes, 1);
+});
+
+test('resize and keyboard edits use the same grid rules and content clicks cannot start gestures', () => {
+  const f = fixture(); f.resize.dispatch('pointerdown'); f.resize.dispatch('pointerup', { clientX: 100, clientY: 160 });
+  assert.equal(f.items[0].w, 5); assert.equal(f.items[0].h, 5);
+  const expected = gestureLayout(f.items, 'time', 'resize', 1, 0, 'desktop'); f.resize.dispatch('keydown', { key: 'ArrowRight' }); assert.deepEqual(f.items, expected);
+  f.root.dispatch('pointerdown'); f.root.dispatch('pointerup', { clientX: 500 }); assert.equal(f.changes, 2);
+  const content = f.root.querySelector('.widget-content'); assert.ok(content);
+  f.editor.render(f.items, 'desktop', false); f.move.dispatch('pointerdown'); f.move.dispatch('pointerup', { clientX: 500 }); assert.equal(f.changes, 2); assert.equal(f.root.querySelector('.widget-content'), content);
+});
+
+test('data owners survive geometry edits, reconcile removal, and resume exactly once after page restoration', () => {
+  const calls = []; const integrations = { configure: (ids) => calls.push(['integration', ids]), suspend: () => calls.push(['suspend']) };
+  const information = { configure: (ids) => calls.push(['information', ids]), setVisible: (visible) => calls.push(['visible', visible]) };
+  const owners = createWidgetOwners({ integrations, information }); const settings = defaultHomeSettings();
+  owners.configure(settings.layouts.desktop, settings); assert.equal(calls.length, 2);
+  owners.configure(changeWidget(settings.layouts.desktop, 'time', { h: 10 }, 'desktop'), settings); assert.equal(calls.length, 2);
+  const removed = settings.layouts.desktop.filter((item) => item.id !== 'calendar'); owners.configure(removed, settings); assert.equal(calls.length, 4); assert.ok(!calls[3][1].includes('calendar'));
+  owners.suspend(); owners.configure(removed, settings); assert.equal(calls.length, 6); owners.resume(true); assert.equal(calls.length, 9); owners.configure(removed, settings); assert.equal(calls.length, 9);
+});
+
+test('selected devices and readings use identities, preserve missing selections, and keep current controls', () => {
+  const devices = [{ selectionId: 'a', name: 'Same name', measurements: [{ selectionId: 'reading-a', name: 'Temperature', value: '20' }], controls: [{ controlToken: 'current' }] }, { selectionId: 'b', name: 'Same name', measurements: [], controls: [] }];
+  const selected = selectedHomeDevices(devices, [{ id: 'a', readings: ['reading-a', 'missing'] }, { id: 'gone', readings: [] }]);
+  assert.equal(selected[0].measurements[0].value, '20'); assert.equal(selected[0].measurements[1].available, false); assert.equal(selected[0].controls[0].controlToken, 'current'); assert.equal(selected[1].name, 'Selected device unavailable');
+  devices[0].name = 'Renamed'; devices.reverse(); assert.equal(selectedHomeDevices(devices, [{ id: 'a', readings: [] }])[0].name, 'Renamed'); assert.deepEqual(selectedHomeDevices(devices, []), []);
+});
+
+test('removing an integration invalidates its pending device snapshot and re-adding loads once', async () => {
+  const nodes = new Map(); const document = { activeElement: null, createElement: () => new Element(document), querySelector: (selector) => { if (!nodes.has(selector)) nodes.set(selector, new Element(document)); return nodes.get(selector); } };
+  const pending = []; const snapshots = [];
+  const integrations = createHomeIntegrations({ document, onDevices: (devices) => snapshots.push(devices), fetchImpl: async (url) => {
+    if (url === '/api/home-assistant') return { ok: true, json: async () => ({ homeAssistant: { configured: true } }) };
+    return new Promise((resolve) => pending.push(resolve));
+  } });
+  integrations.configure(['home-assistant'], []); await new Promise(setImmediate); assert.equal(pending.length, 1);
+  integrations.configure([], []); pending.shift()({ ok: true, json: async () => ({ devices: [{ name: 'obsolete' }] }) }); await new Promise(setImmediate); assert.equal(snapshots.length, 0);
+  integrations.configure(['home-assistant'], []); integrations.configure(['home-assistant'], []); await new Promise(setImmediate); assert.equal(pending.length, 1);
+  pending.shift()({ ok: true, json: async () => ({ devices: [] }) }); await new Promise(setImmediate); assert.deepEqual(snapshots, [[]]); integrations.suspend();
+});

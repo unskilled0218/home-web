@@ -30,7 +30,7 @@ test('serves dashboard aliases and assets while preserving home and static conta
     const html = await result.text(); assert.match(html, /src="\/dashboard.js"/); assert.doesNotMatch(html, /src="\/app.js"/);
     if (previous) assert.equal(html, previous); previous = html;
   }
-  for (const name of ['dashboard.js', 'dashboard-helpers.js', 'dashboard-weather.js', 'dashboard-photos.js', 'dashboard-calendar.js', 'dashboard.css']) {
+  for (const name of ['dashboard.js', 'dashboard-helpers.js', 'dashboard-weather.js', 'dashboard-photos.js', 'dashboard-calendar.js', 'dashboard.css', 'app.js', 'home-layout.js', 'home-settings.js', 'home-widgets.js', 'home-information.js', 'home-integrations.js']) {
     const result = await fetch(`${base}/${name}`); assert.equal(result.status, 200); assert.match(result.headers.get('content-type'), name.endsWith('.css') ? /text\/css/ : /text\/javascript/);
   }
   const iconFiles = ['weather-cloudy.svg', 'weather-fog.svg', 'weather-lightning-rainy.svg', 'weather-lightning.svg', 'weather-night-partly-cloudy.svg', 'weather-night.svg', 'weather-partly-cloudy.svg', 'weather-pouring.svg', 'weather-rainy.svg', 'weather-snowy-rainy.svg', 'weather-snowy.svg', 'weather-sunny.svg'];

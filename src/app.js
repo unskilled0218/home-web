@@ -14,6 +14,7 @@ import { isHomeAssistantClientError, normalizeHomeAssistantCredentials } from '.
 import { createHomeAssistantControlStore } from './home-assistant-controls.js';
 import { isCalDavClientError, normalizeCalDavCredentials } from './caldav.js';
 import { createUnavailablePhotoLibrary } from './photo-library.js';
+import { MAX_HOME_SETTINGS_BYTES, normalizeHomeSettings } from './home-settings.js';
 
 export const MAX_JSON_BODY_BYTES = 16_384;
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -177,13 +178,16 @@ export function createDashboardServer({ runtimeConfig, store, linkwarden, homeAs
   function publicHomeAssistantDevices(settings, devices) {
     const fingerprint = homeAssistantFingerprint(settings);
     const expiresAt = now() + HOME_ASSISTANT_CONTROL_TTL_MS;
-    return devices.map(({ name, area, manufacturer, model, disabled, measurements = [], controls = [] }) => ({
+    const selectionId = (kind, deviceId, entityId = '') => `${kind}_${createHash('sha256').update(JSON.stringify(['home-selection-v1', kind, settings.baseUrl, deviceId, entityId])).digest('base64url')}`;
+    return devices.map(({ deviceId, name, area, manufacturer, model, disabled, measurements = [], controls = [] }) => ({
+      selectionId: selectionId('d', deviceId),
       name,
       area,
       ...(manufacturer && { manufacturer }),
       ...(model && { model }),
       disabled: Boolean(disabled),
-      measurements: measurements.map(({ name: readingName, value, unit, deviceClass, status, available }) => ({
+      measurements: measurements.map(({ entityId, name: readingName, value, unit, deviceClass, status, available }) => ({
+        selectionId: selectionId('r', deviceId, entityId),
         name: readingName,
         value,
         ...(unit && { unit }),
@@ -269,6 +273,23 @@ export function createDashboardServer({ runtimeConfig, store, linkwarden, homeAs
     if (!isTrustedAddress(request.socket.remoteAddress)) return json(response, 403, { error: 'This service only accepts local-network requests.' });
     if (!apiRequestAllowed(request, runtimeConfig.allowedHosts)) return json(response, 403, { error: 'Request host or origin is not allowed.' });
     if (request.method === 'GET' && pathname === '/api/health') return json(response, 200, { status: 'ok' });
+    if (pathname === '/api/home/settings') {
+      if (request.method === 'GET') {
+        try { return json(response, 200, store.getHomeSettings()); }
+        catch { return json(response, 503, { error: 'Saved home settings could not be loaded.' }); }
+      }
+      if (request.method === 'PUT') {
+        let input;
+        try { input = normalizeHomeSettings(await readJson(request, MAX_HOME_SETTINGS_BYTES)); }
+        catch (error) { return json(response, 400, { error: error.message }); }
+        try {
+          store.getHomeSettings();
+          const saved = store.saveHomeSettings(input);
+          return saved ? json(response, 200, saved) : json(response, 409, { error: 'Home settings changed on another device. Reload before reapplying your changes.' });
+        } catch { return json(response, 503, { error: 'Home settings could not be saved.' }); }
+      }
+      return json(response, 405, { error: 'Method not allowed.' });
+    }
     if (request.method === 'GET' && pathname === '/api/dashboard/photos') {
       try { return json(response, 200, await photoLibrary.list()); }
       catch { return json(response, 200, { available: false, photos: [] }); }

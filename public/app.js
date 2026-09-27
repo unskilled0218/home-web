@@ -1,375 +1,133 @@
-import { filterHomeDevices, groupHomeDevices, homeControlPresentation, homeMeasurementPresentation, isLatestRequest, restoreCollectionFocus, runBulkWake, selectedButtonState, showDialogError, updateCollectionSelection, updateSelection } from './app-helpers.js';
+import { WIDGETS, addWidget, changeWidget, columns, layoutMode, minimumWidth } from './home-layout.js';
+import { createHomeSettingsController } from './home-settings.js';
+import { createWidgetEditor, createWidgetOwners } from './home-widgets.js';
+import { createHomeIntegrations } from './home-integrations.js';
+import { createHomeInformation } from './home-information.js';
+import { searchLocations } from './dashboard-weather.js';
 
-const state = { devices: [], selected: new Set(), bulkWakePending: false, bookmarks: [], linkwarden: null, collections: [], activeCollectionToken: null, collectionRequest: 0, homeAssistant: null, homeDevices: [], homeDeviceRequest: 0, homeAssistantRequest: 0, pendingHomeControls: new Set() };
-const devicesElement = document.querySelector('#devices');
-const statusElement = document.querySelector('#status');
-const searchElement = document.querySelector('#search');
-const selectedButton = document.querySelector('#wake-selected');
-const dialog = document.querySelector('#device-dialog');
-const form = document.querySelector('#device-form');
-const deviceError = document.querySelector('#device-error');
-const bookmarksElement = document.querySelector('#bookmarks');
-const bookmarkStatusElement = document.querySelector('#bookmark-status');
-const linkwardenDialog = document.querySelector('#linkwarden-dialog');
-const linkwardenForm = document.querySelector('#linkwarden-form');
-const linkwardenError = document.querySelector('#linkwarden-error');
-const collectionTreeElement = document.querySelector('#collection-tree');
-const refreshBookmarksButton = document.querySelector('#refresh-bookmarks');
-const disconnectLinkwardenButton = document.querySelector('#disconnect-linkwarden');
-const linkwardenAccountElement = document.querySelector('#linkwarden-account');
-const homeAssistantDevicesElement = document.querySelector('#home-assistant-devices');
-const homeAssistantStatusElement = document.querySelector('#home-assistant-status');
-const homeAssistantAccountElement = document.querySelector('#home-assistant-account');
-const homeAssistantToolbar = document.querySelector('#home-assistant-toolbar');
-const homeDeviceSearch = document.querySelector('#home-device-search');
-const refreshHomeDevicesButton = document.querySelector('#refresh-home-devices');
-const disconnectHomeAssistantButton = document.querySelector('#disconnect-home-assistant');
-const homeAssistantDialog = document.querySelector('#home-assistant-dialog');
-const homeAssistantForm = document.querySelector('#home-assistant-form');
-const homeAssistantError = document.querySelector('#home-assistant-error');
-const homeAssistantSubmit = document.querySelector('#home-assistant-submit');
+const $ = (id) => document.getElementById(id);
+const roots = { time: $('home-time'), weather: $('home-weather'), calendar: $('home-calendar'), bookmarks: $('bookmarks-section'), 'home-assistant': $('home-assistant-section'), wol: $('wol-section') };
+const settingsDialog = $('home-settings-dialog');
+let mode = layoutMode(window.innerWidth); let current; let selectionDraft = []; let devices = []; let searchAbort; let searchGeneration = 0; let settingsLauncher;
+const make = (tag, text, className) => { const element = document.createElement(tag); element.textContent = text; if (className) element.className = className; return element; };
+function button(text, action) { const element = make('button', text, 'button secondary'); element.type = 'button'; element.addEventListener('click', action); return element; }
+const announce = (message) => { $('home-status').textContent = message; };
+const integrations = createHomeIntegrations({ onDevices: (next) => { devices = next; if (settingsDialog.open) renderSelections(); } });
+const information = createHomeInformation();
+const owners = createWidgetOwners({ integrations, information });
+const editor = createWidgetEditor({ grid: $('home-grid'), roots, onChange: (items) => change((next) => { next.layouts[mode] = items; return next; }, false), onRemove: (id) => { change((next) => { next.layouts[mode] = next.layouts[mode].filter((item) => item.id !== id); return next; }, false); $('home-save').focus(); }, announce });
+const settings = createHomeSettingsController({ onChange: render });
 
-function setStatus(message = '', error = false) {
-  statusElement.textContent = message;
-  statusElement.classList.toggle('error', error);
+function render(state) {
+  const previousRevision = current?.settings?.revision;
+  current = state;
+  for (const id of ['home-settings-open', 'home-edit']) $(id).disabled = !state.settings || state.saving;
+  $('home-save').hidden = !state.editing; $('home-cancel').hidden = !state.editing; $('home-edit').hidden = state.editing;
+  $('home-save').disabled = state.saving || state.conflict; $('home-cancel').disabled = state.saving;
+  $('home-dialog-save').disabled = !state.editing || state.saving || state.conflict; $('home-dialog-cancel').disabled = state.saving;
+  $('home-status').textContent = state.error || (state.conflict ? 'Another device changed shared settings. Cancel / reload, then reapply your edits.' : state.saving ? 'Saving shared settings…' : state.editing ? 'Unsaved changes. Save layouts to share them, or Cancel to reload.' : state.settings ? 'Shared settings loaded.' : 'Loading shared settings…');
+  $('home-settings-status').textContent = $('home-status').textContent;
+  $('home-retry').hidden = Boolean(state.settings) && !state.error;
+  $('home-layout-label').textContent = `${mode === 'desktop' ? 'Desktop' : 'Mobile'} layout`;
+  if (!state.settings) return;
+  $('home-grid').hidden = false;
+  const items = state.settings.layouts[mode]; $('home-empty').hidden = items.length > 0;
+  editor.render(items, mode, state.editing && !state.saving);
+  owners.configure(items, state.settings);
+  renderCatalog();
+  if (settingsDialog.open && !state.editing && previousRevision !== state.settings.revision) { fillPreferences(); selectionDraft = structuredClone(state.settings.widgetSettings['home-assistant'].selections); renderSelections(); renderGeometry(); }
 }
-
-async function api(path, options) {
-  const response = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...options });
-  const data = response.status === 204 ? {} : await response.json();
-  if (!response.ok) throw new Error(data.error || 'Request failed.');
-  return data;
+async function change(transform, immediate = true) {
+  const wasEditing = current?.editing;
+  settings.update(transform);
+  if (immediate && !wasEditing) await settings.save();
 }
-
-function button(text, className, action) {
-  const element = document.createElement('button');
-  element.type = 'button'; element.textContent = text; element.className = className; element.addEventListener('click', action);
-  return element;
-}
-
-function updateSelectedButton() {
-  const presentation = selectedButtonState(state.selected.size, state.bulkWakePending);
-  selectedButton.disabled = presentation.disabled;
-  selectedButton.textContent = presentation.text;
-}
-
-function render() {
-  const term = searchElement.value.trim().toLowerCase();
-  const filtered = state.devices.filter((device) => [device.name, device.group, device.macAddress, device.ipAddress].filter(Boolean).join(' ').toLowerCase().includes(term));
-  updateSelectedButton();
-  devicesElement.replaceChildren();
-  if (!filtered.length) {
-    const empty = document.createElement('p'); empty.className = 'empty'; empty.textContent = state.devices.length ? 'No devices match that search.' : 'No devices yet. Add the first computer on your LAN.'; devicesElement.append(empty); return;
+function renderCatalog() {
+  if (!current?.settings) return;
+  $('home-catalog-title').textContent = `Add widgets to ${mode} layout`;
+  for (const [id, definition] of Object.entries(WIDGETS)) {
+    const exists = current.settings.layouts[mode].some((item) => item.id === id);
+    let add = $('home-catalog').querySelector(`[data-add="${id}"]`);
+    if (!add) { add = button('', async () => { await change((next) => { next.layouts[mode] = addWidget(next.layouts[mode], id, mode); return next; }); renderGeometry(); }); add.dataset.add = id; $('home-catalog').append(add); }
+    add.textContent = `${definition.label}${exists ? ' (added)' : ''}`; add.disabled = exists || current.saving;
   }
-  const groups = Map.groupBy(filtered, (device) => device.group || 'Ungrouped');
-  for (const [group, devices] of groups) {
-    const section = document.createElement('section'); section.className = 'group';
-    const title = document.createElement('h3'); title.textContent = group; section.append(title);
-    const grid = document.createElement('div'); grid.className = 'device-grid';
-    for (const device of devices) {
-      const card = document.createElement('article'); card.className = 'device';
-      const top = document.createElement('div'); top.className = 'device-top';
-      const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.className = 'select'; checkbox.checked = state.selected.has(device.id); checkbox.ariaLabel = `Select ${device.name}`;
-      checkbox.addEventListener('change', () => { updateSelection(state.selected, device.id, checkbox.checked); updateSelectedButton(); });
-      const name = document.createElement('h3'); name.textContent = device.name;
-      top.append(checkbox, name); card.append(top);
-      const details = document.createElement('p'); details.textContent = `${device.macAddress}${device.ipAddress ? ` · ${device.ipAddress}` : ''}`; card.append(details);
-      const actions = document.createElement('div'); actions.className = 'device-actions';
-      actions.append(button('Wake', 'button', () => wake(device)), button('Edit', 'text-button', () => openForm(device)), button('Remove', 'text-button', () => removeDevice(device)));
-      card.append(actions); grid.append(card);
+}
+function renderGeometry() {
+  $('home-geometry').replaceChildren();
+  for (const item of current.settings.layouts[mode]) {
+    const form = document.createElement('form'); form.className = 'geometry-row'; form.append(make('strong', WIDGETS[item.id].label));
+    for (const key of ['x', 'y', 'w', 'h']) {
+      const label = make('label', { x: 'Column (0-based)', y: 'Row (0-based)', w: 'Width', h: 'Height' }[key]); const input = document.createElement('input'); input.name = key; input.type = 'number'; input.required = true; input.step = 1; input.value = item[key]; input.min = key === 'w' ? minimumWidth(item.id, mode) : key === 'h' ? 3 : 0; input.max = key === 'w' ? columns(mode) : key === 'h' ? 24 : key === 'x' ? columns(mode) - item.w : 144; label.append(input); form.append(label);
     }
-    section.append(grid); devicesElement.append(section);
+    const submit = button('Apply size / position', () => {}); submit.type = 'submit'; form.append(submit, button('Remove', async () => { await change((next) => { next.layouts[mode] = next.layouts[mode].filter((entry) => entry.id !== item.id); return next; }); renderGeometry(); }));
+    form.addEventListener('submit', (event) => { event.preventDefault(); change((next) => { next.layouts[mode] = changeWidget(next.layouts[mode], item.id, Object.fromEntries([...new FormData(form)].map(([key, value]) => [key, Number(value)])), mode); return next; }, false); renderGeometry(); });
+    $('home-geometry').append(form);
   }
 }
-
-function renderBookmarks(message = '') {
-  bookmarksElement.replaceChildren();
-  bookmarkStatusElement.textContent = message;
-  if (!state.linkwarden?.configured) { bookmarkStatusElement.textContent = 'Bookmarks are not connected. Open Bookmarks settings to connect Linkwarden.'; return; }
-  if (!state.activeCollectionToken) { bookmarkStatusElement.textContent ||= 'Choose a collection to view its bookmarks.'; return; }
-  if (!state.bookmarks.length) { const empty = document.createElement('p'); empty.className = 'empty'; empty.textContent = 'No valid web links were found in this collection.'; bookmarksElement.append(empty); return; }
-  for (const bookmark of state.bookmarks) {
-    const card = document.createElement('article'); card.className = 'bookmark';
-    const link = document.createElement('a'); link.href = bookmark.url; link.target = '_blank'; link.rel = 'noopener noreferrer'; link.textContent = bookmark.name; card.append(link);
-    if (bookmark.description) { const description = document.createElement('p'); description.textContent = bookmark.description; card.append(description); }
-    if (bookmark.tags?.length) { const tags = document.createElement('p'); tags.className = 'tags'; tags.textContent = bookmark.tags.join(' · '); card.append(tags); }
-    bookmarksElement.append(card);
+function fillPreferences() {
+  for (const control of $('home-preferences').elements) if (control.name in current.settings.preferences) {
+    if (control.type === 'checkbox') control.checked = current.settings.preferences[control.name]; else control.value = current.settings.preferences[control.name];
   }
+  $('home-location-status').textContent = current.settings.preferences.location?.label || 'No location selected.';
 }
-
-function setHomeAssistantStatus(message = '', error = false) {
-  homeAssistantStatusElement.textContent = message;
-  homeAssistantStatusElement.classList.toggle('error', error);
-}
-
-function renderHomeDevices(message = '', error = false) {
-  homeAssistantDevicesElement.replaceChildren();
-  const configured = Boolean(state.homeAssistant?.configured);
-  const credentialsPresent = Boolean(state.homeAssistant?.accessTokenPresent);
-  homeAssistantAccountElement.hidden = !credentialsPresent;
-  homeAssistantAccountElement.textContent = credentialsPresent ? state.homeAssistant.baseUrl : '';
-  homeAssistantToolbar.hidden = !configured;
-  disconnectHomeAssistantButton.hidden = !credentialsPresent;
-  refreshHomeDevicesButton.disabled = !configured;
-  if (message) setHomeAssistantStatus(message, error);
-  else if (state.homeAssistant?.needsReauthentication) setHomeAssistantStatus('Home Assistant needs re-authentication. Open settings and enter a new long-lived access token.', true);
-  else if (!configured) setHomeAssistantStatus('Home Assistant is not connected. Open Home Assistant settings to connect.');
-  else setHomeAssistantStatus();
-  if (!configured) return;
-  const filtered = filterHomeDevices(state.homeDevices, homeDeviceSearch.value);
-  if (!filtered.length) {
-    const empty = document.createElement('p'); empty.className = 'empty'; empty.textContent = state.homeDevices.length ? 'No Home Assistant devices match that search.' : 'No devices are available in this Home Assistant registry.'; homeAssistantDevicesElement.append(empty); return;
-  }
-  for (const [area, devices] of groupHomeDevices(filtered)) {
-    const section = document.createElement('section'); section.className = 'home-device-group';
-    const title = document.createElement('h3'); title.textContent = area; section.append(title);
-    const grid = document.createElement('div'); grid.className = 'home-device-grid';
-    for (const device of devices) {
-      const card = document.createElement('article'); card.className = 'home-device';
-      const name = document.createElement('h4'); name.textContent = device.name; card.append(name);
-      const details = [device.manufacturer, device.model].filter(Boolean).join(' · ');
-      if (details) { const metadata = document.createElement('p'); metadata.textContent = details; card.append(metadata); }
-      if (device.disabled) { const disabled = document.createElement('p'); disabled.className = 'device-state'; disabled.textContent = 'Disabled in Home Assistant'; card.append(disabled); }
-      if (device.measurements?.length) {
-        const readings = document.createElement('div'); readings.className = 'home-readings';
-        const readingsTitle = document.createElement('p'); readingsTitle.className = 'home-card-label'; readingsTitle.textContent = 'Readings';
-        const list = document.createElement('dl'); list.className = 'home-reading-list';
-        for (const measurement of device.measurements) {
-          const row = document.createElement('div'); row.className = 'home-reading';
-          const name = document.createElement('dt'); name.textContent = measurement.name;
-          const value = document.createElement('dd');
-          const presentation = homeMeasurementPresentation(measurement);
-          value.classList.toggle('unavailable', presentation.unavailable);
-          const readingValue = document.createElement('span'); readingValue.className = 'home-reading-value'; readingValue.textContent = presentation.text;
-          value.append(readingValue);
-          if (presentation.unit) { const unit = document.createElement('span'); unit.className = 'home-reading-unit'; unit.textContent = presentation.unit; value.append(' ', unit); }
-          row.append(name, value); list.append(row);
-        }
-        readings.append(readingsTitle, list); card.append(readings);
-      }
-      if (device.controls?.length) {
-        const controls = document.createElement('div'); controls.className = 'home-controls';
-        const controlsTitle = document.createElement('p'); controlsTitle.className = 'home-card-label'; controlsTitle.textContent = 'Controls'; controls.append(controlsTitle);
-        for (const control of device.controls) {
-          const row = document.createElement('div'); row.className = 'home-control';
-          const summary = document.createElement('div'); summary.className = 'home-control-summary';
-          const label = document.createElement('span'); label.className = 'home-control-name'; label.textContent = control.name;
-          const currentState = document.createElement('span'); currentState.className = `home-control-state ${control.state}`; currentState.textContent = control.state;
-          summary.append(label, currentState);
-          const pending = state.pendingHomeControls.has(control.controlToken);
-          const presentation = homeControlPresentation(control, pending);
-          const actionButton = button(presentation.text, 'button secondary home-control-button', () => controlHomeAssistant(control, presentation.action));
-          actionButton.disabled = presentation.disabled;
-          actionButton.ariaLabel = `${presentation.action === 'turn_on' ? 'Turn on' : 'Turn off'} ${control.name}`;
-          actionButton.setAttribute('aria-pressed', presentation.pressed ? 'true' : 'false');
-          row.append(summary, actionButton); controls.append(row);
-        }
-        card.append(controls);
-      }
-      grid.append(card);
-    }
-    section.append(grid); homeAssistantDevicesElement.append(section);
-  }
-}
-
-async function loadHomeDevices(refresh = false, actionMessage = '') {
-  const request = ++state.homeDeviceRequest;
-  setHomeAssistantStatus('Loading Home Assistant devices…');
-  try {
-    const result = await api(`/api/home-assistant/devices${refresh ? '?refresh=1' : ''}`);
-    if (!isLatestRequest(state.homeDeviceRequest, request)) return;
-    state.homeDevices = result.devices; renderHomeDevices(actionMessage);
-  } catch (error) { if (isLatestRequest(state.homeDeviceRequest, request)) renderHomeDevices(actionMessage ? `${actionMessage} Refresh failed: ${error.message}` : error.message, true); }
-}
-
-async function controlHomeAssistant(control, action) {
-  if (!control.available || state.pendingHomeControls.has(control.controlToken)) return;
-  const connectionRequest = state.homeAssistantRequest;
-  state.pendingHomeControls.add(control.controlToken);
-  renderHomeDevices(`${action === 'turn_on' ? 'Turning on' : 'Turning off'} ${control.name}…`);
-  try {
-    const result = await api(`/api/home-assistant/controls/${encodeURIComponent(control.controlToken)}`, { method: 'POST', body: JSON.stringify({ action }) });
-    if (!isLatestRequest(state.homeAssistantRequest, connectionRequest)) return;
-    state.pendingHomeControls.delete(control.controlToken);
-    await loadHomeDevices(true, result.message);
-  } catch (error) {
-    state.pendingHomeControls.delete(control.controlToken);
-    if (isLatestRequest(state.homeAssistantRequest, connectionRequest)) renderHomeDevices(error.message, true);
-  }
-}
-
-async function loadHomeAssistant() {
-  const request = ++state.homeAssistantRequest;
-  try {
-    const homeAssistant = (await api('/api/home-assistant')).homeAssistant;
-    if (!isLatestRequest(state.homeAssistantRequest, request)) return;
-    state.homeAssistant = homeAssistant;
-    renderHomeDevices();
-    if (state.homeAssistant.configured) await loadHomeDevices();
-  } catch (error) { if (isLatestRequest(state.homeAssistantRequest, request)) renderHomeDevices(error.message, true); }
-}
-
-function renderCollectionTree() {
-  const focusedKey = document.activeElement?.dataset?.collectionKey;
-  collectionTreeElement.replaceChildren();
-  collectionTreeElement.hidden = !state.linkwarden?.configured;
-  disconnectLinkwardenButton.hidden = !state.linkwarden?.configured;
-  linkwardenAccountElement.hidden = !state.linkwarden?.configured;
-  linkwardenAccountElement.textContent = state.linkwarden?.configured ? `${state.linkwarden.username} · ${state.linkwarden.baseUrl}` : '';
-  refreshBookmarksButton.disabled = !state.activeCollectionToken;
-  if (!state.linkwarden?.configured) return;
-  if (!state.collections.length) { const empty = document.createElement('p'); empty.className = 'empty'; empty.textContent = 'No collections are available for this account.'; collectionTreeElement.append(empty); return; }
-  const renderNodes = (collections, parentKey = '') => {
-    const list = document.createElement('ul');
-    for (const [index, collection] of collections.entries()) {
-      const item = document.createElement('li');
-      const select = button(collection.name, 'collection-node', () => selectCollection(collection));
-      select.dataset.collectionToken = collection.collectionToken;
-      select.dataset.collectionKey = `${parentKey}${index}`;
-      select.classList.toggle('selected', collection.collectionToken === state.activeCollectionToken);
-      select.setAttribute('aria-current', collection.collectionToken === state.activeCollectionToken ? 'true' : 'false');
-      item.append(select);
-      if (collection.children.length) item.append(renderNodes(collection.children, `${parentKey}${index}.`));
-      list.append(item);
-    }
-    return list;
-  };
-  collectionTreeElement.append(renderNodes(state.collections));
-  restoreCollectionFocus(collectionTreeElement, focusedKey);
-}
-
-async function load() {
-  try { state.devices = (await api('/api/devices')).devices; state.selected = new Set([...state.selected].filter((id) => state.devices.some((device) => device.id === id))); render(); } catch (error) { setStatus(error.message, true); }
-}
-
-async function loadBookmarks(refresh = false) {
-  if (!state.activeCollectionToken) { renderBookmarks(); return; }
-  const collectionToken = state.activeCollectionToken;
-  bookmarkStatusElement.textContent = 'Loading bookmarks…';
-  const query = new URLSearchParams({ collection: collectionToken, ...(refresh && { refresh: '1' }) });
-  try { const result = await api(`/api/bookmarks?${query}`); if (collectionToken !== state.activeCollectionToken) return; state.bookmarks = result.bookmarks; renderBookmarks(result.stale ? 'Showing recently cached bookmarks while Linkwarden is unavailable.' : ''); }
-  catch (error) { if (collectionToken !== state.activeCollectionToken) return; if (error.message.startsWith('Select a collection')) { await loadCollections(); bookmarkStatusElement.textContent = 'The collection session expired. Choose a collection again.'; } else renderBookmarks(error.message); }
-}
-
-async function loadCollections() {
-  const request = ++state.collectionRequest;
-  state.activeCollectionToken = null; state.bookmarks = []; refreshBookmarksButton.disabled = true;
-  bookmarkStatusElement.textContent = 'Loading collections…';
-  try { const collections = (await api('/api/linkwarden/collections')).collections; if (request !== state.collectionRequest) return; state.collections = collections; renderCollectionTree(); renderBookmarks(); }
-  catch (error) { if (request !== state.collectionRequest) return; state.collections = []; renderCollectionTree(); renderBookmarks(error.message); }
-}
-
-async function loadLinkwarden() {
-  try { state.linkwarden = (await api('/api/linkwarden')).linkwarden; renderCollectionTree(); renderBookmarks(); if (state.linkwarden.configured) await loadCollections(); } catch (error) { bookmarkStatusElement.textContent = error.message; }
-}
-
-async function selectCollection(collection) {
-  state.activeCollectionToken = collection.collectionToken; state.bookmarks = []; refreshBookmarksButton.disabled = false; updateCollectionSelection(collectionTreeElement, state.activeCollectionToken); await loadBookmarks();
-}
-
-function wakeRequest(device) {
-  return api(`/api/devices/${device.id}/wake`, { method: 'POST', body: '{}' });
-}
-
-async function wake(device) {
-  setStatus(`Sending wake packet to ${device.name}…`);
-  try { setStatus((await wakeRequest(device)).message); await load(); } catch (error) { setStatus(error.message, true); }
-}
-
-async function removeDevice(device) {
-  if (!window.confirm(`Remove ${device.name}? This cannot be undone.`)) return;
-  try { await api(`/api/devices/${device.id}`, { method: 'DELETE' }); setStatus(`${device.name} removed.`); await load(); } catch (error) { setStatus(error.message, true); }
-}
-
-function openForm(device = null) {
-  form.reset();
-  showDialogError(deviceError);
-  document.querySelector('#dialog-title').textContent = device ? 'Edit device' : 'Add device';
-  for (const [key, selector] of Object.entries({ id: '#device-id', name: '#name', macAddress: '#mac', broadcastAddress: '#broadcast', ipAddress: '#ip', group: '#group' })) document.querySelector(selector).value = device?.[key] ?? '';
-  dialog.showModal();
-}
-
-document.querySelector('#new-device').addEventListener('click', () => openForm());
-document.querySelector('#cancel').addEventListener('click', () => dialog.close());
-document.querySelector('#dialog-close').addEventListener('click', () => dialog.close());
-searchElement.addEventListener('input', render);
-form.addEventListener('submit', async (event) => {
+$('home-settings-open').addEventListener('click', () => { fillPreferences(); selectionDraft = structuredClone(current.settings.widgetSettings['home-assistant'].selections); renderSelections(); renderGeometry(); settingsDialog.showModal(); });
+$('home-settings-close').addEventListener('click', () => settingsDialog.close());
+$('home-edit').addEventListener('click', () => settings.begin());
+$('home-save').addEventListener('click', async () => { if (await settings.save()) $('home-edit').focus(); });
+$('home-dialog-save').addEventListener('click', async () => { if (await settings.save()) settingsDialog.close(); });
+$('home-dialog-cancel').addEventListener('click', () => { settingsDialog.close(); editor.cancelGesture(); settings.cancel(); });
+$('home-cancel').addEventListener('click', () => { editor.cancelGesture(); settings.cancel(); });
+$('home-retry').addEventListener('click', () => settings.load());
+settingsDialog.addEventListener('close', () => { searchGeneration++; searchAbort?.abort(); $('home-settings-open').focus(); });
+$('home-preferences').addEventListener('input', () => settings.begin());
+$('home-preferences').addEventListener('submit', (event) => {
   event.preventDefault();
-  showDialogError(deviceError);
-  const id = document.querySelector('#device-id').value;
-  const payload = Object.fromEntries(new FormData(form));
-  try {
-    await api(id ? `/api/devices/${id}` : '/api/devices', { method: id ? 'PUT' : 'POST', body: JSON.stringify(payload) });
-    dialog.close(); setStatus(id ? 'Device updated.' : 'Device added.'); await load();
-  } catch (error) { showDialogError(deviceError, error.message); }
+  const form = event.currentTarget;
+  try { new Intl.DateTimeFormat('en', { timeZone: form.elements.timezone.value }); }
+  catch { $('home-settings-status').textContent = 'Enter a valid IANA timezone, for example Europe/London.'; return; }
+  change((next) => { for (const control of form.elements) if (control.name in next.preferences) next.preferences[control.name] = control.type === 'checkbox' ? control.checked : control.value; return next; });
 });
-selectedButton.addEventListener('click', async () => {
-  if (state.bulkWakePending) return;
-  const devices = state.devices.filter((device) => state.selected.has(device.id));
-  state.bulkWakePending = true;
-  updateSelectedButton();
+$('home-location-search').addEventListener('submit', async (event) => {
+  event.preventDefault(); searchAbort?.abort(); searchAbort = new AbortController(); const request = ++searchGeneration;
+  $('home-location-status').textContent = 'Searching…'; $('home-location-results').replaceChildren();
   try {
-    const summary = await runBulkWake(devices, wakeRequest);
-    state.selected.clear();
-    await load();
-    setStatus(summary.message, summary.error);
-  } finally { state.bulkWakePending = false; updateSelectedButton(); }
+    const results = await searchLocations($('home-location-query').value, { signal: searchAbort.signal });
+    if (request !== searchGeneration) return;
+    $('home-location-status').textContent = results.length ? 'Select a location.' : 'No matching locations.';
+    for (const location of results) { const li = document.createElement('li'); li.append(button(location.label, async () => { await change((next) => { next.preferences.location = location; return next; }); $('home-location-status').textContent = location.label; })); $('home-location-results').append(li); }
+  } catch { if (request === searchGeneration) $('home-location-status').textContent = 'Location search unavailable.'; }
 });
-function openLinkwardenForm() {
-  const settings = state.linkwarden;
-  linkwardenForm.reset(); linkwardenError.textContent = '';
-  document.querySelector('#linkwarden-url').value = settings?.baseUrl ?? '';
-  document.querySelector('#linkwarden-username').value = settings?.username ?? '';
-  document.querySelector('#linkwarden-help').textContent = settings?.encryptionReady ? 'The access token is encrypted on this server and never shown again. Leave it blank to retain the configured token.' : 'Set a valid server encryption key before connecting Linkwarden.';
-  linkwardenDialog.showModal();
+$('home-location-clear').addEventListener('click', () => { searchGeneration++; searchAbort?.abort(); $('home-location-results').replaceChildren(); change((next) => { next.preferences.location = null; return next; }); $('home-location-status').textContent = 'Location cleared.'; });
+
+function renderSelections() {
+  const list = $('home-selections'); list.replaceChildren(); const term = $('home-select-search').value.toLowerCase();
+  const all = [...devices, ...selectionDraft.filter((selection) => !devices.some((device) => device.selectionId === selection.id)).map((selection) => ({ selectionId: selection.id, name: 'Selected device unavailable', measurements: [] }))];
+  for (const device of all) {
+    if (!`${device.name} ${device.area ?? ''}`.toLowerCase().includes(term)) continue;
+    const section = document.createElement('fieldset'); const label = make('label', `${device.name}${device.area ? ` · ${device.area}` : ''}`, 'toggle'); const checkbox = document.createElement('input'); checkbox.type = 'checkbox';
+    const selected = selectionDraft.find((selection) => selection.id === device.selectionId); checkbox.checked = Boolean(selected);
+    checkbox.addEventListener('change', () => { settings.begin(); selectionDraft = selectionDraft.filter((selection) => selection.id !== device.selectionId); if (checkbox.checked) selectionDraft.push({ id: device.selectionId, readings: device.measurements.map((reading) => reading.selectionId) }); renderSelections(); }); label.prepend(checkbox); section.append(label);
+    if (selected) {
+      const readings = [...device.measurements, ...selected.readings.filter((id) => !device.measurements.some((reading) => reading.selectionId === id)).map((id) => ({ selectionId: id, name: 'Selected reading unavailable' }))];
+      for (const reading of readings) { const row = make('label', reading.name, 'toggle'); const check = document.createElement('input'); check.type = 'checkbox'; check.checked = selected.readings.includes(reading.selectionId); check.addEventListener('change', () => { settings.begin(); selected.readings = selected.readings.filter((id) => id !== reading.selectionId); if (check.checked) selected.readings.push(reading.selectionId); }); row.prepend(check); section.append(row); }
+    }
+    list.append(section);
+  }
+  $('home-select-status').textContent = all.length ? 'Choose devices and readings, then Apply.' : 'Load devices after connecting Home Assistant.';
 }
-
-document.querySelector('#linkwarden-settings').addEventListener('click', openLinkwardenForm);
-document.querySelector('#linkwarden-close').addEventListener('click', () => linkwardenDialog.close());
-refreshBookmarksButton.addEventListener('click', () => loadBookmarks(true));
-disconnectLinkwardenButton.addEventListener('click', async () => {
-  if (!window.confirm('Disconnect Linkwarden and delete its saved API key?')) return;
-  try { await api('/api/linkwarden', { method: 'DELETE' }); state.collectionRequest += 1; state.collections = []; state.activeCollectionToken = null; state.bookmarks = []; await loadLinkwarden(); } catch (error) { bookmarkStatusElement.textContent = error.message; }
-});
-linkwardenForm.addEventListener('submit', async (event) => {
-  event.preventDefault(); linkwardenError.textContent = '';
-  try {
-    const result = await api('/api/linkwarden', { method: 'PUT', body: JSON.stringify(Object.fromEntries(new FormData(linkwardenForm))) });
-    state.collectionRequest += 1; state.linkwarden = result.linkwarden; state.collections = result.collections; state.activeCollectionToken = null; state.bookmarks = [];
-    linkwardenDialog.close(); renderCollectionTree(); renderBookmarks();
-  } catch (error) { linkwardenError.textContent = error.message; }
-});
-
-function openHomeAssistantForm() {
-  homeAssistantForm.reset(); showDialogError(homeAssistantError);
-  document.querySelector('#home-assistant-url').value = state.homeAssistant?.baseUrl ?? '';
-  document.querySelector('#home-assistant-help').textContent = state.homeAssistant?.needsReauthentication ? 'The saved token cannot be read. Enter a new long-lived access token to reconnect.' : state.homeAssistant?.encryptionReady ? 'The access token is encrypted on this server and never shown again. Leave it blank to retain the token when the URL is unchanged.' : 'Set a valid server encryption key before connecting Home Assistant.';
-  homeAssistantDialog.showModal();
+$('home-select-search').addEventListener('input', renderSelections);
+$('home-select-load').addEventListener('click', async () => { $('home-select-status').textContent = 'Loading devices…'; devices = await integrations.devices(); renderSelections(); });
+$('home-select-save').addEventListener('click', () => { try { change((next) => { next.widgetSettings['home-assistant'].selections = structuredClone(selectionDraft); return next; }).catch((error) => { $('home-select-status').textContent = error.message; }); } catch (error) { $('home-select-status').textContent = error.message; } });
+for (const control of document.querySelectorAll('[data-integration]')) control.addEventListener('click', async () => { settingsLauncher = $('home-settings-open'); settingsDialog.close(); await integrations.openSettings(control.dataset.integration); });
+$('home-calendar-open').addEventListener('click', async () => { settingsLauncher = $('home-settings-open'); settingsDialog.close(); await information.openCalendar(); });
+for (const dialog of document.querySelectorAll('dialog:not(#home-settings-dialog)')) {
+  dialog.addEventListener('close', () => { (settingsLauncher ?? $('home-settings-open')).focus(); settingsLauncher = null; });
 }
-
-document.querySelector('#home-assistant-settings').addEventListener('click', openHomeAssistantForm);
-document.querySelector('#home-assistant-close').addEventListener('click', () => homeAssistantDialog.close());
-homeDeviceSearch.addEventListener('input', () => renderHomeDevices());
-refreshHomeDevicesButton.addEventListener('click', () => loadHomeDevices(true));
-disconnectHomeAssistantButton.addEventListener('click', async () => {
-  if (!window.confirm('Disconnect Home Assistant and delete its saved access token?')) return;
-  const request = ++state.homeAssistantRequest;
-  try {
-    await api('/api/home-assistant', { method: 'DELETE' });
-    if (!isLatestRequest(state.homeAssistantRequest, request)) return;
-    state.homeDeviceRequest += 1; state.pendingHomeControls.clear(); state.homeAssistant = { configured: false, accessTokenPresent: false, needsReauthentication: false, encryptionReady: state.homeAssistant?.encryptionReady }; state.homeDevices = []; homeDeviceSearch.value = ''; renderHomeDevices();
-  } catch (error) { if (isLatestRequest(state.homeAssistantRequest, request)) renderHomeDevices(error.message, true); }
-});
-homeAssistantForm.addEventListener('submit', async (event) => {
-  event.preventDefault(); showDialogError(homeAssistantError); homeAssistantSubmit.disabled = true;
-  const request = ++state.homeAssistantRequest;
-  try {
-    const result = await api('/api/home-assistant', { method: 'PUT', body: JSON.stringify(Object.fromEntries(new FormData(homeAssistantForm))) });
-    if (!isLatestRequest(state.homeAssistantRequest, request)) return;
-    state.homeDeviceRequest += 1; state.pendingHomeControls.clear(); state.homeAssistant = result.homeAssistant; state.homeDevices = result.devices; homeDeviceSearch.value = '';
-    homeAssistantDialog.close(); renderHomeDevices('Home Assistant connected.');
-  } catch (error) { if (isLatestRequest(state.homeAssistantRequest, request)) showDialogError(homeAssistantError, error.message); }
-  finally { homeAssistantSubmit.disabled = false; }
-});
-
-load(); loadLinkwarden(); loadHomeAssistant();
+document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && !document.querySelector('dialog[open]') && current?.editing) { editor.cancelGesture(); settings.cancel(); } });
+window.addEventListener('resize', () => { editor.cancelGesture(); const next = layoutMode(window.innerWidth); if (next === mode) return; mode = next; if (current) render(current); if (settingsDialog.open && current?.settings) renderGeometry(); });
+document.addEventListener('visibilitychange', () => { const visible = !document.hidden; information.setVisible(visible); settings.setVisible(visible); });
+window.addEventListener('focus', () => { if (!document.hidden) void settings.load(); });
+window.addEventListener('pagehide', (event) => { editor.cancelGesture(); searchGeneration++; searchAbort?.abort(); owners.suspend(); settings.setVisible(false); if (!event.persisted) { information.dispose(); settings.dispose(); editor.dispose(); } });
+window.addEventListener('pageshow', (event) => { if (event.persisted) { owners.resume(!document.hidden); settings.setVisible(!document.hidden); if (current) render(current); } });
+settings.setVisible(!document.hidden);
+if (document.hidden) void settings.load();

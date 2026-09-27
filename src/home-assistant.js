@@ -100,7 +100,7 @@ export function normalizeHomeAssistantDevices(devices, areas, entityRegistry = {
       const name = safeText(current?.attributes?.friendly_name, 160) ?? safeText(entity?.en, 160) ?? safeText(objectName, 160) ?? 'Unnamed reading';
       const unit = safeText(current?.attributes?.unit_of_measurement, 32);
       const deviceClass = safeText(current?.attributes?.device_class, 64);
-      device.measurements.push({ name, ...normalizedState, ...(unit && { unit }), ...(deviceClass && { deviceClass }) });
+      device.measurements.push({ entityId, name, ...normalizedState, ...(unit && { unit }), ...(deviceClass && { deviceClass }) });
       continue;
     }
     if (!CONTROL_DOMAINS.has(domain) || entity?.ec !== undefined) continue;

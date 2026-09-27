@@ -1,6 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
+import { defaultHomeSettings, normalizeHomeSettings } from './home-settings.js';
 
 export function createStore(databasePath) {
   mkdirSync(path.dirname(databasePath), { recursive: true });
@@ -8,6 +9,12 @@ export function createStore(databasePath) {
   db.exec(`
     PRAGMA foreign_keys = ON;
     PRAGMA journal_mode = WAL;
+    CREATE TABLE IF NOT EXISTS home_settings (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      configuration TEXT NOT NULL,
+      revision INTEGER NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
     CREATE TABLE IF NOT EXISTS devices (
       id INTEGER PRIMARY KEY,
       name TEXT NOT NULL,
@@ -121,6 +128,9 @@ export function createStore(databasePath) {
     lastWakeRequestedAt: row.last_wake_requested_at
   });
   const queries = {
+    getHomeSettings: db.prepare('SELECT configuration, revision FROM home_settings WHERE id = 1'),
+    initializeHomeSettings: db.prepare('INSERT OR IGNORE INTO home_settings (id, configuration, revision) VALUES (1, ?, 0)'),
+    saveHomeSettings: db.prepare('UPDATE home_settings SET configuration = ?, revision = revision + 1, updated_at = CURRENT_TIMESTAMP WHERE id = 1 AND revision = ?'),
     list: db.prepare('SELECT * FROM devices ORDER BY group_name COLLATE NOCASE, name COLLATE NOCASE'),
     get: db.prepare('SELECT * FROM devices WHERE id = ?'),
     insert: db.prepare('INSERT INTO devices (name, mac_address, broadcast_address, ip_address, group_name) VALUES (?, ?, ?, ?, ?)'),
@@ -142,6 +152,16 @@ export function createStore(databasePath) {
   const mapHomeAssistant = (row) => row && ({ baseUrl: row.base_url, encryptedAccessToken: { ciphertext: row.token_ciphertext, iv: row.token_iv, tag: row.token_tag }, updatedAt: row.updated_at });
   const mapCalDav = (row) => row && ({ serverUrl: row.base_url, username: row.username, encryptedPassword: { ciphertext: row.password_ciphertext, iv: row.password_iv, tag: row.password_tag }, updatedAt: row.updated_at });
   return {
+    getHomeSettings() {
+      queries.initializeHomeSettings.run(JSON.stringify(defaultHomeSettings()));
+      const row = queries.getHomeSettings.get();
+      return normalizeHomeSettings({ ...JSON.parse(row.configuration), revision: row.revision });
+    },
+    saveHomeSettings(value) {
+      const settings = normalizeHomeSettings(value);
+      if (!queries.saveHomeSettings.run(JSON.stringify(settings), settings.revision).changes) return null;
+      return { ...settings, revision: settings.revision + 1 };
+    },
     list: () => queries.list.all().map(mapDevice),
     get: (id) => mapDevice(queries.get.get(id)),
     create: (device) => { const result = queries.insert.run(device.name, device.macAddress, device.broadcastAddress, device.ipAddress, device.group); return mapDevice(queries.get.get(result.lastInsertRowid)); },

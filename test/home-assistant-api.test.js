@@ -78,7 +78,9 @@ test('connects Home Assistant atomically and exposes only safe configuration', a
   assert.equal(JSON.stringify(connected.body).includes('light.office'), false);
   assert.equal(JSON.stringify(connected.body).includes('sensor.private_temperature'), false);
   assert.equal(JSON.stringify(connected.body).includes('private-reading-detail'), false);
-  assert.deepEqual(connected.body.devices[0].measurements, [
+  assert.match(connected.body.devices[0].selectionId, /^d_[A-Za-z0-9_-]{43}$/);
+  for (const reading of connected.body.devices[0].measurements) assert.match(reading.selectionId, /^r_[A-Za-z0-9_-]{43}$/);
+  assert.deepEqual(connected.body.devices[0].measurements.map(({ selectionId, ...reading }) => reading), [
     { name: 'Temperature', value: '20', unit: '°C', deviceClass: 'temperature', status: 'available', available: true },
     { name: 'Offline sensor', value: null, deviceClass: 'humidity', status: 'unavailable', available: false }
   ]);
@@ -96,6 +98,7 @@ test('connects Home Assistant atomically and exposes only safe configuration', a
   assert.equal(calls.at(-1).action, 'turn_on');
   assert.equal((await api(`/api/home-assistant/controls/${unavailableToken}`, { method: 'POST', body: { action: 'turn_on' } })).status, 404);
   assert.equal((await api('/api/home-assistant/controls/forged-control-token', { method: 'POST', body: { action: 'turn_on' } })).status, 404);
+  assert.equal((await api(`/api/home-assistant/controls/${connected.body.devices[0].selectionId}`, { method: 'POST', body: { action: 'turn_on' } })).status, 404);
   assert.equal((await api(`/api/home-assistant/controls/${controlToken}`, { method: 'POST', body: { action: 'toggle', extra: true } })).status, 400);
 
   blockControl = true;
@@ -116,6 +119,8 @@ test('connects Home Assistant atomically and exposes only safe configuration', a
   assert.equal(listed.status, 200);
   assert.equal(calls.at(-1).options.force, true);
   assert.equal(listed.body.devices[0].measurements[0].value, '19');
+  assert.equal(listed.body.devices[0].selectionId, connected.body.devices[0].selectionId);
+  assert.deepEqual(listed.body.devices[0].measurements.map((item) => item.selectionId), connected.body.devices[0].measurements.map((item) => item.selectionId));
   assert.equal((await api('/api/home-assistant', { method: 'PUT', body: { url: 'https://changed.example.test', accessToken: '' } })).status, 400);
   assert.equal((await api('/api/home-assistant', { method: 'PUT', body: { url: 'https://home.example.test', accessToken: '' } })).status, 200);
   assert.equal((await api(`/api/home-assistant/controls/${controlToken}`, { method: 'POST', body: { action: 'turn_on' } })).status, 404);
@@ -172,4 +177,17 @@ test('connects Home Assistant atomically and exposes only safe configuration', a
   assert.equal(await slowConnect, 200);
   assert.equal((await orderedDisconnect).status, 204);
   assert.equal(store.getHomeAssistant(), undefined);
+});
+
+test('selection identities survive renames, reordering and token rotation but are scoped to the server', async (t) => {
+  const store = createStore(':memory:'); const secret = Buffer.alloc(32, 7).toString('base64');
+  let devices = [{ deviceId: 'device-a', name: 'Original', area: 'Office', measurements: [{ entityId: 'sensor.a', name: 'A', value: '1', status: 'available', available: true }, { entityId: 'sensor.b', name: 'B', value: '2', status: 'available', available: true }] }, { deviceId: 'device-b', name: 'Original', area: 'Office', measurements: [] }];
+  const server = createDashboardServer({ store, runtimeConfig: { allowedHosts: ['127.0.0.1'], linkwardenEncryptionKey: secret }, homeAssistant: { listDevices: async () => devices, clearCache() {} } });
+  server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  t.after(async () => { await new Promise((resolve) => server.close(resolve)); store.close(); });
+  const connect = async (url, accessToken) => (await (await fetch(`http://127.0.0.1:${server.address().port}/api/home-assistant`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url, accessToken }) })).json()).devices;
+  const first = await connect('https://home.test', 'one'); assert.notEqual(first[0].selectionId, first[1].selectionId);
+  devices[0].name = 'Renamed'; devices[0].area = 'Kitchen'; devices[0].measurements[0].name = 'Renamed reading'; devices[0].measurements.reverse(); devices.reverse();
+  const second = await connect('https://home.test', 'two'); assert.equal(second[1].selectionId, first[0].selectionId); assert.equal(second[1].measurements[1].selectionId, first[0].measurements[0].selectionId);
+  const third = await connect('https://other.test', 'two'); assert.notEqual(third[1].selectionId, first[0].selectionId); assert.notEqual(third[1].measurements[1].selectionId, first[0].measurements[0].selectionId);
 });

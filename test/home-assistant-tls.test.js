@@ -120,7 +120,7 @@ test('trusts a configured private CA while preserving hostname verification', as
     assert.match(untrusted.message, /connection failed.*NODE_EXTRA_CA_CERTS/);
 
     const trusted = await runClient(`https://127.0.0.1:${port}`, caCertificate);
-    assert.deepEqual(trusted, { ok: true, devices: [{ deviceId: 'lamp', name: 'Lamp', area: 'Office', disabled: false, measurements: [{ name: 'Temperature', value: '22.5', status: 'available', available: true, unit: '°C', deviceClass: 'temperature' }], controls: [{ entityId: 'light.lamp', domain: 'light', name: 'Lamp', state: 'off' }] }] });
+    assert.deepEqual(trusted, { ok: true, devices: [{ deviceId: 'lamp', name: 'Lamp', area: 'Office', disabled: false, measurements: [{ entityId: 'sensor.temperature', name: 'Temperature', value: '22.5', status: 'available', available: true, unit: '°C', deviceClass: 'temperature' }], controls: [{ entityId: 'light.lamp', domain: 'light', name: 'Lamp', state: 'off' }] }] });
 
     const wrongHostname = await runClient(`https://localhost:${port}`, caCertificate);
     assert.equal(wrongHostname.ok, false);

@@ -1,0 +1,92 @@
+import { WIDGETS, columns, changeWidget } from './home-layout.js';
+
+// Geometry edits must not restart data owners or their refresh timers.
+export function createWidgetOwners({ integrations, information }) {
+  let signature = ''; let latest; let suspended = false;
+  function configure(items, settings) {
+    latest = { items, settings };
+    const ids = items.map((item) => item.id);
+    const next = JSON.stringify([ids.slice().sort(), settings.preferences, settings.widgetSettings]);
+    if (suspended || signature === next) return;
+    signature = next;
+    integrations.configure(ids, settings.widgetSettings['home-assistant'].selections);
+    information.configure(ids, settings.preferences);
+  }
+  return {
+    configure,
+    suspend() { suspended = true; signature = ''; integrations.suspend(); information.setVisible(false); },
+    resume(visible) { suspended = false; if (latest) configure(latest.items, latest.settings); information.setVisible(visible); }
+  };
+}
+
+export function gestureLayout(items, id, kind, dx, dy, mode) {
+  const item = items.find((entry) => entry.id === id);
+  if (!item) return items;
+  return changeWidget(items, id, kind === 'resize' ? { w: item.w + dx, h: item.h + dy } : { x: item.x + dx, y: item.y + dy }, mode);
+}
+
+export function createWidgetEditor({ grid, roots, onChange, onRemove, announce, document = globalThis.document }) {
+  let items = []; let mode = 'desktop'; let editing = false; let gesture = null;
+  const handles = new Map();
+  for (const [id, root] of Object.entries(roots)) {
+    root.classList.add('home-widget');
+    if (!root.querySelector('.widget-content')) { const body = document.createElement('div'); body.className = 'widget-content'; body.append(...root.childNodes); root.append(body); }
+    const header = document.createElement('header'); header.className = 'widget-heading';
+    const title = document.createElement('h2'); title.textContent = WIDGETS[id].label; header.append(title);
+    const controls = [];
+    for (const kind of ['move', 'remove', 'resize']) {
+      const button = document.createElement('button'); button.type = 'button'; button.className = `widget-${kind}`; button.dataset.widget = id; button.dataset.kind = kind;
+      button.textContent = kind === 'move' ? 'Move' : kind === 'remove' ? 'Remove' : '●';
+      button.setAttribute('aria-label', `${kind === 'resize' ? 'Resize' : kind === 'move' ? 'Move' : 'Remove'} ${WIDGETS[id].label}${kind !== 'remove' ? '; use arrow keys' : ''}`);
+      if (kind === 'remove') button.addEventListener('click', () => onRemove(id));
+      else {
+        button.addEventListener('pointerdown', start);
+        button.addEventListener('pointermove', move);
+        button.addEventListener('pointerup', finish);
+        button.addEventListener('pointercancel', cancel);
+        button.addEventListener('lostpointercapture', cancel);
+        button.addEventListener('keydown', (event) => {
+          const delta = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[event.key];
+          if (!editing || !delta) return; event.preventDefault();
+          onChange(gestureLayout(items, id, kind, ...delta, mode)); announce(`${WIDGETS[id].label} ${kind === 'resize' ? 'resized' : 'moved'}.`);
+        });
+      }
+      controls.push(button);
+      if (kind === 'resize') root.append(button); else header.append(button);
+    }
+    root.prepend(header); handles.set(id, controls);
+  }
+  function paint(next) {
+    const focused = document.activeElement;
+    for (const [id, root] of Object.entries(roots)) root.hidden = !next.some((item) => item.id === id);
+    next.forEach((item, index) => {
+      const root = roots[item.id]; root.style.gridColumn = `${item.x + 1} / span ${item.w}`; root.style.gridRow = `${item.y + 1} / span ${item.h}`;
+      if (grid.children[index] !== root) grid.insertBefore(root, grid.children[index] ?? null);
+    });
+    if (focused && document.activeElement !== focused && !focused.closest('[hidden]')) focused.focus({ preventScroll: true });
+  }
+  function start(event) {
+    if (!editing || event.button !== 0 || gesture) return;
+    event.preventDefault(); const button = event.currentTarget;
+    gesture = { button, pointerId: event.pointerId, id: button.dataset.widget, kind: button.dataset.kind, x: event.clientX, y: event.clientY, before: structuredClone(items), next: items, step: (grid.getBoundingClientRect().width + 16) / columns(mode) };
+    button.setPointerCapture(event.pointerId);
+  }
+  function move(event) {
+    if (!gesture || event.pointerId !== gesture.pointerId) return;
+    gesture.next = gestureLayout(gesture.before, gesture.id, gesture.kind, Math.round((event.clientX - gesture.x) / gesture.step), Math.round((event.clientY - gesture.y) / 80), mode);
+    paint(gesture.next);
+  }
+  function release() { const previous = gesture; gesture = null; if (previous?.button.hasPointerCapture(previous.pointerId)) previous.button.releasePointerCapture(previous.pointerId); return previous; }
+  function finish(event) { if (!gesture || event.pointerId !== gesture.pointerId) return; move(event); const previous = release(); onChange(previous.next); announce(`${WIDGETS[previous.id].label} position and size updated.`); }
+  function cancel() { if (!gesture) return; const previous = release(); paint(previous.before); }
+  return {
+    render(next, nextMode, isEditing) {
+      if (mode !== nextMode || !isEditing) cancel();
+      items = next; mode = nextMode; editing = isEditing; grid.style.setProperty('--columns', columns(mode));
+      for (const controls of handles.values()) for (const button of controls) button.hidden = !editing;
+      grid.classList.toggle('editing', editing); if (!gesture) paint(items);
+    },
+    cancelGesture: cancel,
+    dispose: cancel
+  };
+}

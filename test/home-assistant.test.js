@@ -58,8 +58,8 @@ test('normalizes Home Assistant credentials and safe device metadata', () => {
   ]);
   assert.deepEqual(devices, [
     { deviceId: '1', name: 'Alpha', area: 'Kitchen', disabled: false, measurements: [
-      { name: 'Humidity', value: '45', status: 'available', available: true, unit: '%', deviceClass: 'humidity' },
-      { name: 'Temperature', value: '20', status: 'available', available: true, unit: '°C', deviceClass: 'temperature' }
+      { entityId: 'sensor.humidity', name: 'Humidity', value: '45', status: 'available', available: true, unit: '%', deviceClass: 'humidity' },
+      { entityId: 'sensor.temperature', name: 'Temperature', value: '20', status: 'available', available: true, unit: '°C', deviceClass: 'temperature' }
     ], controls: [{ entityId: 'light.alpha', domain: 'light', name: 'Alpha light', state: 'on' }] },
     { deviceId: '2', name: 'Beta', area: null, manufacturer: 'Maker', model: 'Model', disabled: true, measurements: [], controls: [] },
     { deviceId: '3', name: 'Fallback model', area: null, model: 'Fallback model', disabled: false, measurements: [], controls: [] }
@@ -73,7 +73,7 @@ test('authenticates and correlates Home Assistant device and area commands', asy
   const sockets = [];
   const client = createHomeAssistantClient({ webSocketFactory: successfulFactory({ sockets }) });
   const devices = await client.listDevices({ baseUrl: 'https://home.example.test', accessToken: 'private-token' });
-  assert.deepEqual(devices, [{ deviceId: 'device-1', name: 'Lamp', area: 'Living room', disabled: false, measurements: [{ name: 'Room temperature', value: '21.5', status: 'available', available: true, unit: '°C', deviceClass: 'temperature' }], controls: [{ entityId: 'light.lamp', domain: 'light', name: 'Desk lamp', state: 'off' }] }]);
+  assert.deepEqual(devices, [{ deviceId: 'device-1', name: 'Lamp', area: 'Living room', disabled: false, measurements: [{ entityId: 'sensor.temperature', name: 'Room temperature', value: '21.5', status: 'available', available: true, unit: '°C', deviceClass: 'temperature' }], controls: [{ entityId: 'light.lamp', domain: 'light', name: 'Desk lamp', state: 'off' }] }]);
   assert.equal(sockets[0].url, 'wss://home.example.test/api/websocket');
   assert.deepEqual(sockets[0].sent, [
     { type: 'auth', access_token: 'private-token' },
@@ -149,10 +149,10 @@ test('normalizes bounded numeric sensor readings and rejects unsafe states', () 
   const readings = devices[0].measurements;
   assert.equal(readings.length, valid.length);
   const byName = Object.fromEntries(readings.map((reading) => [reading.name, reading]));
-  assert.deepEqual(byName.Temperature, { name: 'Temperature', value: '-1.25', status: 'available', available: true, unit: '°C', deviceClass: 'temperature' });
-  assert.deepEqual(byName.Pressure, { name: 'Pressure', value: '1e3', status: 'available', available: true, unit: 'hPa', deviceClass: 'pressure' });
-  assert.deepEqual(byName.Offline, { name: 'Offline', value: null, status: 'unavailable', available: false, unit: 'V', deviceClass: 'voltage' });
-  assert.deepEqual(byName.Pending, { name: 'Pending', value: null, status: 'unknown', available: false });
+  assert.deepEqual(byName.Temperature, { entityId: 'sensor.temperature', name: 'Temperature', value: '-1.25', status: 'available', available: true, unit: '°C', deviceClass: 'temperature' });
+  assert.deepEqual(byName.Pressure, { entityId: 'sensor.pressure', name: 'Pressure', value: '1e3', status: 'available', available: true, unit: 'hPa', deviceClass: 'pressure' });
+  assert.deepEqual(byName.Offline, { entityId: 'sensor.offline', name: 'Offline', value: null, status: 'unavailable', available: false, unit: 'V', deviceClass: 'voltage' });
+  assert.deepEqual(byName.Pending, { entityId: 'sensor.pending', name: 'Pending', value: null, status: 'unknown', available: false });
   assert.equal(JSON.stringify(readings).includes('private'), false);
   assert.deepEqual(devices[1].measurements, []);
 });
