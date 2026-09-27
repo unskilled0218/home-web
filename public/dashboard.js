@@ -154,8 +154,6 @@ function setCalendarMutationPending(pending) {
 $('open-settings').addEventListener('click', () => { fillForm(); fillCalendarForm(); $('calendar-settings-status').textContent = ''; dialog.showModal(); });
 $('close-settings').addEventListener('click', () => dialog.close());
 dialog.addEventListener('close', () => $('open-settings').focus());
-$('photo-files').addEventListener('change', (event) => photos.select(event.target.files));
-
 function cancelSearch() { searchGeneration++; searchController?.abort(); }
 $('location-search').addEventListener('submit', async (event) => {
   event.preventDefault(); cancelSearch(); const request = searchGeneration;
@@ -206,6 +204,6 @@ document.addEventListener('fullscreenchange', fullscreenState);
 document.addEventListener('visibilitychange', () => { startClock(); photos.setVisible(!document.hidden); weather.setVisible(!document.hidden); calendar.setVisible(!document.hidden); if (document.hidden) stopAnimations(); });
 reducedMotion.addEventListener('change', () => { stopAnimations(); photos.configure(settings); });
 window.addEventListener('pagehide', (event) => { clearInterval(clockTimer); cancelSearch(); weather.dispose(); photos.dispose(); if (!event.persisted) calendar.dispose(); });
-window.addEventListener('pageshow', (event) => { if (event.persisted) { $('photo-status').textContent = 'Reselect photos after returning to this page.'; startClock(); void weather.refresh(); void calendar.refresh(); } });
+window.addEventListener('pageshow', (event) => { if (event.persisted) { void photos.load(); startClock(); void weather.refresh(); void calendar.refresh(); } });
 photos.setVisible(!document.hidden); weather.setVisible(!document.hidden); calendar.setVisible(!document.hidden);
-fillForm(); apply();
+fillForm(); apply(); void photos.load();

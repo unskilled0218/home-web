@@ -10,6 +10,24 @@ const integer = (value, fallback, name) => {
   return parsed;
 };
 
+function nfsConfig(environment) {
+  const source = String(environment.NFS_SOURCE ?? '').trim();
+  const mountPath = String(environment.NFS_MOUNT_PATH ?? '').trim();
+  const mode = String(environment.NFS_MOUNT_MODE ?? (source ? 'mount' : 'disabled')).trim().toLowerCase();
+  const rawOptions = String(environment.NFS_MOUNT_OPTIONS ?? '').trim();
+  const invalidText = (value, limit) => value.length > limit || /[\0-\x1f\x7f]/.test(value);
+  let error = null;
+  if (!['disabled', 'mount', 'existing'].includes(mode)) error = 'NFS_MOUNT_MODE must be disabled, mount, or existing.';
+  else if (mode !== 'disabled' && !mountPath) error = 'NFS_MOUNT_PATH is required when NFS backgrounds are enabled.';
+  else if (mode === 'mount' && !source) error = 'NFS_SOURCE is required when NFS_MOUNT_MODE is mount.';
+  else if (invalidText(source, 1024) || (source && (!source.includes(':') || /\s/.test(source)))) error = 'NFS_SOURCE is invalid.';
+  else if (invalidText(mountPath, 1024)) error = 'NFS_MOUNT_PATH is invalid.';
+  else if (invalidText(rawOptions, 512)) error = 'NFS_MOUNT_OPTIONS is invalid.';
+  const options = rawOptions ? rawOptions.split(',').map((value) => value.trim()).filter(Boolean) : [];
+  if (!error && options.some((value) => !/^[A-Za-z0-9._=:-]+$/.test(value) || ['rw', 'suid', 'dev', 'exec', 'hard', 'bg'].includes(value) || value.startsWith('retry='))) error = 'NFS_MOUNT_OPTIONS contains an unsafe option.';
+  return Object.freeze({ mode, source, mountPath: mountPath ? path.resolve(mountPath) : null, options: Object.freeze(options), error });
+}
+
 export function normalizeDashboardHostname(value, name = 'DASHBOARD_ALLOWED_HOSTS') {
   let hostname = String(value ?? '').trim().toLowerCase();
   if (hostname.startsWith('[') && hostname.endsWith(']')) hostname = hostname.slice(1, -1);
@@ -51,7 +69,8 @@ export function loadConfig(environment = process.env) {
     nodeExtraCaFile: environment.NODE_EXTRA_CA_CERTS ? path.resolve(environment.NODE_EXTRA_CA_CERTS) : null,
     homeAssistantCacheSeconds: integer(environment.HOME_ASSISTANT_CACHE_SECONDS, 30, 'HOME_ASSISTANT_CACHE_SECONDS'),
     calDavCacheSeconds: integer(environment.CALDAV_CACHE_SECONDS, 300, 'CALDAV_CACHE_SECONDS'),
-    calDavCaFile: environment.CALDAV_CA_FILE ? path.resolve(environment.CALDAV_CA_FILE) : null
+    calDavCaFile: environment.CALDAV_CA_FILE ? path.resolve(environment.CALDAV_CA_FILE) : null,
+    nfs: nfsConfig(environment)
   });
 }
 

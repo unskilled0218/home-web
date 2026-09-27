@@ -29,3 +29,19 @@ test('loads scoped CalDAV runtime configuration', async () => {
   assert.equal(config.calDavCacheSeconds, 450);
   assert.equal(config.calDavCaFile, path.resolve('./certs/baikal-ca.pem'));
 });
+
+test('loads optional NFS mount and pre-mounted photo configuration', async () => {
+  const { loadConfig } = await import('../src/config.js');
+  assert.deepEqual(loadConfig({ HOST: '127.0.0.1' }).nfs, { mode: 'disabled', source: '', mountPath: null, options: [], error: null });
+  const mounted = loadConfig({ HOST: '127.0.0.1', NFS_SOURCE: 'nas.lan:/photos', NFS_MOUNT_PATH: './data/photos', NFS_MOUNT_OPTIONS: 'vers=4.2,timeo=20' }).nfs;
+  assert.deepEqual(mounted, { mode: 'mount', source: 'nas.lan:/photos', mountPath: path.resolve('./data/photos'), options: ['vers=4.2', 'timeo=20'], error: null });
+  const existing = loadConfig({ HOST: '127.0.0.1', NFS_MOUNT_MODE: 'existing', NFS_MOUNT_PATH: '/photos' }).nfs;
+  assert.equal(existing.mode, 'existing'); assert.equal(existing.error, null);
+  for (const environment of [
+    { NFS_SOURCE: 'invalid', NFS_MOUNT_PATH: '/photos' },
+    { NFS_SOURCE: 'nas:/photos', NFS_MOUNT_PATH: '/photos', NFS_MOUNT_OPTIONS: 'rw' },
+    { NFS_SOURCE: 'nas:/photos', NFS_MOUNT_PATH: '/photos', NFS_MOUNT_OPTIONS: 'bg' },
+    { NFS_MOUNT_MODE: 'existing' },
+    { NFS_MOUNT_MODE: 'other', NFS_MOUNT_PATH: '/photos' }
+  ]) assert.ok(loadConfig({ HOST: '127.0.0.1', ...environment }).nfs.error);
+});

@@ -1,9 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
-import { readdirSync } from 'node:fs';
+import { Readable } from 'node:stream';
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+import { tmpdir } from 'node:os';
 import { createDashboardServer } from '../src/app.js';
-import { clockText, loadSettings, normalizeSettings, orderPhotos, sampleHours, selectPhotos, weatherIconFile } from '../public/dashboard-helpers.js';
+import { clockText, loadSettings, normalizeSettings, orderPhotos, sampleHours, weatherIconFile } from '../public/dashboard-helpers.js';
 import { createWeatherController, normalizeForecast, requestJson, searchLocations, weatherUrls } from '../public/dashboard-weather.js';
 import { createPhotoController } from '../public/dashboard-photos.js';
 
@@ -38,6 +41,7 @@ test('serves dashboard aliases and assets while preserving home and static conta
   }
   assert.equal((await fetch(`${base}/weather-icons.svg`)).status, 404); assert.equal((await fetch(`${base}/weather-icons/snowflake.svg`)).status, 404);
   const dashboardHtml = await (await fetch(`${base}/dashboard.html`)).text(); assert.match(dashboardHtml, /<img id="weather-icon"[^>]*alt=""[^>]*aria-hidden="true"[^>]*hidden>/);
+  assert.match(dashboardHtml, /NFS backgrounds/); assert.doesNotMatch(dashboardHtml, /id="photo-files"|Choose photos|Reselect/);
   assert.match(dashboardHtml, /id="calendar-events"/); assert.match(dashboardHtml, /id="calendar-password"[^>]*type="password"[^>]*autocomplete="current-password"/);
   assert.match(dashboardHtml, /Baikal server URL/); assert.match(dashboardHtml, /name="serverUrl"[^>]*placeholder="https:\/\/baikal\.example\.test"/); assert.doesNotMatch(dashboardHtml, /dav\.php\/calendars/);
   const dashboardCss = await (await fetch(`${base}/dashboard.css`)).text(); assert.match(dashboardCss, /#weather \{[^}]*background: transparent;[^}]*border-radius: 0;/); assert.doesNotMatch(dashboardCss, /#weather \{[^}]*#08101bcc/);
@@ -48,6 +52,27 @@ test('serves dashboard aliases and assets while preserving home and static conta
   const dashboardJs = await (await fetch(`${base}/dashboard.js`)).text(); assert.match(dashboardJs, /`\/weather-icons\/\$\{weatherIconFile\(/); assert.match(dashboardJs, /icon\.hidden = true; icon\.removeAttribute\('src'\)/); assert.match(dashboardJs, /icon\.alt = ''; icon\.setAttribute\('aria-hidden', 'true'\)/); assert.match(dashboardJs, /forecastItem\(\{ code: hour\.code, day: hour\.day/); assert.match(dashboardJs, /forecastItem\(\{ code: day\.code, label/); assert.match(dashboardJs, /weatherDescription\(code, day\)/); assert.doesNotMatch(dashboardJs, /innerHTML|weather-icons\.svg/);
   assert.match(await (await fetch(base)).text(), /href="\/dashboard"/);
   for (const route of ['/missing', '/dashboard/missing', '/%2e%2e/package.json', '/..%2fpackage.json', '/src/app.js']) assert.equal((await fetch(base + route)).status, 404);
+});
+
+test('serves an injected NFS photo snapshot only through protected API routes', async (context) => {
+  const directory = mkdtempSync(path.join(tmpdir(), 'dashboard-photo-api-'));
+  const imagePath = path.join(directory, 'photo.png'); writeFileSync(imagePath, 'image-data');
+  const token = 'abcdefghijklmnop';
+  const photoLibrary = {
+    list: async () => ({ available: true, photos: [{ name: 'photo.png', lastModified: 1, url: `/api/dashboard/photos/${token}` }] }),
+    open: async (value) => value === token ? { stream: Readable.from('image-data'), mime: 'image/png', size: 10 } : null
+  };
+  const server = createDashboardServer({ runtimeConfig: { allowedHosts: ['127.0.0.1'] }, store: {}, photoLibrary });
+  server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  context.after(async () => { await new Promise((resolve) => server.close(resolve)); rmSync(directory, { recursive: true, force: true }); });
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const manifest = await fetch(`${base}/api/dashboard/photos`);
+  assert.deepEqual(await manifest.json(), { available: true, photos: [{ name: 'photo.png', lastModified: 1, url: `/api/dashboard/photos/${token}` }] });
+  assert.equal(manifest.headers.get('cache-control'), 'no-store');
+  const image = await fetch(`${base}/api/dashboard/photos/${token}`);
+  assert.equal(image.status, 200); assert.equal(image.headers.get('content-type'), 'image/png'); assert.equal(image.headers.get('x-content-type-options'), 'nosniff'); assert.equal(await image.text(), 'image-data');
+  assert.equal((await fetch(`${base}/api/dashboard/photos/unknownunknownunk`)).status, 404);
+  assert.equal((await fetch(`${base}/api/dashboard/photos/${token}`, { method: 'POST' })).status, 404);
 });
 
 test('maps bounded WMO conditions to local weather icons', () => {
@@ -75,11 +100,8 @@ test('formats clock across timezone date boundaries and daylight saving', () => 
   const summer = clockText(new Date('2026-07-01T12:00:00Z'), settings(), 'en-GB'); assert.equal(summer.time, '13:00:00');
 });
 
-test('bounds photo selection and provides deterministic ordering without mutating input', () => {
+test('provides deterministic photo ordering without mutating input', () => {
   const file = (name, size = 1, type = 'image/png', lastModified = 0) => ({ name, size, type, lastModified });
-  const result = selectPhotos([file('bad', 1, 'text/plain'), file('large', 21 * 1024 ** 2), ...Array.from({ length: 101 }, (_, i) => file(String(i)))]);
-  assert.equal(result.accepted.length, 100); assert.equal(result.excluded, 3);
-  assert.equal(selectPhotos(Array.from({ length: 11 }, () => file('photo', 20 * 1024 ** 2))).accepted.length, 10);
   const photos = [{ file: file('z', 1, 'image/png', 1) }, { file: file('a', 1, 'image/png', 2) }];
   assert.equal(orderPhotos(photos, 'name')[0].file.name, 'a'); assert.equal(orderPhotos(photos, 'date')[0].file.name, 'z'); assert.equal(photos[0].file.name, 'z');
   assert.equal(orderPhotos(photos, 'random', () => 0)[0].file.name, 'a');
@@ -146,21 +168,43 @@ test('late weather results cannot overwrite a changed location', async () => {
   await tick(); assert.equal(latest.forecast.current.temperature_2m, 25); assert.equal(latest.air.aqi, 30); assert.equal(timers.tasks.size, 1); client.dispose();
 });
 
-test('photo owner skips failed images, cancels timers, and revokes replaced URLs after clearing', async () => {
+test('photo owner skips failed server images and cancels timers after replacement', async () => {
   const timers = scheduler(); const events = []; const shown = [];
-  const client = createPhotoController({ ...timers, createUrl: (file) => file.name, revokeUrl: (url) => events.push(`revoke:${url}`), clear: () => events.push('clear'), report: (message) => events.push(message), show: (photo) => shown.push(photo.url), decode: async (url) => { if (url === 'bad') throw new Error('decode'); } });
-  const file = (name) => ({ name, size: 1, type: 'image/png' });
-  client.configure(settings({ order: 'name' })); client.select([file('bad'), file('good'), file('other')]); await tick();
+  const client = createPhotoController({ ...timers, clear: () => events.push('clear'), report: (message) => events.push(message), show: (photo) => shown.push(photo.url), decode: async (url) => { if (url === 'bad') throw new Error('decode'); } });
+  const photo = (name) => ({ file: { name, lastModified: 1 }, url: name });
+  client.configure(settings({ order: 'name' })); client.replace([photo('bad'), photo('good'), photo('other')]); await tick();
   assert.deepEqual(shown, ['good']); assert.equal(timers.tasks.size, 1);
   client.setVisible(false); assert.equal(timers.tasks.size, 0);
   client.setVisible(true); await tick(); assert.equal(timers.tasks.size, 1);
-  events.length = 0; client.select([file('single')]); await tick(); assert.equal(events[0], 'clear'); assert.ok(events.includes('revoke:good')); assert.equal(timers.tasks.size, 0);
-  client.dispose(); assert.ok(events.includes('revoke:single'));
+  events.length = 0; client.replace([photo('single')]); await tick(); assert.equal(events[0], 'clear'); assert.equal(timers.tasks.size, 0);
+  client.dispose(); assert.equal(events.at(-1), 'clear');
 });
 
 test('a photo decoding after replacement cannot be displayed', async () => {
   const pending = []; const shown = [];
-  const client = createPhotoController({ createUrl: (file) => file.name, revokeUrl() {}, clear() {}, report() {}, show: (photo) => shown.push(photo.url), decode: () => new Promise((resolve) => pending.push(resolve)) });
-  client.configure(settings()); client.select([{ name: 'old', size: 1, type: 'image/png' }]); client.select([{ name: 'new', size: 1, type: 'image/png' }]);
+  const client = createPhotoController({ clear() {}, report() {}, show: (photo) => shown.push(photo.url), decode: () => new Promise((resolve) => pending.push(resolve)) });
+  client.configure(settings()); client.replace([{ file: { name: 'old', lastModified: 1 }, url: 'old' }]); client.replace([{ file: { name: 'new', lastModified: 1 }, url: 'new' }]);
   pending[1](); await tick(); pending[0](); await tick(); assert.deepEqual(shown, ['new']); client.dispose();
+});
+
+test('loads normalized NFS records and ignores a late manifest response', async () => {
+  const requests = []; const shown = []; const reports = [];
+  const client = createPhotoController({ clear() {}, report: (message) => reports.push(message), show: (photo) => shown.push(photo.url), decode: async () => {}, fetchImpl: (_url, options) => new Promise((resolve) => requests.push({ resolve, signal: options.signal })) });
+  client.configure(settings({ order: 'name' }));
+  const first = client.load(); const second = client.load();
+  requests[1].resolve(response({ available: true, photos: [{ name: 'new.png', lastModified: 2, url: '/api/dashboard/photos/abcdefghijklmnop' }, { name: '../bad', lastModified: 1, url: '/outside' }] }));
+  await second; await tick();
+  requests[0].resolve(response({ available: true, photos: [{ name: 'old.png', lastModified: 1, url: '/api/dashboard/photos/ponmlkjihgfedcba' }] }));
+  await first; await tick();
+  assert.deepEqual(shown, ['/api/dashboard/photos/abcdefghijklmnop']);
+  assert.equal(reports.at(-1), '1 NFS backgrounds loaded.');
+  client.dispose();
+});
+
+test('bounds a stalled NFS manifest request and reports the fallback', async () => {
+  const reports = []; let abort;
+  const client = createPhotoController({ clear() {}, report: (message) => reports.push(message), show() {}, requestSchedule: (fn) => { abort = fn; return 1; }, requestCancel() {}, fetchImpl: (_url, { signal }) => new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })), { once: true })) });
+  client.configure(settings()); const pending = client.load(); abort(); await pending;
+  assert.equal(reports.at(-1), 'NFS backgrounds could not be loaded. The dashboard will continue without photos.');
+  client.dispose();
 });

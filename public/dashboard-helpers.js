@@ -36,15 +36,6 @@ export function clockText(date, settings, locale = undefined) {
   };
 }
 
-export function selectPhotos(files) {
-  const accepted = []; let bytes = 0; let excluded = 0;
-  for (const file of files) {
-    if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.type) || file.size > 20 * 1024 ** 2 || bytes + file.size > 200 * 1024 ** 2 || accepted.length >= 100) { excluded++; continue; }
-    bytes += file.size; accepted.push(file);
-  }
-  return { accepted, excluded };
-}
-
 export function orderPhotos(photos, order, random = Math.random) {
   const result = [...photos];
   if (order === 'random') {

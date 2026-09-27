@@ -1,6 +1,6 @@
 {
   "name": "dashboard",
-  "version": "0.14.2",
+  "version": "0.15.0",
   "private": true,
   "description": "A self-hosted dashboard for CalDAV events, Home Assistant devices, Linkwarden bookmarks, and Wake-on-LAN controls.",
   "type": "module",

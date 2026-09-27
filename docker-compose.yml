@@ -1,6 +1,7 @@
 services:
   dashboard:
     image: node:24-bookworm-slim
+    user: "${DASHBOARD_UID:-1000}:${DASHBOARD_GID:-1000}"
     network_mode: host
     working_dir: /app
     command: node src/server.js

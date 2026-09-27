@@ -1,6 +1,7 @@
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { normalizeDashboardHostname } from './config.js';
@@ -12,6 +13,7 @@ import { createCollectionSelectionStore } from './collection-selections.js';
 import { isHomeAssistantClientError, normalizeHomeAssistantCredentials } from './home-assistant.js';
 import { createHomeAssistantControlStore } from './home-assistant-controls.js';
 import { isCalDavClientError, normalizeCalDavCredentials } from './caldav.js';
+import { createUnavailablePhotoLibrary } from './photo-library.js';
 
 export const MAX_JSON_BODY_BYTES = 16_384;
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -92,7 +94,7 @@ function selectionFingerprint(settings) {
   return createHash('sha256').update(`${settings.baseUrl}\0${settings.username}\0${settings.accessToken}`).digest('base64url');
 }
 
-export function createDashboardServer({ runtimeConfig, store, linkwarden, homeAssistant, calDav, homeAssistantControls = createHomeAssistantControlStore(), wakeExecutor = executeWakeRequest, collectionSelections = createCollectionSelectionStore(), now = Date.now, publicRoot = defaultPublicRoot }) {
+export function createDashboardServer({ runtimeConfig, store, linkwarden, homeAssistant, calDav, photoLibrary = createUnavailablePhotoLibrary(), homeAssistantControls = createHomeAssistantControlStore(), wakeExecutor = executeWakeRequest, collectionSelections = createCollectionSelectionStore(), now = Date.now, publicRoot = defaultPublicRoot }) {
   const wakeRequests = new Map();
   const integrationEncryptionKey = runtimeConfig.integrationEncryptionKey ?? runtimeConfig.linkwardenEncryptionKey;
   let homeAssistantMutation = Promise.resolve();
@@ -256,10 +258,23 @@ export function createDashboardServer({ runtimeConfig, store, linkwarden, homeAs
     } catch { json(response, 404, { error: 'Not found.' }); }
   }
 
+  async function servePhoto(response, token) {
+    const photo = await photoLibrary.open(token);
+    if (!photo) return json(response, 404, { error: 'Photo not found.' });
+    response.writeHead(200, { 'Content-Type': photo.mime, 'Content-Length': photo.size, 'Cache-Control': 'private, no-cache', 'X-Content-Type-Options': 'nosniff' });
+    await pipeline(photo.stream, response);
+  }
+
   async function handleApi(request, response, pathname) {
     if (!isTrustedAddress(request.socket.remoteAddress)) return json(response, 403, { error: 'This service only accepts local-network requests.' });
     if (!apiRequestAllowed(request, runtimeConfig.allowedHosts)) return json(response, 403, { error: 'Request host or origin is not allowed.' });
     if (request.method === 'GET' && pathname === '/api/health') return json(response, 200, { status: 'ok' });
+    if (request.method === 'GET' && pathname === '/api/dashboard/photos') {
+      try { return json(response, 200, await photoLibrary.list()); }
+      catch { return json(response, 200, { available: false, photos: [] }); }
+    }
+    const photoToken = /^\/api\/dashboard\/photos\/([A-Za-z0-9_-]{16,128})$/.exec(pathname)?.[1];
+    if (request.method === 'GET' && photoToken) return servePhoto(response, photoToken);
     if (request.method === 'GET' && pathname === '/api/devices') return json(response, 200, { devices: store.list() });
     if (request.method === 'GET' && pathname === '/api/linkwarden') return json(response, 200, { linkwarden: linkwardenStatus() });
     if (request.method === 'GET' && pathname === '/api/home-assistant') return json(response, 200, { homeAssistant: homeAssistantStatus() });

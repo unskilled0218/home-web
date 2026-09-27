@@ -23,7 +23,35 @@ Open `/dashboard` (or `/dashboard/`) for a photo, clock, weather, and optional c
 
 **Settings** controls the lower-left/right information position, overall and individual clock/weather/calendar scale, visibility, timezone, date style, 12/24-hour format, seconds, and weather units. Date styles use the browser's locale and `Intl` formatting rather than the desktop app's custom format strings. Preferences are saved per browser in localStorage; blocked or corrupt storage falls back to defaults, and save failures are reported without stopping the page.
 
-Select JPEG, PNG, WebP, or GIF photos using **Choose photos**. Photos stay in the browser session, are never uploaded, and must be reselected after reload or returning from a suspended page. Selection is limited to 100 files, 20 MiB per file, and 200 MiB total. Invalid or undecodable images are reported and skipped. Choose name, modification-date, or shuffled ordering; none/fade/slide transitions; interval and transition duration; opacity; a solid or blurred-image background; and optional filename display. Transitions respect reduced-motion preferences, and slideshow timers pause while the page is hidden.
+The dashboard automatically loads JPEG, PNG, WebP, and GIF backgrounds from an optional read-only NFS share. It recursively scans up to 5,000 entries and eight directory levels, then accepts up to 100 files, 20 MiB per file, and 200 MiB total. Symbolic links, unsupported files, invalid images, and files outside the configured root are rejected or skipped. Reload `/dashboard` after changing the share. Choose name, modification-date, or shuffled ordering; none/fade/slide transitions; interval and transition duration; opacity; a solid or blurred-image background; and optional filename display. Transitions respect reduced-motion preferences, and slideshow timers pause while the page is hidden. If NFS is disabled or unavailable, the page continues with its solid background, clock, weather, and calendar.
+
+### NFS backgrounds
+
+For a direct run, install the NFS client supplied by the host operating system and configure the dashboard service account to mount only the intended export without an interactive password. The application never invokes `sudo` and must not run as root. Set the export and local mount point in `.env`:
+
+```sh
+NFS_MOUNT_MODE=mount
+NFS_SOURCE=nas.lan:/photos
+NFS_MOUNT_PATH=./data/backgrounds
+NFS_MOUNT_OPTIONS=vers=4.2
+```
+
+`npm start` checks for an existing matching NFS/NFS4 mount, otherwise invokes `mount` with the configured source and path before opening the HTTP listener. It always forces `ro,nosuid,nodev,noexec,soft,timeo=20,retrans=2`, uses no shell interpolation, and bounds mount and disconnected-share operations. A missing client, denied mount, unreachable server, conflicting or unsafe mount point, timeout, or failed verification emits one generic warning and starts the dashboard without photos. The process does not unmount the share at shutdown because the mount may be shared or managed externally. `NFS_MOUNT_OPTIONS` accepts only comma-separated option tokens and cannot relax the forced bounded read-only settings; background, hard-mount, and retry-control options are rejected.
+
+To read a directory that is already mounted by the host or service manager, mount it with `ro,nosuid,nodev,noexec,soft,timeo=20,retrans=2`, omit `NFS_SOURCE`, and use:
+
+```sh
+NFS_MOUNT_MODE=existing
+NFS_MOUNT_PATH=/srv/dashboard-photos
+```
+
+The standard Compose service remains unprivileged and does not install an NFS client or receive mount capabilities. The selected `DASHBOARD_UID`/`DASHBOARD_GID` must have read and traverse access to the host-mounted share. Mount NFS on the Docker host with the bounded read-only options above, then add the supplied read-only override:
+
+```sh
+NFS_HOST_MOUNT_PATH=/srv/dashboard-photos docker compose -f docker-compose.yml -f docker-compose.nfs.yml up -d
+```
+
+The browser receives only bounded relative names and temporary opaque image URLs. Absolute mount paths and the NFS source are not exposed. Photo API requests retain the dashboard's trusted-LAN and allowed-Host checks.
 
 Search for a weather location in settings. Search terms and selected coordinates are sent directly from the browser to [Open-Meteo](https://open-meteo.com/). The transparent weather overlay pairs visible condition text with local SVG artwork for current conditions, three-hourly samples of the next 24 hours, and seven daily forecasts; it does not request icons from another service. Hourly icons follow Open-Meteo's day/night flag, while daily icons use daytime variants. The artwork is bundled from the sibling `dash-board` project. The page also shows the **US AQI**, with air-quality data attributed to [CAMS ENSEMBLE](https://ads.atmosphere.copernicus.eu/). Weather refreshes hourly while visible and when relevant settings change. Failed refreshes label retained data as stale; weather and air-quality failures are handled independently. The page uses the public provider endpoints and their usage terms, and requires internet access for weather only.
 
@@ -56,7 +84,7 @@ npm start
 
 ## Container deployment
 
-The supplied `docker-compose.yml` uses the official Node image and host networking because UDP broadcast packets need to leave through the LAN interface. It automatically creates the integration-credential encryption key at `data/linkwarden-config-encryption.key` on first startup and reuses it after container recreation. No encryption secret must be configured before a fresh Compose deployment. On Linux, set `HOST` to the host's private address before running:
+The supplied `docker-compose.yml` uses the official Node image and host networking because UDP broadcast packets need to leave through the LAN interface. It runs as UID/GID 1000 by default; set `DASHBOARD_UID` and `DASHBOARD_GID` to the owner of `data/` when the host account differs, and ensure that account can create and update files there. Existing root-owned Compose data must be reassigned by the host administrator before upgrading. The service automatically creates the integration-credential encryption key at `data/linkwarden-config-encryption.key` on first startup and reuses it after container recreation. No encryption secret must be configured before a fresh Compose deployment. On Linux, set `HOST` to the host's private address before running:
 
 ```sh
 HOST=192.168.1.10 docker compose up -d

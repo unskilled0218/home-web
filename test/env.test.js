@@ -39,8 +39,8 @@ test('loads configuration and extra CA before production startup', async (contex
   writeFileSync(caFile, rootCertificates[0]);
   const databasePath = path.join(directory, 'dashboard.db');
   const file = path.join(directory, '.env');
-  writeFileSync(file, `HOST=127.0.0.1\nPORT=${port}\nDATABASE_PATH=${databasePath}\nLINKWARDEN_CONFIG_ENCRYPTION_KEY=${Buffer.alloc(32, 4).toString('base64')}\nNODE_EXTRA_CA_CERTS=${caFile}\n`);
-  const child = spawn(process.execPath, [`--env-file-if-exists=${file}`, 'src/server.js'], { cwd: root, env: withoutEnvironment('HOST', 'PORT', 'DATABASE_PATH', 'LINKWARDEN_CONFIG_ENCRYPTION_KEY', 'NODE_EXTRA_CA_CERTS'), stdio: ['ignore', 'pipe', 'pipe'] });
+  writeFileSync(file, `HOST=127.0.0.1\nPORT=${port}\nDATABASE_PATH=${databasePath}\nLINKWARDEN_CONFIG_ENCRYPTION_KEY=${Buffer.alloc(32, 4).toString('base64')}\nNODE_EXTRA_CA_CERTS=${caFile}\nNFS_SOURCE=invalid\nNFS_MOUNT_PATH=${path.join(directory, 'photos')}\n`);
+  const child = spawn(process.execPath, [`--env-file-if-exists=${file}`, 'src/server.js'], { cwd: root, env: withoutEnvironment('HOST', 'PORT', 'DATABASE_PATH', 'LINKWARDEN_CONFIG_ENCRYPTION_KEY', 'NODE_EXTRA_CA_CERTS', 'NFS_SOURCE', 'NFS_MOUNT_PATH'), stdio: ['ignore', 'pipe', 'pipe'] });
   context.after(async () => {
     if (child.exitCode == null) { child.kill('SIGTERM'); await once(child, 'exit'); }
     rmSync(directory, { recursive: true, force: true });
@@ -52,4 +52,5 @@ test('loads configuration and extra CA before production startup', async (contex
     child.stdout.on('data', (chunk) => { if (chunk.toString().includes(`127.0.0.1:${port}`)) { clearTimeout(timer); resolve(); } });
     child.once('exit', (code) => { clearTimeout(timer); reject(new Error(`Startup exited with ${code}: ${stderr}`)); });
   });
+  assert.match(stderr, /NFS backgrounds are unavailable/);
 });

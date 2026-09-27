@@ -1,0 +1,7 @@
+services:
+  dashboard:
+    environment:
+      NFS_MOUNT_MODE: existing
+      NFS_MOUNT_PATH: /photos
+    volumes:
+      - ${NFS_HOST_MOUNT_PATH:?Set NFS_HOST_MOUNT_PATH to the host-mounted photo directory}:/photos:ro
