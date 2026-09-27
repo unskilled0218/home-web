@@ -5,6 +5,11 @@ const boolean = (value, fallback) => typeof value === 'boolean' ? value : fallba
 export const text = (value, limit = 120) => typeof value === 'string' ? value.trim().slice(0, limit) : '';
 export const finite = (value) => typeof value === 'number' && Number.isFinite(value);
 
+export function temperatureRange(minimum, maximum, unit = '') {
+  const compact = (value) => value === null || value === undefined ? 'Unavailable' : `${value}${unit}`;
+  return `${compact(minimum)}/${compact(maximum)}`;
+}
+
 export function normalizeLocation(value) {
   if (!value || !finite(value.latitude) || !finite(value.longitude) || Math.abs(value.latitude) > 90 || Math.abs(value.longitude) > 180) return null;
   return { latitude: value.latitude, longitude: value.longitude, label: text(value.label) || 'Selected location' };

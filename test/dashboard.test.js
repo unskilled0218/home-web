@@ -6,7 +6,7 @@ import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { createDashboardServer } from '../src/app.js';
-import { clockText, loadSettings, normalizeSettings, orderPhotos, sampleHours, weatherIconFile } from '../public/dashboard-helpers.js';
+import { clockText, loadSettings, normalizeSettings, orderPhotos, sampleHours, temperatureRange, weatherIconFile } from '../public/dashboard-helpers.js';
 import { createWeatherController, normalizeForecast, requestJson, searchLocations, weatherUrls } from '../public/dashboard-weather.js';
 import { createPhotoController } from '../public/dashboard-photos.js';
 
@@ -46,6 +46,7 @@ test('serves dashboard aliases and assets while preserving home and static conta
   assert.match(dashboardHtml, /id="calendar-events"/); assert.match(dashboardHtml, /id="calendar-password"[^>]*type="password"[^>]*autocomplete="current-password"/);
   assert.match(dashboardHtml, /Baikal server URL/); assert.match(dashboardHtml, /name="serverUrl"[^>]*placeholder="https:\/\/baikal\.example\.test"/); assert.doesNotMatch(dashboardHtml, /dav\.php\/calendars/);
   const dashboardCss = await (await fetch(`${base}/dashboard.css`)).text(); assert.match(dashboardCss, /#weather \{[^}]*background: transparent;[^}]*border-radius: 0;/); assert.doesNotMatch(dashboardCss, /#weather \{[^}]*#08101bcc/);
+  assert.match(dashboardCss, /#information \{[^}]*width: calc\(100% - 2rem\);[^}]*max-width: none;/); assert.doesNotMatch(dashboardCss, /max-width: min\(55rem/);
   assert.match(dashboardCss, /:fullscreen \.page-tools \{ display: none; \}/);
   assert.match(dashboardCss, /#hourly li, #daily li \{[^}]*background: transparent;/);
   assert.match(dashboardCss, /#hourly, #daily \{[^}]*flex-wrap: wrap;[^}]*max-width: 100%;/); assert.doesNotMatch(dashboardCss, /#hourly, #daily \{[^}]*overflow-[xy]:\s*auto/);
@@ -53,7 +54,7 @@ test('serves dashboard aliases and assets while preserving home and static conta
   assert.match(dashboardCss, /#hourly li:only-child, #daily li:only-child \{[^}]*flex-basis: 100%;/);
   assert.match(dashboardCss, /\.forecast-item \{[^}]*flex-direction: column;/);
   assert.match(dashboardCss, /\.forecast-label, \.forecast-temperature, \.forecast-condition \{[^}]*overflow: hidden;[^}]*text-overflow: ellipsis;[^}]*white-space: nowrap;/);
-  assert.match(dashboardCss, /@media \(max-width: 600px\) \{[\s\S]*#hourly, #daily \{ gap: \.2rem; \}/);
+  assert.match(dashboardCss, /@media \(max-width: 600px\) \{[\s\S]*#hourly, #daily \{ gap: \.1rem; \}/);
   assert.match(dashboardCss, /\.weather-icon \{[^}]*filter: brightness\(0\) invert\(1\) drop-shadow/);
   assert.match(dashboardCss, /\.forecast-icon \{[^}]*width: clamp[^}]*filter: brightness\(0\) invert\(1\) drop-shadow/);
   assert.match(dashboardCss, /#calendar \{[^}]*background: transparent;/); assert.match(dashboardCss, /\.calendar-event \{[^}]*background: transparent;/);
@@ -106,6 +107,11 @@ test('formats clock across timezone date boundaries and daylight saving', () => 
   assert.equal(clockText(instant, settings({ timezone: 'America/Los_Angeles', dateStyle: 'short' }), 'en-US').date, '12/31/25');
   assert.match(clockText(instant, settings({ timezone: 'Asia/Tokyo' }), 'en-GB').time, /09:30:00/);
   const summer = clockText(new Date('2026-07-01T12:00:00Z'), settings(), 'en-GB'); assert.equal(summer.time, '13:00:00');
+});
+
+test('formats compact daily temperature ranges without unit spaces', () => {
+  assert.equal(temperatureRange(16.2, 26.4, '°C'), '16.2°C/26.4°C');
+  assert.equal(temperatureRange(-4, 7, '°F'), '-4°F/7°F');
 });
 
 test('provides deterministic photo ordering without mutating input', () => {

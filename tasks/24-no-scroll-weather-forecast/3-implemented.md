@@ -13,6 +13,9 @@ Updated the hourly and daily forecast presentation so the lists no longer scroll
 - Added single-line ellipsis behavior to `.forecast-label`, `.forecast-temperature`, and `.forecast-condition` without changing rendered weather data.
 - Added full-width treatment for one-item unavailable messages.
 - Added mobile-specific card basis, gaps, padding, and icon sizing while retaining no-wrap text and no-scroll lists.
+- Removed the `55rem` information-panel cap so forecasts can use the full viewport width minus the existing desktop/mobile margins.
+- Reduced horizontal forecast-card padding and list gaps to show more forecast content across each row.
+- Changed daily temperature ranges from `16.2 °C to 26.4 °C` to the compact `16.2°C/26.4°C` format without changing hourly/current readings.
 - Bumped the project version from `0.15.0` to `0.15.1`.
 - README changes were unnecessary because it does not document the forecast list's scrolling or wrapping interaction.
 
@@ -27,10 +30,10 @@ Passed:
 
 ```text
 node --test test/dashboard.test.js
-15 tests passed, 0 failed
+16 tests passed, 0 failed
 
 npm test
-128 tests passed, 0 failed
+129 tests passed, 0 failed
 
 npm run check
 node --check src/*.js && node --check public/*.js

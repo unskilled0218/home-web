@@ -1,4 +1,4 @@
-import { SETTINGS_KEY, clockText, loadSettings, normalizeSettings, sampleHours, weatherDescription, weatherIconFile } from './dashboard-helpers.js';
+import { SETTINGS_KEY, clockText, loadSettings, normalizeSettings, sampleHours, temperatureRange, weatherDescription, weatherIconFile } from './dashboard-helpers.js';
 import { createWeatherController, searchLocations } from './dashboard-weather.js';
 import { createPhotoController } from './dashboard-photos.js';
 import { createCalendarController, formatCalendarEvent } from './dashboard-calendar.js';
@@ -63,7 +63,7 @@ function renderWeather(state = weatherState) {
     if (!$('hourly').children.length) $('hourly').append(element('li', 'Hourly forecast unavailable.'));
     for (const day of forecast.daily) {
       const label = new Intl.DateTimeFormat(undefined, { timeZone: 'UTC', weekday: 'short', month: 'short', day: 'numeric' }).format(new Date(`${day.date}T12:00:00Z`));
-      $('daily').append(forecastItem({ code: day.code, label, temperature: `${reading(day.min, forecast.dailyUnit)} to ${reading(day.max, forecast.dailyUnit)}` }));
+      $('daily').append(forecastItem({ code: day.code, label, temperature: temperatureRange(day.min, day.max, forecast.dailyUnit) }));
     }
     if (!$('daily').children.length) $('daily').append(element('li', 'Daily forecast unavailable.'));
   }
