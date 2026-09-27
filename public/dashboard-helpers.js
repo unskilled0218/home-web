@@ -51,7 +51,7 @@ export function orderPhotos(photos, order, random = Math.random) {
 
 export function sampleHours(rows, now = Date.now()) {
   let next = now / 1000;
-  return rows.filter((row) => { if (row.time < next || row.time > now / 1000 + 86400) return false; next = row.time + 10800; return true; }).slice(0, 8);
+  return rows.filter((row) => { if (row.time < next || row.time > now / 1000 + 86400) return false; next = row.time + 10800; return true; }).slice(1, 8);
 }
 
 export function weatherDescription(code, day = 1) {
