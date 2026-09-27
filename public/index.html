@@ -7,11 +7,10 @@
     <title>dashboard</title>
     <link rel="stylesheet" href="/styles.css">
   </head>
-  <body>
-    <main class="shell">
-      <header class="home-toolbar"><h1>Home</h1><nav aria-label="Pages"><a href="/dashboard">Photo dashboard</a></nav><button class="button secondary" id="home-settings-open" type="button" disabled>Settings</button><button class="button" id="home-edit" type="button" disabled>Edit widgets</button><button class="button" id="home-save" type="button" hidden>Save layouts</button><button class="button secondary" id="home-cancel" type="button" hidden>Cancel / reload</button></header>
-      <p id="home-layout-label"></p><p id="home-status" role="status" aria-live="polite">Loading shared home settings…</p><button id="home-retry" class="button secondary" type="button">Reload settings</button>
-      <p id="home-empty" hidden>No widgets in this layout. Open Settings to add widgets.</p>
+  <body class="home-page">
+    <main class="shell" aria-label="Home widget dashboard">
+      <div class="home-toolbar"><button class="button secondary" id="home-settings-open" type="button">Settings</button></div>
+      <p id="home-status" class="sr-only" role="status" aria-live="polite">Loading shared home settings…</p>
       <div id="home-grid" class="home-grid" aria-label="Home widgets" hidden>
       <section id="home-time" class="home-widget" aria-label="Time"><div class="widget-content"><p id="home-date"></p><time id="home-clock"></time></div></section>
       <section id="home-weather" class="home-widget" aria-label="Weather"><div class="widget-content"><p id="home-weather-status" role="status"></p><div id="home-weather-current"></div><p id="home-air"></p><h3>Hourly</h3><ul id="home-hourly" class="home-forecast"></ul><h3>Daily</h3><ul id="home-daily" class="home-forecast"></ul></div></section>
@@ -40,9 +39,14 @@
     </main>
     <dialog id="home-settings-dialog" aria-labelledby="home-settings-title">
       <div class="dialog-heading"><h2 id="home-settings-title">Home settings</h2><button type="button" id="home-settings-close" class="icon-button" aria-label="Close home settings">×</button></div>
+      <button id="home-fullscreen" class="button secondary" type="button">Enter fullscreen</button><p id="home-fullscreen-status" role="status"></p>
+      <p id="home-layout-label"></p><p id="home-settings-status" role="status">Loading shared home settings…</p><button id="home-retry" class="button secondary" type="button">Reload settings</button>
+      <p id="home-empty" hidden>No widgets in this layout. Add widgets below.</p>
+      <fieldset id="home-config" disabled>
+      <button class="button" id="home-edit" type="button">Edit widgets</button>
       <p>Saved on this server for every device. Desktop and mobile have separate layouts; display preferences are shared.</p>
       <h3 id="home-catalog-title">Add widgets</h3><div id="home-catalog" class="home-catalog"></div>
-      <h3>Widget position and size</h3><p>Changes here edit the current layout. Save layouts to finish, or Cancel to discard.</p><div id="home-geometry"></div>
+      <h3>Widget position and size</h3><p>Changes here edit the current layout. Save shared changes to finish, or Cancel to discard.</p><div id="home-geometry"></div>
       <form id="home-preferences">
         <h3>Display preferences</h3>
         <label>Timezone<input name="timezone" value="UTC" maxlength="80" required></label>
@@ -56,8 +60,8 @@
       <section><h3>Weather location</h3><p>Search terms and coordinates are sent to Open-Meteo.</p><form id="home-location-search"><label>City or place<input id="home-location-query" minlength="2" maxlength="120" required></label><button class="button" type="submit">Search</button><button id="home-location-clear" class="button secondary" type="button">Clear location</button></form><p id="home-location-status" role="status"></p><ul id="home-location-results"></ul></section>
       <section><h3>Home Assistant selection</h3><button id="home-select-load" class="button secondary" type="button">Load devices</button><label>Find devices<input id="home-select-search" type="search"></label><p id="home-select-status" role="status"></p><div id="home-selections"></div><button id="home-select-save" class="button" type="button">Apply selected devices and readings</button></section>
       <section><h3>Integration settings</h3><div class="section-actions"><button data-integration="bookmarks" class="button secondary" type="button">Bookmarks connection</button><button data-integration="home-assistant" class="button secondary" type="button">Home Assistant connection</button><button data-integration="wol" class="button secondary" type="button">Add Wake-on-LAN device</button><button id="home-calendar-open" class="button secondary" type="button">Calendar connection</button></div></section>
-      <p id="home-settings-status" role="status"></p>
       <div class="dialog-actions"><button id="home-dialog-save" class="button" type="button">Save shared changes</button><button id="home-dialog-cancel" class="button secondary" type="button">Cancel / reload</button></div>
+      </fieldset>
     </dialog>
     <dialog id="home-calendar-dialog" aria-labelledby="home-calendar-title"><div class="dialog-heading"><h2 id="home-calendar-title">Baikal calendar</h2><button id="home-calendar-close" class="icon-button" type="button" aria-label="Close calendar settings">×</button></div><form id="home-calendar-form"><label>Baikal server URL<input name="serverUrl" type="url" required maxlength="2048" placeholder="https://baikal.example.test"></label><label>Username<input name="username" required maxlength="120" autocomplete="username"></label><label>Password (leave blank to retain)<input name="password" type="password" maxlength="2000" autocomplete="current-password"></label><p id="home-calendar-message" role="status"></p><button id="home-calendar-connect" class="button" type="submit">Connect calendar</button><button id="home-calendar-disconnect" class="button secondary" type="button">Disconnect calendar</button></form></dialog>
     <dialog id="device-dialog" aria-labelledby="dialog-title">

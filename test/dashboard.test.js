@@ -30,7 +30,7 @@ test('serves dashboard aliases and assets while preserving home and static conta
     const html = await result.text(); assert.match(html, /src="\/dashboard.js"/); assert.doesNotMatch(html, /src="\/app.js"/);
     if (previous) assert.equal(html, previous); previous = html;
   }
-  for (const name of ['dashboard.js', 'dashboard-helpers.js', 'dashboard-weather.js', 'dashboard-photos.js', 'dashboard-calendar.js', 'dashboard.css', 'app.js', 'home-layout.js', 'home-settings.js', 'home-widgets.js', 'home-information.js', 'home-integrations.js']) {
+  for (const name of ['dashboard.js', 'dashboard-helpers.js', 'dashboard-weather.js', 'dashboard-photos.js', 'dashboard-calendar.js', 'dashboard.css', 'app.js', 'home-layout.js', 'home-settings.js', 'home-widgets.js', 'home-information.js', 'home-integrations.js', 'home-shell.js']) {
     const result = await fetch(`${base}/${name}`); assert.equal(result.status, 200); assert.match(result.headers.get('content-type'), name.endsWith('.css') ? /text\/css/ : /text\/javascript/);
   }
   const iconFiles = ['weather-cloudy.svg', 'weather-fog.svg', 'weather-lightning-rainy.svg', 'weather-lightning.svg', 'weather-night-partly-cloudy.svg', 'weather-night.svg', 'weather-partly-cloudy.svg', 'weather-pouring.svg', 'weather-rainy.svg', 'weather-snowy-rainy.svg', 'weather-snowy.svg', 'weather-sunny.svg'];
@@ -63,7 +63,14 @@ test('serves dashboard aliases and assets while preserving home and static conta
   const dashboardJs = await (await fetch(`${base}/dashboard.js`)).text(); assert.match(dashboardJs, /`\/weather-icons\/\$\{weatherIconFile\(/); assert.match(dashboardJs, /icon\.hidden = true; icon\.removeAttribute\('src'\)/); assert.match(dashboardJs, /icon\.alt = ''; icon\.setAttribute\('aria-hidden', 'true'\)/); assert.match(dashboardJs, /forecastItem\(\{ code: hour\.code, day: hour\.day/); assert.match(dashboardJs, /forecastItem\(\{ code: day\.code, label/); assert.match(dashboardJs, /weatherDescription\(code, day\)/); assert.doesNotMatch(dashboardJs, /innerHTML|weather-icons\.svg/);
   assert.doesNotMatch(dashboardJs, /refresh-calendar|forceRefresh/);
   const calendarJs = await (await fetch(`${base}/dashboard-calendar.js`)).text(); assert.doesNotMatch(calendarJs, /forceRefresh|\?refresh=1/);
-  assert.match(await (await fetch(base)).text(), /href="\/dashboard"/);
+  const homeHtml = await (await fetch(base)).text();
+  assert.doesNotMatch(homeHtml, /href="\/dashboard"|<h1>Home<\/h1>|id="home-save"|id="home-cancel"/);
+  const homeMain = homeHtml.slice(homeHtml.indexOf('<main'), homeHtml.indexOf('</main>'));
+  assert.match(homeMain, /id="home-settings-open"[^>]*>Settings/);
+  assert.match(homeMain, /id="home-status" class="sr-only"/);
+  assert.doesNotMatch(homeMain, /id="home-(?:layout-label|retry|empty|edit|dialog-save|dialog-cancel|fullscreen)"/);
+  const homeSettings = homeHtml.slice(homeHtml.indexOf('<dialog id="home-settings-dialog"'), homeHtml.indexOf('</dialog>'));
+  for (const id of ['home-edit', 'home-fullscreen', 'home-retry', 'home-layout-label', 'home-dialog-save', 'home-dialog-cancel']) assert.ok(homeSettings.includes(`id="${id}"`));
   for (const route of ['/missing', '/dashboard/missing', '/%2e%2e/package.json', '/..%2fpackage.json', '/src/app.js']) assert.equal((await fetch(base + route)).status, 404);
 });
 

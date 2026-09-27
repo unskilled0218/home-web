@@ -145,7 +145,8 @@ test('renders Bookmarks before an accessible Wake-on-LAN section', () => {
   const bookmarksSection = html.slice(bookmarksStart, html.indexOf('</section>', bookmarksStart));
   const wakeSection = html.slice(wakeStart, html.indexOf('</section>', wakeStart));
   assert.ok(bookmarksStart > -1 && homeAssistantStart > bookmarksStart && wakeStart > homeAssistantStart);
-  assert.match(html, /<h1>Home<\/h1>/);
+  assert.doesNotMatch(html, /<h1>Home<\/h1>/);
+  assert.match(html, /<main[^>]*aria-label="Home widget dashboard"/);
   assert.match(html, /id="home-grid"/);
   assert.match(html, /id="home-catalog"/);
   assert.match(bookmarksSection, /aria-labelledby="bookmarks-title"/);

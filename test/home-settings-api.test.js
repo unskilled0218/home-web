@@ -8,6 +8,7 @@ import http from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
 import { createStore } from '../src/db.js';
 import { createDashboardServer } from '../src/app.js';
+import { defaultHomeSettings } from '../public/home-layout.js';
 
 test('shares both layouts across clients, atomically rejects stale saves, and persists on restart', async (t) => {
   const directory = mkdtempSync(path.join(tmpdir(), 'home-settings-')); const filename = path.join(directory, 'home.db');
@@ -40,4 +41,17 @@ test('creates settings on an existing database without replacing devices, and re
   db = new DatabaseSync(filename); db.prepare('UPDATE home_settings SET configuration = ?').run('{broken'); db.close();
   store = createStore(filename); assert.throws(() => store.getHomeSettings()); store.close();
   db = new DatabaseSync(filename); assert.equal(db.prepare('SELECT configuration FROM home_settings').get().configuration, '{broken'); db.close(); rmSync(directory, { recursive: true, force: true });
+});
+
+test('legacy geometry is fitted on GET without writing storage and persists only on revision-checked save', async (t) => {
+  const directory = mkdtempSync(path.join(tmpdir(), 'home-fit-')); const filename = path.join(directory, 'home.db'); const store = createStore(filename);
+  const legacy = defaultHomeSettings(); legacy.revision = 7; legacy.layouts.desktop = legacy.layouts.desktop.map((item, i) => ({ ...item, y: i * 10, h: 24 }));
+  const db = new DatabaseSync(filename); db.prepare('INSERT INTO home_settings (id, configuration, revision) VALUES (1, ?, 7)').run(JSON.stringify(legacy));
+  const server = createDashboardServer({ store, runtimeConfig: { allowedHosts: ['127.0.0.1'] } }); server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  t.after(async () => { await new Promise((resolve) => server.close(resolve)); db.close(); store.close(); rmSync(directory, { recursive: true, force: true }); });
+  const url = `http://127.0.0.1:${server.address().port}/api/home/settings`; const fitted = await (await fetch(url)).json();
+  assert.equal(fitted.revision, 7); assert.ok(fitted.layouts.desktop.every((item) => item.y + item.h <= 12)); assert.deepEqual(fitted.layouts.mobile, legacy.layouts.mobile); assert.deepEqual(fitted.preferences, legacy.preferences);
+  assert.equal(db.prepare('SELECT configuration FROM home_settings').get().configuration, JSON.stringify(legacy));
+  const options = { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(fitted) };
+  const saved = await (await fetch(url, options)).json(); assert.equal(saved.revision, 8); assert.deepEqual(saved.layouts, fitted.layouts); assert.equal((await fetch(url, options)).status, 409);
 });

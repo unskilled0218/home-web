@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createWidgetEditor, createWidgetOwners, gestureLayout } from '../public/home-widgets.js';
+import { createWidgetEditor, createWidgetOwners, gestureLayout, gridMetrics } from '../public/home-widgets.js';
 import { defaultHomeSettings, changeWidget } from '../public/home-layout.js';
 import { createHomeIntegrations, selectedHomeDevices } from '../public/home-integrations.js';
 
@@ -11,7 +11,8 @@ class Element {
   append(...nodes) { for (const node of nodes) this.insertBefore(node, null); }
   replaceChildren(...nodes) { this.children = []; this.append(...nodes); }
   prepend(node) { this.insertBefore(node, this.children[0]); }
-  insertBefore(node, reference) { if (node.parent) node.parent.children.splice(node.parent.children.indexOf(node), 1); const index = reference ? this.children.indexOf(reference) : this.children.length; this.children.splice(index, 0, node); node.parent = this; }
+  loseCapture() { if (this.capture !== undefined && this.capture !== null) this.releasePointerCapture(); for (const child of this.children) child.loseCapture(); }
+  insertBefore(node, reference) { if (node.parent) { node.loseCapture(); node.parent.children.splice(node.parent.children.indexOf(node), 1); } const index = reference ? this.children.indexOf(reference) : this.children.length; this.children.splice(index, 0, node); node.parent = this; }
   querySelector() { return this.children.find((item) => item.className === 'widget-content'); }
   setAttribute() {}
   addEventListener(type, fn) { (this.listeners[type] ??= []).push(fn); }
@@ -23,13 +24,13 @@ class Element {
   closest() { return this.hidden ? this : this.parent?.closest(); }
   focus() { this.document.activeElement = this; }
 }
-function fixture() {
+function fixture(initial = [{ id: 'time', type: 'time', x: 0, y: 0, w: 4, h: 3 }], step = { x: 100, y: 80 }) {
   const document = { createElement: () => new Element(document), activeElement: null };
-  const grid = new Element(document); const root = new Element(document); grid.append(root);
-  let items = [{ id: 'time', type: 'time', x: 0, y: 0, w: 4, h: 3 }]; let changes = 0; let removed = 0;
-  const editor = createWidgetEditor({ document, grid, roots: { time: root }, onChange: (next) => { items = next; changes++; editor.render(items, 'desktop', true); }, onRemove: () => removed++, announce() {} });
+  const grid = new Element(document); const roots = Object.fromEntries(initial.map((item) => [item.id, new Element(document)])); grid.append(...Object.values(roots)); const root = roots.time;
+  let items = initial; let changes = 0; let removed = 0; const announcements = [];
+  const editor = createWidgetEditor({ document, grid, roots, measure: () => step, onChange: (next) => { items = next; changes++; editor.render(items, 'desktop', true); }, onRemove: () => removed++, announce: (message) => announcements.push(message) });
   editor.render(items, 'desktop', true);
-  return { editor, root, grid, get items() { return items; }, get changes() { return changes; }, get removed() { return removed; }, move: root.children[0].children[1], resize: root.children.at(-1) };
+  return { editor, root, grid, roots, announcements, get items() { return items; }, get changes() { return changes; }, get removed() { return removed; }, move: root.children[0].children[1], resize: root.children.at(-1) };
 }
 
 test('pointer movement previews and commits on release; cancel/breakpoint changes restore geometry', () => {
@@ -54,9 +55,33 @@ test('data owners survive geometry edits, reconcile removal, and resume exactly 
   const information = { configure: (ids) => calls.push(['information', ids]), setVisible: (visible) => calls.push(['visible', visible]) };
   const owners = createWidgetOwners({ integrations, information }); const settings = defaultHomeSettings();
   owners.configure(settings.layouts.desktop, settings); assert.equal(calls.length, 2);
-  owners.configure(changeWidget(settings.layouts.desktop, 'time', { h: 10 }, 'desktop'), settings); assert.equal(calls.length, 2);
+  owners.configure(changeWidget(settings.layouts.desktop, 'time', { w: 2 }, 'desktop'), settings); assert.equal(calls.length, 2);
   const removed = settings.layouts.desktop.filter((item) => item.id !== 'calendar'); owners.configure(removed, settings); assert.equal(calls.length, 4); assert.ok(!calls[3][1].includes('calendar'));
   owners.suspend(); owners.configure(removed, settings); assert.equal(calls.length, 6); owners.resume(true); assert.equal(calls.length, 9); owners.configure(removed, settings); assert.equal(calls.length, 9);
+});
+
+test('upward previews keep capture and DOM order until release with a neighbor on the target row', () => {
+  const initial = [{ id: 'weather', type: 'weather', x: 4, y: 0, w: 4, h: 3 }, { id: 'time', type: 'time', x: 0, y: 6, w: 4, h: 3 }];
+  const f = fixture(initial, { x: 100, y: 35 }); const before = [...f.grid.children];
+  f.move.dispatch('pointerdown'); f.move.dispatch('pointermove', { clientY: -210 });
+  assert.equal(f.move.capture, 1); assert.deepEqual(f.grid.children, before); assert.equal(f.root.style.gridRow, '1 / span 3');
+  f.move.dispatch('pointerup', { clientY: -210 }); assert.equal(f.items[0].id, 'time'); assert.equal(f.grid.children[0], f.root); assert.equal(f.move.capture, null); assert.equal(f.changes, 1);
+  const keyboard = fixture(initial); for (let index = 0; index < 6; index++) keyboard.move.dispatch('keydown', { key: 'ArrowUp' }); assert.deepEqual(keyboard.items, f.items);
+});
+
+test('lost capture or container/fullscreen cancellation restores displaced widgets without committing', () => {
+  const initial = [{ id: 'weather', type: 'weather', x: 0, y: 0, w: 4, h: 3 }, { id: 'time', type: 'time', x: 0, y: 6, w: 4, h: 3 }];
+  const f = fixture(initial); f.move.dispatch('pointerdown'); f.move.dispatch('pointermove', { clientY: -480 }); f.move.releasePointerCapture();
+  assert.equal(f.changes, 0); assert.deepEqual(f.items, initial); assert.equal(f.root.style.gridRow, '7 / span 3');
+  f.move.dispatch('pointerdown'); f.move.dispatch('pointermove', { clientY: -480 }); f.editor.cancelGesture(); assert.equal(f.changes, 0); assert.equal(f.move.capture, null);
+});
+
+test('desktop full-grid resize is rejected and geometry metrics use measured rows and gaps', () => {
+  const f = fixture(defaultHomeSettings().layouts.desktop); const before = structuredClone(f.items);
+  f.resize.dispatch('pointerdown'); f.resize.dispatch('pointerup', { clientY: 80 }); assert.equal(f.changes, 0); assert.deepEqual(f.items, before); assert.match(f.announcements.at(-1), /Not enough desktop space/);
+  f.resize.dispatch('keydown', { key: 'ArrowDown' }); assert.equal(f.changes, 0);
+  assert.deepEqual(gridMetrics({ getBoundingClientRect: () => ({ width: 1184 }) }, 'desktop', () => ({ columnGap: '16px', rowGap: '8px', gridTemplateRows: '27px 27px' })), { x: 100, y: 35 });
+  assert.deepEqual(gridMetrics({ getBoundingClientRect: () => ({ width: 384 }) }, 'mobile', () => ({ columnGap: '16px', rowGap: '16px', gridTemplateRows: '64px 64px' })), { x: 100, y: 80 });
 });
 
 test('selected devices and readings use identities, preserve missing selections, and keep current controls', () => {

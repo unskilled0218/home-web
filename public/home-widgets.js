@@ -1,4 +1,4 @@
-import { WIDGETS, columns, changeWidget } from './home-layout.js';
+import { WIDGETS, columns, changeWidget, NO_SPACE } from './home-layout.js';
 
 // Geometry edits must not restart data owners or their refresh timers.
 export function createWidgetOwners({ integrations, information }) {
@@ -25,7 +25,14 @@ export function gestureLayout(items, id, kind, dx, dy, mode) {
   return changeWidget(items, id, kind === 'resize' ? { w: item.w + dx, h: item.h + dy } : { x: item.x + dx, y: item.y + dy }, mode);
 }
 
-export function createWidgetEditor({ grid, roots, onChange, onRemove, announce, document = globalThis.document }) {
+export function gridMetrics(grid, mode, getStyle = globalThis.getComputedStyle) {
+  const style = getStyle(grid); const rect = grid.getBoundingClientRect();
+  const columnGap = parseFloat(style.columnGap) || 0; const rowGap = parseFloat(style.rowGap) || 0;
+  const rowHeight = parseFloat(style.gridTemplateRows) || parseFloat(style.gridAutoRows);
+  return { x: (rect.width + columnGap) / columns(mode), y: rowHeight + rowGap };
+}
+
+export function createWidgetEditor({ grid, roots, onChange, onRemove, announce, document = globalThis.document, measure = gridMetrics }) {
   let items = []; let mode = 'desktop'; let editing = false; let gesture = null;
   const handles = new Map();
   for (const [id, root] of Object.entries(roots)) {
@@ -48,7 +55,9 @@ export function createWidgetEditor({ grid, roots, onChange, onRemove, announce, 
         button.addEventListener('keydown', (event) => {
           const delta = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[event.key];
           if (!editing || !delta) return; event.preventDefault();
-          onChange(gestureLayout(items, id, kind, ...delta, mode)); announce(`${WIDGETS[id].label} ${kind === 'resize' ? 'resized' : 'moved'}.`);
+          const next = gestureLayout(items, id, kind, ...delta, mode);
+          if (!next) { announce(NO_SPACE); return; }
+          onChange(next); announce(`${WIDGETS[id].label} ${kind === 'resize' ? 'resized' : 'moved'}.`);
         });
       }
       controls.push(button);
@@ -61,23 +70,25 @@ export function createWidgetEditor({ grid, roots, onChange, onRemove, announce, 
     for (const [id, root] of Object.entries(roots)) root.hidden = !next.some((item) => item.id === id);
     next.forEach((item, index) => {
       const root = roots[item.id]; root.style.gridColumn = `${item.x + 1} / span ${item.w}`; root.style.gridRow = `${item.y + 1} / span ${item.h}`;
-      if (grid.children[index] !== root) grid.insertBefore(root, grid.children[index] ?? null);
+      if (!gesture && grid.children[index] !== root) grid.insertBefore(root, grid.children[index] ?? null);
     });
     if (focused && document.activeElement !== focused && !focused.closest('[hidden]')) focused.focus({ preventScroll: true });
   }
   function start(event) {
     if (!editing || event.button !== 0 || gesture) return;
     event.preventDefault(); const button = event.currentTarget;
-    gesture = { button, pointerId: event.pointerId, id: button.dataset.widget, kind: button.dataset.kind, x: event.clientX, y: event.clientY, before: structuredClone(items), next: items, step: (grid.getBoundingClientRect().width + 16) / columns(mode) };
+    const step = measure(grid, mode);
+    if (!(step.x > 0) || !(step.y > 0)) return;
+    gesture = { button, pointerId: event.pointerId, id: button.dataset.widget, kind: button.dataset.kind, x: event.clientX, y: event.clientY, before: structuredClone(items), next: items, step };
     button.setPointerCapture(event.pointerId);
   }
   function move(event) {
     if (!gesture || event.pointerId !== gesture.pointerId) return;
-    gesture.next = gestureLayout(gesture.before, gesture.id, gesture.kind, Math.round((event.clientX - gesture.x) / gesture.step), Math.round((event.clientY - gesture.y) / 80), mode);
-    paint(gesture.next);
+    gesture.next = gestureLayout(gesture.before, gesture.id, gesture.kind, Math.round((event.clientX - gesture.x) / gesture.step.x), Math.round((event.clientY - gesture.y) / gesture.step.y), mode);
+    paint(gesture.next ?? gesture.before);
   }
   function release() { const previous = gesture; gesture = null; if (previous?.button.hasPointerCapture(previous.pointerId)) previous.button.releasePointerCapture(previous.pointerId); return previous; }
-  function finish(event) { if (!gesture || event.pointerId !== gesture.pointerId) return; move(event); const previous = release(); onChange(previous.next); announce(`${WIDGETS[previous.id].label} position and size updated.`); }
+  function finish(event) { if (!gesture || event.pointerId !== gesture.pointerId) return; move(event); const previous = release(); if (!previous.next) { paint(previous.before); announce(NO_SPACE); return; } onChange(previous.next); announce(`${WIDGETS[previous.id].label} position and size updated.`); }
   function cancel() { if (!gesture) return; const previous = release(); paint(previous.before); }
   return {
     render(next, nextMode, isEditing) {
