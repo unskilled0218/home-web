@@ -23,16 +23,11 @@ body { display: flex; flex-direction: column; }
 #time { font-size: clamp(2rem, 9vw, 5em); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 #weather { font-size: calc(1em * var(--weather-scale, 1)); padding: 0; background: transparent; border-radius: 0; margin-top: .9rem; }
 #calendar { font-size: calc(1em * var(--calendar-scale, 1)); margin-top: .9rem; background: transparent; }
-.calendar-heading { display: flex; align-items: center; gap: .75em; }
-.calendar-heading h2 { margin-right: auto; }
-.calendar-heading button { padding: .35em .65em; font-size: .8em; }
 #calendar-events { display: grid; gap: .45em; list-style: none; margin: .5em 0; padding: 0; }
 .calendar-event { display: grid; grid-template-columns: minmax(6.5em, auto) minmax(0, 1fr); column-gap: .75em; align-items: baseline; background: transparent; overflow-wrap: anywhere; }
 .calendar-event-date { grid-row: span 2; font-weight: 700; }
 .calendar-event-time, .calendar-event-location { font-size: .85em; }
 .calendar-event.current .calendar-event-time { font-weight: 700; }
-.right .calendar-heading { justify-content: flex-end; }
-.right .calendar-heading h2 { margin-left: auto; margin-right: 0; }
 .right .calendar-event { grid-template-columns: minmax(0, 1fr) minmax(6.5em, auto); }
 .right .calendar-event-date { grid-column: 2; }
 .right .calendar-event-title, .right .calendar-event-time, .right .calendar-event-location { grid-column: 1; }

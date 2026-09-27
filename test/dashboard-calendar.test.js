@@ -38,6 +38,13 @@ test('loads status and events, deduplicates refresh, and owns a five-minute time
   assert.equal(latest.events[0].title, 'Planning');
   assert.equal(timers.tasks.size, 1);
   assert.equal([...timers.tasks.values()][0].delay, 300000);
+  calls.length = 0;
+  const [timerId, automatic] = [...timers.tasks.entries()][0];
+  timers.tasks.delete(timerId);
+  automatic.fn();
+  await tick();
+  assert.deepEqual(calls.map(({ url }) => url), ['/api/calendar/events']);
+  assert.equal(timers.tasks.size, 1);
 
   let resolve;
   calls.length = 0;
@@ -55,7 +62,7 @@ test('loads status and events, deduplicates refresh, and owns a five-minute time
   pendingController.dispose();
 });
 
-test('pauses while hidden or disabled and force refreshes with cache bypass', async () => {
+test('pauses while hidden or disabled and refreshes immediately on resume', async () => {
   const timers = scheduler();
   const urls = [];
   const controller = createCalendarController({ ...timers, onChange() {}, fetchImpl: async (url) => {
@@ -72,8 +79,8 @@ test('pauses while hidden or disabled and force refreshes with cache bypass', as
   assert.equal(timers.tasks.size, 0);
   controller.configure({ calendarVisible: true });
   await tick();
-  await controller.forceRefresh();
-  assert.equal(urls.at(-1), '/api/calendar/events?refresh=1');
+  await controller.refresh();
+  assert.equal(urls.at(-1), '/api/calendar/events');
   assert.equal(timers.tasks.size, 1);
   controller.dispose();
 });
@@ -96,10 +103,11 @@ test('connects atomically, disconnects, and retains a stale snapshot after refre
   assert.deepEqual(JSON.parse(put.options.body), { serverUrl: 'https://calendar.test/', username: 'sam', password: 'secret' });
   assert.equal(latest.events.length, 1);
   failEvents = true;
-  await controller.forceRefresh();
+  await controller.refresh();
   assert.equal(latest.stale, true);
   assert.equal(latest.events.length, 1);
   assert.match(latest.error, /Temporarily unavailable/);
+  assert.equal(timers.tasks.size, 1);
   await controller.disconnect();
   assert.equal(latest.configured, false);
   assert.deepEqual(latest.events, []);
@@ -141,7 +149,7 @@ test('aborts obsolete work and ignores late results after reconnect and disposal
   await tick();
   assert.equal(states.at(-1).username, 'new');
 
-  const refresh = controller.forceRefresh();
+  const refresh = controller.refresh();
   const active = pending.at(-1);
   controller.dispose();
   assert.equal(active.options.signal.aborted, true);
@@ -174,7 +182,7 @@ test('clears private browser snapshots when CalDAV requires re-authentication', 
   await tick();
   assert.equal(latest.events.length, 1);
   unauthorized = true;
-  await controller.forceRefresh();
+  await controller.refresh();
   assert.equal(latest.needsReauthentication, true);
   assert.deepEqual(latest.events, []);
   assert.equal(latest.stale, false);
@@ -199,7 +207,7 @@ test('stops retries and clears snapshots when Baikal denies calendar access', as
   await tick();
   assert.equal(latest.events.length, 1);
   denied = true;
-  await controller.forceRefresh();
+  await controller.refresh();
   assert.equal(latest.accessDenied, true);
   assert.equal(latest.needsReauthentication, false);
   assert.deepEqual(latest.events, []);

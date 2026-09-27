@@ -222,17 +222,16 @@ export function createCalendarController({
     return pending;
   }
 
-  function refresh(force = false) {
+  function refresh() {
     if (disposed || !active()) return;
     if (!statusLoaded) return start();
     if (!state.configured || state.needsReauthentication || state.accessDenied) return;
-    if (pending && pendingKind === 'events' && !force) return pending;
+    if (pending && pendingKind === 'events') return pending;
     const { request, signal } = begin('events');
     emit({ loading: true, error: '' });
     pending = (async () => {
       try {
-        const suffix = force ? '?refresh=1' : '';
-        applyEvents(await getJson(`/api/calendar/events${suffix}`, signal));
+        applyEvents(await getJson('/api/calendar/events', signal));
       } catch (error) {
         if (!current(request) || signal.aborted) return;
         applyRequestFailure(error);
@@ -321,7 +320,6 @@ export function createCalendarController({
       else if (!wasActive) void (statusLoaded ? refresh() : start());
     },
     refresh,
-    forceRefresh() { return refresh(true); },
     connect,
     disconnect,
     dispose() { if (disposed) return; disposed = true; invalidate(); },

@@ -75,7 +75,6 @@ function renderCalendar(state = calendarState) {
   calendarState = state;
   const list = $('calendar-events');
   list.replaceChildren();
-  $('refresh-calendar').disabled = !state.configured || state.loading;
   let status = '';
   if (state.needsReauthentication) status = 'Calendar needs re-authentication. Open Settings and enter the Baikal password.';
   else if (!state.configured) status = state.encryptionReady === false ? 'Calendar credential encryption is not configured on this server.' : 'Connect a Baikal calendar in Settings.';
@@ -175,7 +174,6 @@ $('location-search').addEventListener('submit', async (event) => {
 });
 $('clear-location').addEventListener('click', () => { cancelSearch(); settings = normalizeSettings({ ...settings, location: null }); save(); apply(); $('location-results').replaceChildren(); $('search-status').textContent = 'Location cleared.'; });
 
-$('refresh-calendar').addEventListener('click', () => { void calendar.forceRefresh(); });
 $('calendar-connection').addEventListener('submit', async (event) => {
   event.preventDefault();
   setCalendarMutationPending(true); $('calendar-settings-status').textContent = 'Connecting to Baikal…';

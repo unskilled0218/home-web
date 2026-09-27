@@ -44,12 +44,13 @@ test('serves dashboard aliases and assets while preserving home and static conta
   assert.match(dashboardHtml, /NFS backgrounds/); assert.doesNotMatch(dashboardHtml, /id="photo-files"|Choose photos|Reselect/);
   assert.match(dashboardHtml, /id="hourly" aria-label="Hourly forecast"/); assert.match(dashboardHtml, /id="daily" aria-label="Daily forecast"/);
   assert.match(dashboardHtml, /id="calendar-events"/); assert.match(dashboardHtml, /id="calendar-password"[^>]*type="password"[^>]*autocomplete="current-password"/);
+  assert.doesNotMatch(dashboardHtml, /refresh-calendar|>Refresh<|calendar-heading/);
   assert.match(dashboardHtml, /Baikal server URL/); assert.match(dashboardHtml, /name="serverUrl"[^>]*placeholder="https:\/\/baikal\.example\.test"/); assert.doesNotMatch(dashboardHtml, /dav\.php\/calendars/);
   const dashboardCss = await (await fetch(`${base}/dashboard.css`)).text(); assert.match(dashboardCss, /#weather \{[^}]*background: transparent;[^}]*border-radius: 0;/); assert.doesNotMatch(dashboardCss, /#weather \{[^}]*#08101bcc/);
   assert.match(dashboardCss, /#information \{[^}]*width: calc\(100% - 2rem\);[^}]*max-width: none;/); assert.doesNotMatch(dashboardCss, /max-width: min\(55rem/);
   assert.match(dashboardCss, /:fullscreen \.page-tools \{ display: none; \}/);
   assert.match(dashboardCss, /#hourly li, #daily li \{[^}]*background: transparent;/);
-  assert.match(dashboardCss, /#hourly, #daily \{[^}]*flex-wrap: wrap;[^}]*max-width: 100%;/); assert.doesNotMatch(dashboardCss, /#hourly, #daily \{[^}]*overflow-[xy]:\s*auto/);
+  assert.match(dashboardCss, /#hourly, #daily \{[^}]*flex-wrap: wrap;[^}]*max-width: 70%;/); assert.doesNotMatch(dashboardCss, /#hourly, #daily \{[^}]*overflow-[xy]:\s*auto/);
   assert.match(dashboardCss, /#hourly li, #daily li \{[^}]*flex: 1 1 6\.25em;[^}]*min-width: min\(6\.25em, 100%\);/); assert.doesNotMatch(dashboardCss, /flex: 0 0 8em/);
   assert.match(dashboardCss, /#hourly li:only-child, #daily li:only-child \{[^}]*flex-basis: 100%;/);
   assert.match(dashboardCss, /\.forecast-item \{[^}]*flex-direction: column;/);
@@ -58,7 +59,10 @@ test('serves dashboard aliases and assets while preserving home and static conta
   assert.match(dashboardCss, /\.weather-icon \{[^}]*filter: brightness\(0\) invert\(1\) drop-shadow/);
   assert.match(dashboardCss, /\.forecast-icon \{[^}]*width: clamp[^}]*filter: brightness\(0\) invert\(1\) drop-shadow/);
   assert.match(dashboardCss, /#calendar \{[^}]*background: transparent;/); assert.match(dashboardCss, /\.calendar-event \{[^}]*background: transparent;/);
+  assert.doesNotMatch(dashboardCss, /calendar-heading/);
   const dashboardJs = await (await fetch(`${base}/dashboard.js`)).text(); assert.match(dashboardJs, /`\/weather-icons\/\$\{weatherIconFile\(/); assert.match(dashboardJs, /icon\.hidden = true; icon\.removeAttribute\('src'\)/); assert.match(dashboardJs, /icon\.alt = ''; icon\.setAttribute\('aria-hidden', 'true'\)/); assert.match(dashboardJs, /forecastItem\(\{ code: hour\.code, day: hour\.day/); assert.match(dashboardJs, /forecastItem\(\{ code: day\.code, label/); assert.match(dashboardJs, /weatherDescription\(code, day\)/); assert.doesNotMatch(dashboardJs, /innerHTML|weather-icons\.svg/);
+  assert.doesNotMatch(dashboardJs, /refresh-calendar|forceRefresh/);
+  const calendarJs = await (await fetch(`${base}/dashboard-calendar.js`)).text(); assert.doesNotMatch(calendarJs, /forceRefresh|\?refresh=1/);
   assert.match(await (await fetch(base)).text(), /href="\/dashboard"/);
   for (const route of ['/missing', '/dashboard/missing', '/%2e%2e/package.json', '/..%2fpackage.json', '/src/app.js']) assert.equal((await fetch(base + route)).status, 404);
 });
@@ -123,8 +127,8 @@ test('provides deterministic photo ordering without mutating input', () => {
 
 test('samples future hours with gaps, exhausted forecasts, and daily offset dates', () => {
   const rows = [0, 3600, 7200, 14400, 25200, 90000].map((time, index) => ({ time, day: index % 2 }));
-  assert.deepEqual(sampleHours(rows, 1000).map((row) => [row.time, row.day]), [[3600, 1], [14400, 1], [25200, 0]]);
-  assert.equal(sampleHours(Array.from({ length: 30 }, (_, index) => ({ time: 3600 + index * 10800, day: index % 2 })), 1000).length, 8);
+  assert.deepEqual(sampleHours(rows, 1000).map((row) => [row.time, row.day]), [[14400, 1], [25200, 0]]);
+  assert.equal(sampleHours(Array.from({ length: 30 }, (_, index) => ({ time: 3600 + index * 10800, day: index % 2 })), 1000).length, 7);
   assert.deepEqual(sampleHours(rows, 100000000), []);
   const normalized = normalizeForecast(forecast()); assert.equal(normalized.daily[0].date, '2024-10-01'); assert.deepEqual(normalized.hourly[0], { time: 1727740800, temperature: 12, code: 0, day: 0 });
   const hourly = { time: [1727740800, 1727744400, 1727748000, 1727751600], temperature_2m: [12, 13, 14, 15], weather_code: [0, 1], is_day: [1, 0, '1', 2] };
