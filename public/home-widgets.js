@@ -44,7 +44,7 @@ export function createWidgetEditor({ grid, roots, onChange, onRemove, announce, 
       const button = document.createElement('button'); button.type = 'button'; button.className = `widget-${kind}`; button.dataset.widget = id; button.dataset.kind = kind;
       button.textContent = kind === 'move' ? 'Move' : kind === 'remove' ? 'Remove' : '●';
       button.setAttribute('aria-label', `${kind === 'resize' ? 'Resize' : kind === 'move' ? 'Move' : 'Remove'} ${WIDGETS[id].label}${kind !== 'remove' ? '; use arrow keys' : ''}`);
-      if (kind === 'remove') button.addEventListener('click', () => onRemove(id));
+      if (kind === 'remove') button.addEventListener('click', () => onRemove(id, mode));
       else {
         button.addEventListener('pointerdown', start);
         button.addEventListener('pointermove', move);
@@ -56,7 +56,7 @@ export function createWidgetEditor({ grid, roots, onChange, onRemove, announce, 
           if (!editing || !delta) return; event.preventDefault();
           const next = gestureLayout(items, id, kind, ...delta, mode);
           if (!next) { announce(NO_SPACE); return; }
-          onChange(next); announce(`${WIDGETS[id].label} ${kind === 'resize' ? 'resized' : 'moved'}.`);
+          onChange(next, mode); announce(`${WIDGETS[id].label} ${kind === 'resize' ? 'resized' : 'moved'}.`);
         });
       }
       controls.push(button);
@@ -87,7 +87,7 @@ export function createWidgetEditor({ grid, roots, onChange, onRemove, announce, 
     paint(gesture.next ?? gesture.before);
   }
   function release() { const previous = gesture; gesture = null; if (previous?.button.hasPointerCapture(previous.pointerId)) previous.button.releasePointerCapture(previous.pointerId); return previous; }
-  function finish(event) { if (!gesture || event.pointerId !== gesture.pointerId) return; move(event); const previous = release(); if (!previous.next) { paint(previous.before); announce(NO_SPACE); return; } onChange(previous.next); announce(`${WIDGETS[previous.id].label} position and size updated.`); }
+  function finish(event) { if (!gesture || event.pointerId !== gesture.pointerId) return; move(event); const previous = release(); if (!previous.next) { paint(previous.before); announce(NO_SPACE); return; } onChange(previous.next, mode); announce(`${WIDGETS[previous.id].label} position and size updated.`); }
   function cancel() { if (!gesture) return; const previous = release(); paint(previous.before); }
   return {
     render(next, nextMode, isEditing) {

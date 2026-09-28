@@ -6,7 +6,7 @@ import { createHomeIntegrations, selectedHomeDevices } from '../public/home-inte
 
 // Minimal event/geometry surface: tests drive the real editor handlers, not a copy of its algorithm.
 class Element {
-  constructor(document, tagName = '') { this.document = document; this.tagName = tagName.toUpperCase(); this.children = []; this.dataset = {}; this.listeners = {}; this.attributes = {}; this.style = { setProperty() {} }; this.classList = { add() {}, toggle() {} }; this.hidden = false; this.value = ''; }
+  constructor(document, tagName = '') { this.document = document; this.tagName = tagName.toUpperCase(); this.children = []; this.dataset = {}; this.listeners = {}; this.attributes = {}; this.style = { setProperty(name, value) { this[name] = value; } }; this.classList = { add() {}, toggle() {} }; this.hidden = false; this.value = ''; }
   get childNodes() { return this.children; }
   append(...nodes) { for (const node of nodes) this.insertBefore(node, null); }
   replaceChildren(...nodes) { this.children = []; this.append(...nodes); }
@@ -27,11 +27,11 @@ class Element {
 function fixture(initial = [{ id: 'time', type: 'time', x: 0, y: 0, w: 4, h: 3 }], step = { x: 100, y: 80 }) {
   const document = { createElement: (tagName) => new Element(document, tagName), activeElement: null };
   const grid = new Element(document); const roots = Object.fromEntries(initial.map((item) => [item.id, new Element(document)])); grid.append(...Object.values(roots)); const root = roots.time;
-  let items = initial; let changes = 0; let removed = 0; const announcements = [];
-  const editor = createWidgetEditor({ document, grid, roots, measure: () => step, onChange: (next) => { items = next; changes++; editor.render(items, 'desktop', true); }, onRemove: () => removed++, announce: (message) => announcements.push(message) });
+  let items = initial; let changes = 0; let removed = 0; const announcements = []; const changedModes = []; const removedModes = [];
+  const editor = createWidgetEditor({ document, grid, roots, measure: () => step, onChange: (next, nextMode) => { items = next; changes++; changedModes.push(nextMode); editor.render(items, nextMode, true); }, onRemove: (_id, nextMode) => { removed++; removedModes.push(nextMode); }, announce: (message) => announcements.push(message) });
   editor.render(items, 'desktop', true);
   const controls = root.children.flatMap((child) => child.children).concat(root.children).filter((child) => child.dataset.kind);
-  return { editor, root, grid, roots, announcements, heading: root.children[0], get items() { return items; }, get changes() { return changes; }, get removed() { return removed; }, move: controls.find((control) => control.dataset.kind === 'move'), remove: controls.find((control) => control.dataset.kind === 'remove'), resize: controls.find((control) => control.dataset.kind === 'resize') };
+  return { editor, root, grid, roots, announcements, changedModes, removedModes, heading: root.children[0], get items() { return items; }, get changes() { return changes; }, get removed() { return removed; }, move: controls.find((control) => control.dataset.kind === 'move'), remove: controls.find((control) => control.dataset.kind === 'remove'), resize: controls.find((control) => control.dataset.kind === 'resize') };
 }
 
 test('editor chrome has no visible title and keeps labeled controls only while editing', () => {
@@ -40,6 +40,12 @@ test('editor chrome has no visible title and keeps labeled controls only while e
   assert.equal(f.move.attributes['aria-label'], 'Move Time; use arrow keys'); assert.equal(f.remove.attributes['aria-label'], 'Remove Time'); assert.equal(f.resize.attributes['aria-label'], 'Resize Time; use arrow keys');
   assert.equal(f.heading.hidden, false); f.editor.render(f.items, 'desktop', false); assert.equal(f.heading.hidden, true);
   assert.equal(f.move.hidden, true); assert.equal(f.remove.hidden, true); assert.equal(f.resize.hidden, true);
+});
+
+test('editor reports the rendered mode for layout mutations and cancels desktop previews before mobile edits', () => {
+  const f = fixture(); f.move.dispatch('pointerdown'); f.move.dispatch('pointermove', { clientX: 200 });
+  f.editor.render([{ ...f.items[0], x: 0, w: 4 }], 'mobile', true); assert.equal(f.move.capture, null); assert.equal(f.changes, 0); assert.equal(f.grid.style['--columns'], 4);
+  f.move.dispatch('keydown', { key: 'ArrowDown' }); assert.deepEqual(f.changedModes, ['mobile']); f.remove.dispatch('click'); assert.deepEqual(f.removedModes, ['mobile']);
 });
 
 test('pointer movement previews and commits on release; cancel/breakpoint changes restore geometry', () => {

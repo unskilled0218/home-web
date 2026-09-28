@@ -30,7 +30,7 @@ test('serves dashboard aliases and assets while preserving home and static conta
     const html = await result.text(); assert.match(html, /src="\/dashboard.js"/); assert.doesNotMatch(html, /src="\/app.js"/);
     if (previous) assert.equal(html, previous); previous = html;
   }
-  for (const name of ['dashboard.js', 'dashboard-helpers.js', 'dashboard-weather.js', 'dashboard-photos.js', 'dashboard-calendar.js', 'dashboard.css', 'app.js', 'home-layout.js', 'home-settings.js', 'home-widgets.js', 'home-information.js', 'home-integrations.js', 'home-shell.js']) {
+  for (const name of ['dashboard.js', 'dashboard-helpers.js', 'dashboard-weather.js', 'dashboard-photos.js', 'dashboard-calendar.js', 'dashboard.css', 'app.js', 'home-layout.js', 'home-settings.js', 'home-widgets.js', 'home-information.js', 'home-integrations.js', 'home-shell.js', 'home-responsive.js']) {
     const result = await fetch(`${base}/${name}`); assert.equal(result.status, 200); assert.match(result.headers.get('content-type'), name.endsWith('.css') ? /text\/css/ : /text\/javascript/);
   }
   const iconFiles = ['weather-cloudy.svg', 'weather-fog.svg', 'weather-lightning-rainy.svg', 'weather-lightning.svg', 'weather-night-partly-cloudy.svg', 'weather-night.svg', 'weather-partly-cloudy.svg', 'weather-pouring.svg', 'weather-rainy.svg', 'weather-snowy-rainy.svg', 'weather-snowy.svg', 'weather-sunny.svg'];
@@ -73,8 +73,13 @@ test('serves dashboard aliases and assets while preserving home and static conta
   const homeSettings = homeHtml.slice(homeHtml.indexOf('<dialog id="home-settings-dialog"'), homeHtml.indexOf('</dialog>'));
   for (const id of ['home-edit', 'home-fullscreen', 'home-retry', 'home-layout-label', 'home-dialog-save', 'home-dialog-cancel']) assert.ok(homeSettings.includes(`id="${id}"`));
   const homeCss = await (await fetch(`${base}/styles.css`)).text(); assert.match(homeCss, /\.home-grid \.home-widget \{[^}]*border: 0;/); assert.doesNotMatch(homeCss, /\.widget-heading h2|\.home-forecast/);
+  assert.match(homeCss, /\.home-grid \{[^}]*--columns: 4;[^}]*grid-template-columns: repeat\(4,/); assert.match(homeCss, /\.home-grid\[data-layout-mode="mobile"\] \{[^}]*grid-template-columns: repeat\(4,/);
+  assert.match(homeCss, /@media \(min-width: 768px\) \{[\s\S]*\.home-page\[data-layout-mode="desktop"\] \.home-grid\[data-layout-mode="desktop"\] \{[^}]*--columns: 12;[^}]*grid-template-columns: repeat\(12,[^}]*grid-template-rows: repeat\(12,/);
+  assert.match(homeCss, /\.home-page\[data-layout-mode="desktop"\] \{[^}]*overflow: hidden;/);
   const homeWidgetsJs = await (await fetch(`${base}/home-widgets.js`)).text(); assert.doesNotMatch(homeWidgetsJs, /createElement\('h2'\)/);
   const homeInformationJs = await (await fetch(`${base}/home-information.js`)).text(); assert.doesNotMatch(homeInformationJs, /home-hourly|home-daily|sampleHours|temperatureRange/);
+  const homeAppJs = await (await fetch(`${base}/app.js`)).text(); assert.match(homeAppJs, /document\.body\.dataset\.layoutMode = mode/); assert.match(homeAppJs, /\$\('home-grid'\)\.dataset\.layoutMode = mode/); assert.doesNotMatch(homeAppJs, /window\.innerWidth/); assert.match(homeAppJs, /removeEventListener\('resize', cancelResizeGesture\)/);
+  const homeResponsiveJs = await (await fetch(`${base}/home-responsive.js`)).text(); assert.match(homeResponsiveJs, /\(max-width: 767px\)/); assert.match(homeResponsiveJs, /addEventListener\('change'/); assert.match(homeResponsiveJs, /removeEventListener\('change'/);
   for (const route of ['/missing', '/dashboard/missing', '/%2e%2e/package.json', '/..%2fpackage.json', '/src/app.js']) assert.equal((await fetch(base + route)).status, 404);
 });
 

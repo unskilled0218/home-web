@@ -29,6 +29,13 @@ test('editing or emptying one layout preserves the other and shared preferences'
   const previous = structuredClone(changed.layouts.desktop); changed.layouts.mobile = changeWidget(mobile, 'weather', { h: 15 }, 'mobile'); assert.deepEqual(changed.layouts.desktop, previous);
 });
 
+test('distinct desktop and mobile membership and geometry remain independent', () => {
+  const settings = defaultHomeSettings(); settings.layouts.desktop = [{ id: 'time', type: 'time', x: 8, y: 9, w: 4, h: 3 }]; settings.layouts.mobile = [{ id: 'weather', type: 'weather', x: 0, y: 15, w: 4, h: 9 }];
+  const normalized = normalizeHomeSettings(settings); const desktop = structuredClone(normalized.layouts.desktop);
+  normalized.layouts.mobile = changeWidget(normalized.layouts.mobile, 'weather', { y: 2, h: 6 }, 'mobile');
+  const changed = normalizeHomeSettings(normalized); assert.deepEqual(changed.layouts.desktop, desktop); assert.deepEqual(changed.layouts.mobile, [{ id: 'weather', type: 'weather', x: 0, y: 2, w: 4, h: 6 }]); assert.deepEqual(normalizeHomeSettings(changed), changed);
+});
+
 test('rejects invalid identities, versions and shapes, and bounds geometry and selections', () => {
   for (const input of [null, [], {}, { ...defaultHomeSettings(), version: 2 }, { ...defaultHomeSettings(), revision: -1 }]) assert.throws(() => normalizeHomeSettings(input));
   const settings = defaultHomeSettings(); settings.layouts.desktop[0].w = 1000; settings.layouts.desktop[0].y = 9000; settings.layouts.desktop[0].h = -5;

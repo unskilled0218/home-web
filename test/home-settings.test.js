@@ -33,6 +33,13 @@ test('retains drafts on failure/conflict and saves both layouts atomically', asy
   controller.cancel(); await controller.load(); assert.equal(controller.getState().settings.revision, 2); assert.equal(controller.getState().editing, false); controller.dispose();
 });
 
+test('mobile-only drafts save and cancel without changing desktop geometry', async () => {
+  const f = fixture(); const controller = createHomeSettingsController(f.options); await controller.load(); const desktop = structuredClone(controller.getState().settings.layouts.desktop); const mobile = structuredClone(controller.getState().settings.layouts.mobile);
+  controller.update((next) => { next.layouts.mobile = []; return next; }); f.failure = 503; assert.equal(await controller.save(), false); assert.deepEqual(controller.getState().settings.layouts.desktop, desktop); assert.deepEqual(controller.getState().settings.layouts.mobile, []);
+  f.failure = 0; assert.equal(await controller.save(), true); assert.deepEqual(f.remote.layouts.desktop, desktop); assert.deepEqual(f.remote.layouts.mobile, []);
+  controller.update((next) => { next.layouts.mobile = mobile; return next; }); controller.cancel(); await controller.load(); assert.deepEqual(controller.getState().settings.layouts.desktop, desktop); assert.deepEqual(controller.getState().settings.layouts.mobile, []); controller.dispose();
+});
+
 test('failed initial load does not invent or write defaults and simultaneous saves issue one mutation', async () => {
   const f = fixture(); f.failure = 503; const controller = createHomeSettingsController(f.options); await controller.load(); assert.equal(controller.getState().settings, null); assert.equal(await controller.save(), false);
   f.failure = 0; await controller.load(); controller.begin(); const before = f.count; await Promise.all([controller.save(), controller.save()]); assert.equal(f.count, before + 1); controller.dispose();

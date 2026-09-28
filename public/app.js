@@ -1,22 +1,25 @@
-import { WIDGETS, addWidget, changeWidget, columns, layoutMode, minimumWidth, DESKTOP_ROWS, NO_SPACE } from './home-layout.js';
+import { WIDGETS, addWidget, changeWidget, columns, minimumWidth, DESKTOP_ROWS, NO_SPACE } from './home-layout.js';
 import { createHomeSettingsController } from './home-settings.js';
 import { createWidgetEditor, createWidgetOwners } from './home-widgets.js';
 import { createHomeIntegrations } from './home-integrations.js';
 import { createHomeInformation } from './home-information.js';
 import { searchLocations } from './dashboard-weather.js';
 import { createHomeShell } from './home-shell.js';
+import { createLayoutModeOwner } from './home-responsive.js';
 
 const $ = (id) => document.getElementById(id);
 const roots = { time: $('home-time'), weather: $('home-weather'), calendar: $('home-calendar'), bookmarks: $('bookmarks-section'), 'home-assistant': $('home-assistant-section'), wol: $('wol-section') };
 const settingsDialog = $('home-settings-dialog');
-let mode = layoutMode(window.innerWidth); let current; let selectionDraft = []; let devices = []; let searchAbort; let searchGeneration = 0; let settingsLauncher;
+let mode; let current; let selectionDraft = []; let devices = []; let searchAbort; let searchGeneration = 0; let settingsLauncher;
 const make = (tag, text, className) => { const element = document.createElement(tag); element.textContent = text; if (className) element.className = className; return element; };
 function button(text, action) { const element = make('button', text, 'button secondary'); element.type = 'button'; element.addEventListener('click', action); return element; }
 const announce = (message) => { for (const id of ['home-status', 'home-settings-status']) if ($(id).textContent !== message) $(id).textContent = message; };
 const integrations = createHomeIntegrations({ onDevices: (next) => { devices = next; if (settingsDialog.open) renderSelections(); } });
 const information = createHomeInformation();
 const owners = createWidgetOwners({ integrations, information });
-const editor = createWidgetEditor({ grid: $('home-grid'), roots, onChange: (items) => change((next) => { next.layouts[mode] = items; return next; }, false), onRemove: (id) => { change((next) => { next.layouts[mode] = next.layouts[mode].filter((item) => item.id !== id); return next; }, false); $('home-settings-open').focus(); }, announce });
+const modeOwner = createLayoutModeOwner({ matchMediaImpl: window.matchMedia.bind(window), onChange: switchMode });
+mode = modeOwner.getMode(); document.body.dataset.layoutMode = mode; $('home-grid').dataset.layoutMode = mode;
+const editor = createWidgetEditor({ grid: $('home-grid'), roots, onChange: (items, targetMode) => change((next) => { next.layouts[targetMode] = items; return next; }, false), onRemove: (id, targetMode) => { change((next) => { next.layouts[targetMode] = next.layouts[targetMode].filter((item) => item.id !== id); return next; }, false); $('home-settings-open').focus(); }, announce });
 const settings = createHomeSettingsController({ onChange: render });
 const shell = createHomeShell({ settings, prepareSettings() { fillPreferences(); selectionDraft = structuredClone(current.settings.widgetSettings['home-assistant'].selections); renderSelections(); renderGeometry(); }, cancelGesture: () => editor.cancelGesture() });
 
@@ -40,16 +43,22 @@ function render(state) {
   renderCatalog();
   if (settingsDialog.open && !state.editing && previousRevision !== state.settings.revision) { fillPreferences(); selectionDraft = structuredClone(state.settings.widgetSettings['home-assistant'].selections); renderSelections(); renderGeometry(); }
 }
+function switchMode(next) {
+  if (next === mode) return;
+  editor.cancelGesture(); mode = next; document.body.dataset.layoutMode = mode; $('home-grid').dataset.layoutMode = mode;
+  if (current) render(current);
+  if (settingsDialog.open && current?.settings) renderGeometry();
+}
 async function change(transform, immediate = true) {
   const wasEditing = current?.editing;
   settings.update(transform);
   if (immediate && !wasEditing) await settings.save();
 }
-async function updateLayout(operation, immediate = true) {
+async function updateLayout(operation, immediate = true, targetMode = mode) {
   if (!current?.settings) return;
-  const items = operation(current.settings.layouts[mode]);
+  const items = operation(current.settings.layouts[targetMode]);
   if (!items) { announce(NO_SPACE); return; }
-  await change((next) => { next.layouts[mode] = items; return next; }, immediate);
+  await change((next) => { next.layouts[targetMode] = items; return next; }, immediate);
 }
 function renderCatalog() {
   if (!current?.settings) return;
@@ -57,19 +66,20 @@ function renderCatalog() {
   for (const [id, definition] of Object.entries(WIDGETS)) {
     const exists = current.settings.layouts[mode].some((item) => item.id === id);
     let add = $('home-catalog').querySelector(`[data-add="${id}"]`);
-    if (!add) { add = button('', async () => { await updateLayout((items) => addWidget(items, id, mode)); renderGeometry(); }); add.dataset.add = id; $('home-catalog').append(add); }
+    if (!add) { add = button('', async () => { const targetMode = mode; await updateLayout((items) => addWidget(items, id, targetMode), true, targetMode); if (targetMode === mode) renderGeometry(); }); add.dataset.add = id; $('home-catalog').append(add); }
     add.textContent = `${definition.label}${exists ? ' (added)' : ''}`; add.disabled = exists || current.saving;
   }
 }
 function renderGeometry() {
+  const targetMode = mode;
   $('home-geometry').replaceChildren();
-  for (const item of current.settings.layouts[mode]) {
+  for (const item of current.settings.layouts[targetMode]) {
     const form = document.createElement('form'); form.className = 'geometry-row'; form.append(make('strong', WIDGETS[item.id].label));
     for (const key of ['x', 'y', 'w', 'h']) {
-      const label = make('label', { x: 'Column (0-based)', y: 'Row (0-based)', w: 'Width', h: 'Height' }[key]); const input = document.createElement('input'); input.name = key; input.type = 'number'; input.required = true; input.step = 1; input.value = item[key]; input.min = key === 'w' ? minimumWidth(item.id, mode) : key === 'h' ? 3 : 0; input.max = key === 'w' ? columns(mode) : key === 'h' ? (mode === 'desktop' ? DESKTOP_ROWS : 24) : key === 'x' ? columns(mode) - item.w : mode === 'desktop' ? DESKTOP_ROWS - item.h : 144; label.append(input); form.append(label);
+      const label = make('label', { x: 'Column (0-based)', y: 'Row (0-based)', w: 'Width', h: 'Height' }[key]); const input = document.createElement('input'); input.name = key; input.type = 'number'; input.required = true; input.step = 1; input.value = item[key]; input.min = key === 'w' ? minimumWidth(item.id, targetMode) : key === 'h' ? 3 : 0; input.max = key === 'w' ? columns(targetMode) : key === 'h' ? (targetMode === 'desktop' ? DESKTOP_ROWS : 24) : key === 'x' ? columns(targetMode) - item.w : targetMode === 'desktop' ? DESKTOP_ROWS - item.h : 144; label.append(input); form.append(label);
     }
-    const submit = button('Apply size / position', () => {}); submit.type = 'submit'; form.append(submit, button('Remove', async () => { await change((next) => { next.layouts[mode] = next.layouts[mode].filter((entry) => entry.id !== item.id); return next; }); renderGeometry(); }));
-    form.addEventListener('submit', (event) => { event.preventDefault(); updateLayout((items) => changeWidget(items, item.id, Object.fromEntries([...new FormData(form)].map(([key, value]) => [key, Number(value)])), mode), false); renderGeometry(); });
+    const submit = button('Apply size / position', () => {}); submit.type = 'submit'; form.append(submit, button('Remove', async () => { await change((next) => { next.layouts[targetMode] = next.layouts[targetMode].filter((entry) => entry.id !== item.id); return next; }); if (targetMode === mode) renderGeometry(); }));
+    form.addEventListener('submit', (event) => { event.preventDefault(); updateLayout((items) => changeWidget(items, item.id, Object.fromEntries([...new FormData(form)].map(([key, value]) => [key, Number(value)])), targetMode), false, targetMode); if (targetMode === mode) renderGeometry(); });
     $('home-geometry').append(form);
   }
 }
@@ -126,10 +136,11 @@ for (const dialog of document.querySelectorAll('dialog:not(#home-settings-dialog
 }
 const gridObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(() => editor.cancelGesture()) : null;
 gridObserver?.observe($('home-grid'));
-window.addEventListener('resize', () => { editor.cancelGesture(); const next = layoutMode(window.innerWidth); if (next === mode) return; mode = next; if (current) render(current); if (settingsDialog.open && current?.settings) renderGeometry(); });
+const cancelResizeGesture = () => editor.cancelGesture();
+window.addEventListener('resize', cancelResizeGesture);
 document.addEventListener('visibilitychange', () => { const visible = !document.hidden; information.setVisible(visible); settings.setVisible(visible); });
 window.addEventListener('focus', () => { if (!document.hidden) void settings.load(); });
-window.addEventListener('pagehide', (event) => { editor.cancelGesture(); searchGeneration++; searchAbort?.abort(); owners.suspend(); settings.setVisible(false); if (!event.persisted) { information.dispose(); settings.dispose(); editor.dispose(); gridObserver?.disconnect(); shell.dispose(); } });
+window.addEventListener('pagehide', (event) => { editor.cancelGesture(); searchGeneration++; searchAbort?.abort(); owners.suspend(); settings.setVisible(false); if (!event.persisted) { information.dispose(); settings.dispose(); editor.dispose(); gridObserver?.disconnect(); window.removeEventListener('resize', cancelResizeGesture); modeOwner.dispose(); shell.dispose(); } });
 window.addEventListener('pageshow', (event) => { if (event.persisted) { owners.resume(!document.hidden); settings.setVisible(!document.hidden); if (current) render(current); } });
 settings.setVisible(!document.hidden);
 if (document.hidden) void settings.load();

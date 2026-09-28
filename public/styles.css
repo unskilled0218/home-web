@@ -6,7 +6,8 @@
 }
 
 .home-toolbar { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: .5rem; flex-shrink: 0; }
-.home-grid { display: grid; grid-template-columns: repeat(var(--columns, 12), minmax(0, 1fr)); grid-auto-rows: 64px; gap: 16px; align-items: stretch; }
+.home-grid { --columns: 4; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); grid-auto-rows: 64px; gap: 16px; align-items: stretch; }
+.home-grid[data-layout-mode="mobile"] { --columns: 4; width: 100%; grid-template-columns: repeat(4, minmax(0, 1fr)); grid-auto-rows: 64px; }
 .home-grid .home-widget { min-width: 0; min-height: 0; position: relative; display: flex; flex-direction: column; border: 0; border-radius: .8rem; background: transparent; padding: .75rem; margin: 0; overflow: auto; }
 .widget-heading { display: flex; align-items: center; flex-wrap: wrap; gap: .35rem; flex-shrink: 0; }
 .widget-content { min-height: 0; overflow: auto; overflow-wrap: anywhere; flex: 1; }
@@ -167,11 +168,11 @@ dialog label { display: grid; gap: .35rem; color: #cbd9e5; font-size: .85rem; fo
 #home-config { min-width: 0; border: 0; padding: 0; margin: 0; }
 .home-grid .collection-tree, .home-grid .bookmark, .home-grid .device, .home-grid .home-device { background: transparent; }
 @media (min-width: 768px) {
-  .home-page { height: 100vh; height: 100dvh; overflow: hidden; }
-  .home-page > .shell { height: 100%; display: flex; flex-direction: column; min-height: 0; }
-  .home-page .home-grid { flex: 1; min-height: 0; grid-template-rows: repeat(12, minmax(0, 1fr)); grid-auto-rows: 0; gap: clamp(2px, 1.2vh, 16px); }
-  .home-page .home-widget { padding: clamp(.2rem, .8vh, .75rem); }
-  .home-page .editing .home-widget { padding-bottom: clamp(.2rem, .8vh, .75rem); }
-  .home-page .editing .widget-content { padding-bottom: 2.5rem; }
-  .home-page .widget-resize { max-height: 100%; max-width: 100%; }
+  .home-page[data-layout-mode="desktop"] { height: 100vh; height: 100dvh; overflow: hidden; }
+  .home-page[data-layout-mode="desktop"] > .shell { height: 100%; display: flex; flex-direction: column; min-height: 0; }
+  .home-page[data-layout-mode="desktop"] .home-grid[data-layout-mode="desktop"] { --columns: 12; flex: 1; min-height: 0; grid-template-columns: repeat(12, minmax(0, 1fr)); grid-template-rows: repeat(12, minmax(0, 1fr)); grid-auto-rows: 0; gap: clamp(2px, 1.2vh, 16px); }
+  .home-page[data-layout-mode="desktop"] .home-widget { padding: clamp(.2rem, .8vh, .75rem); }
+  .home-page[data-layout-mode="desktop"] .editing .home-widget { padding-bottom: clamp(.2rem, .8vh, .75rem); }
+  .home-page[data-layout-mode="desktop"] .editing .widget-content { padding-bottom: 2.5rem; }
+  .home-page[data-layout-mode="desktop"] .widget-resize { max-height: 100%; max-width: 100%; }
 }
