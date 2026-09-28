@@ -1,4 +1,4 @@
-import { clockText, sampleHours, temperatureRange, weatherDescription, weatherIconFile } from './dashboard-helpers.js';
+import { clockText, weatherDescription, weatherIconFile } from './dashboard-helpers.js';
 import { createWeatherController } from './dashboard-weather.js';
 import { createCalendarController, formatCalendarEvent } from './dashboard-calendar.js';
 
@@ -9,17 +9,14 @@ export function createHomeInformation({ document = globalThis.document } = {}) {
   const value = (number, unit = '') => number === null || number === undefined ? 'Unavailable' : `${number}${unit}`;
   function clock() { const now = new Date(); const text = clockText(now, preferences); $('home-date').textContent = text.date; $('home-clock').textContent = text.time; $('home-clock').dateTime = now.toISOString(); }
   function icon(code, day) { const image = document.createElement('img'); image.src = `/weather-icons/${weatherIconFile(code, day)}`; image.alt = ''; return image; }
-  function forecastItem(code, day, label, temperature) { const li = document.createElement('li'); li.append(icon(code, day), node('span', label), node('strong', temperature), node('span', weatherDescription(code, day))); return li; }
   function renderWeather(state) {
     lastWeather = state;
     $('home-weather-status').textContent = !preferences.location ? 'Choose a weather location in Settings.' : state.forecastError ? (state.forecast ? 'Forecast is stale. Retrying hourly.' : 'Forecast unavailable. Retrying hourly.') : state.loading ? 'Updating weather…' : '';
-    $('home-weather-current').replaceChildren(); $('home-hourly').replaceChildren(); $('home-daily').replaceChildren();
+    $('home-weather-current').replaceChildren();
     const data = state.forecast;
     if (data) {
       const current = data.current;
       $('home-weather-current').append(icon(current.weather_code, current.is_day), node('strong', value(current.temperature_2m, data.units.temperature_2m)), node('span', weatherDescription(current.weather_code, current.is_day)), node('p', `Wind ${value(current.wind_speed_10m, data.units.wind_speed_10m)} · Humidity ${value(current.relative_humidity_2m, data.units.relative_humidity_2m)} · Precipitation ${value(current.precipitation, data.units.precipitation)}`));
-      for (const hour of sampleHours(data.hourly)) $('home-hourly').append(forecastItem(hour.code, hour.day, new Intl.DateTimeFormat(undefined, { timeZone: preferences.timezone, weekday: 'short', hour: 'numeric', minute: '2-digit', hour12: preferences.hour12 }).format(new Date(hour.time * 1000)), value(hour.temperature, data.hourlyUnit)));
-      for (const day of data.daily) $('home-daily').append(forecastItem(day.code, 1, new Intl.DateTimeFormat(undefined, { timeZone: 'UTC', weekday: 'short', month: 'short', day: 'numeric' }).format(new Date(`${day.date}T12:00:00Z`)), temperatureRange(day.min, day.max, data.dailyUnit)));
     }
     $('home-air').textContent = !preferences.location ? '' : state.air ? `US AQI: ${state.air.aqi}${state.airError ? ' (stale)' : ''} · CAMS ENSEMBLE` : state.airError ? 'Air quality unavailable.' : '';
   }

@@ -9,11 +9,11 @@
   </head>
   <body class="home-page">
     <main class="shell" aria-label="Home widget dashboard">
-      <div class="home-toolbar"><button class="button secondary" id="home-settings-open" type="button">Settings</button></div>
+      <div class="home-toolbar"><button class="button secondary" id="home-settings-open" type="button">Settings</button><button class="button" id="home-toolbar-save" type="button" aria-label="Save widget changes" hidden>Save</button><button class="button secondary" id="home-toolbar-cancel" type="button" aria-label="Cancel widget changes" hidden>Cancel</button></div>
       <p id="home-status" class="sr-only" role="status" aria-live="polite">Loading shared home settings…</p>
       <div id="home-grid" class="home-grid" aria-label="Home widgets" hidden>
       <section id="home-time" class="home-widget" aria-label="Time"><div class="widget-content"><p id="home-date"></p><time id="home-clock"></time></div></section>
-      <section id="home-weather" class="home-widget" aria-label="Weather"><div class="widget-content"><p id="home-weather-status" role="status"></p><div id="home-weather-current"></div><p id="home-air"></p><h3>Hourly</h3><ul id="home-hourly" class="home-forecast"></ul><h3>Daily</h3><ul id="home-daily" class="home-forecast"></ul></div></section>
+      <section id="home-weather" class="home-widget" aria-label="Weather"><div class="widget-content"><p id="home-weather-status" role="status"></p><div id="home-weather-current"></div><p id="home-air"></p></div></section>
       <section id="home-calendar" class="home-widget" aria-label="Calendar"><div class="widget-content"><p id="home-calendar-status" role="status"></p><ol id="home-events"></ol></div></section>
       <section class="dashboard-section bookmarks-section" id="bookmarks-section" aria-labelledby="bookmarks-title">
         <div class="section-heading"><div><p class="eyebrow">LINKWARDEN</p><h2 id="bookmarks-title">Bookmarks</h2><p class="connected-account" id="linkwarden-account" hidden></p></div><div class="section-actions bookmark-actions"><button class="button secondary" id="linkwarden-settings" type="button">Bookmarks settings</button><button class="text-button" id="disconnect-linkwarden" type="button" hidden>Disconnect</button><button class="button secondary" id="refresh-bookmarks" type="button" disabled>Refresh</button></div></div>

@@ -34,12 +34,11 @@ export function gridMetrics(grid, mode, getStyle = globalThis.getComputedStyle) 
 
 export function createWidgetEditor({ grid, roots, onChange, onRemove, announce, document = globalThis.document, measure = gridMetrics }) {
   let items = []; let mode = 'desktop'; let editing = false; let gesture = null;
-  const handles = new Map();
+  const handles = new Map(); const headings = new Map();
   for (const [id, root] of Object.entries(roots)) {
     root.classList.add('home-widget');
     if (!root.querySelector('.widget-content')) { const body = document.createElement('div'); body.className = 'widget-content'; body.append(...root.childNodes); root.append(body); }
     const header = document.createElement('header'); header.className = 'widget-heading';
-    const title = document.createElement('h2'); title.textContent = WIDGETS[id].label; header.append(title);
     const controls = [];
     for (const kind of ['move', 'remove', 'resize']) {
       const button = document.createElement('button'); button.type = 'button'; button.className = `widget-${kind}`; button.dataset.widget = id; button.dataset.kind = kind;
@@ -63,7 +62,7 @@ export function createWidgetEditor({ grid, roots, onChange, onRemove, announce, 
       controls.push(button);
       if (kind === 'resize') root.append(button); else header.append(button);
     }
-    root.prepend(header); handles.set(id, controls);
+    root.prepend(header); handles.set(id, controls); headings.set(id, header);
   }
   function paint(next) {
     const focused = document.activeElement;
@@ -95,6 +94,7 @@ export function createWidgetEditor({ grid, roots, onChange, onRemove, announce, 
       if (mode !== nextMode || !isEditing) cancel();
       items = next; mode = nextMode; editing = isEditing; grid.style.setProperty('--columns', columns(mode));
       for (const controls of handles.values()) for (const button of controls) button.hidden = !editing;
+      for (const heading of headings.values()) heading.hidden = !editing;
       grid.classList.toggle('editing', editing); if (!gesture) paint(items);
     },
     cancelGesture: cancel,

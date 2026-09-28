@@ -6,7 +6,7 @@ import { createHomeIntegrations, selectedHomeDevices } from '../public/home-inte
 
 // Minimal event/geometry surface: tests drive the real editor handlers, not a copy of its algorithm.
 class Element {
-  constructor(document) { this.document = document; this.children = []; this.dataset = {}; this.listeners = {}; this.style = { setProperty() {} }; this.classList = { add() {}, toggle() {} }; this.hidden = false; this.value = ''; }
+  constructor(document, tagName = '') { this.document = document; this.tagName = tagName.toUpperCase(); this.children = []; this.dataset = {}; this.listeners = {}; this.attributes = {}; this.style = { setProperty() {} }; this.classList = { add() {}, toggle() {} }; this.hidden = false; this.value = ''; }
   get childNodes() { return this.children; }
   append(...nodes) { for (const node of nodes) this.insertBefore(node, null); }
   replaceChildren(...nodes) { this.children = []; this.append(...nodes); }
@@ -14,7 +14,7 @@ class Element {
   loseCapture() { if (this.capture !== undefined && this.capture !== null) this.releasePointerCapture(); for (const child of this.children) child.loseCapture(); }
   insertBefore(node, reference) { if (node.parent) { node.loseCapture(); node.parent.children.splice(node.parent.children.indexOf(node), 1); } const index = reference ? this.children.indexOf(reference) : this.children.length; this.children.splice(index, 0, node); node.parent = this; }
   querySelector() { return this.children.find((item) => item.className === 'widget-content'); }
-  setAttribute() {}
+  setAttribute(name, value) { this.attributes[name] = value; }
   addEventListener(type, fn) { (this.listeners[type] ??= []).push(fn); }
   dispatch(type, fields = {}) { for (const fn of this.listeners[type] ?? []) fn({ currentTarget: this, button: 0, pointerId: 1, clientX: 0, clientY: 0, preventDefault() {}, ...fields }); }
   setPointerCapture(id) { this.capture = id; }
@@ -25,13 +25,22 @@ class Element {
   focus() { this.document.activeElement = this; }
 }
 function fixture(initial = [{ id: 'time', type: 'time', x: 0, y: 0, w: 4, h: 3 }], step = { x: 100, y: 80 }) {
-  const document = { createElement: () => new Element(document), activeElement: null };
+  const document = { createElement: (tagName) => new Element(document, tagName), activeElement: null };
   const grid = new Element(document); const roots = Object.fromEntries(initial.map((item) => [item.id, new Element(document)])); grid.append(...Object.values(roots)); const root = roots.time;
   let items = initial; let changes = 0; let removed = 0; const announcements = [];
   const editor = createWidgetEditor({ document, grid, roots, measure: () => step, onChange: (next) => { items = next; changes++; editor.render(items, 'desktop', true); }, onRemove: () => removed++, announce: (message) => announcements.push(message) });
   editor.render(items, 'desktop', true);
-  return { editor, root, grid, roots, announcements, get items() { return items; }, get changes() { return changes; }, get removed() { return removed; }, move: root.children[0].children[1], resize: root.children.at(-1) };
+  const controls = root.children.flatMap((child) => child.children).concat(root.children).filter((child) => child.dataset.kind);
+  return { editor, root, grid, roots, announcements, heading: root.children[0], get items() { return items; }, get changes() { return changes; }, get removed() { return removed; }, move: controls.find((control) => control.dataset.kind === 'move'), remove: controls.find((control) => control.dataset.kind === 'remove'), resize: controls.find((control) => control.dataset.kind === 'resize') };
 }
+
+test('editor chrome has no visible title and keeps labeled controls only while editing', () => {
+  const f = fixture();
+  assert.deepEqual(f.heading.children.map((child) => [child.tagName, child.textContent]), [['BUTTON', 'Move'], ['BUTTON', 'Remove']]);
+  assert.equal(f.move.attributes['aria-label'], 'Move Time; use arrow keys'); assert.equal(f.remove.attributes['aria-label'], 'Remove Time'); assert.equal(f.resize.attributes['aria-label'], 'Resize Time; use arrow keys');
+  assert.equal(f.heading.hidden, false); f.editor.render(f.items, 'desktop', false); assert.equal(f.heading.hidden, true);
+  assert.equal(f.move.hidden, true); assert.equal(f.remove.hidden, true); assert.equal(f.resize.hidden, true);
+});
 
 test('pointer movement previews and commits on release; cancel/breakpoint changes restore geometry', () => {
   const f = fixture(); f.move.dispatch('pointerdown'); f.move.dispatch('pointermove', { clientX: 200, clientY: 80 });

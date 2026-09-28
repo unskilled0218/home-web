@@ -66,11 +66,15 @@ test('serves dashboard aliases and assets while preserving home and static conta
   const homeHtml = await (await fetch(base)).text();
   assert.doesNotMatch(homeHtml, /href="\/dashboard"|<h1>Home<\/h1>|id="home-save"|id="home-cancel"/);
   const homeMain = homeHtml.slice(homeHtml.indexOf('<main'), homeHtml.indexOf('</main>'));
-  assert.match(homeMain, /id="home-settings-open"[^>]*>Settings/);
+  assert.match(homeMain, /class="home-toolbar"><button[^>]*id="home-settings-open"[^>]*>Settings<\/button><button[^>]*id="home-toolbar-save"[^>]*aria-label="Save widget changes"[^>]*hidden[^>]*>Save<\/button><button[^>]*id="home-toolbar-cancel"[^>]*aria-label="Cancel widget changes"[^>]*hidden[^>]*>Cancel<\/button>/);
   assert.match(homeMain, /id="home-status" class="sr-only"/);
   assert.doesNotMatch(homeMain, /id="home-(?:layout-label|retry|empty|edit|dialog-save|dialog-cancel|fullscreen)"/);
+  assert.doesNotMatch(homeMain, /id="home-(?:hourly|daily)"|class="home-forecast"|<h3>(?:Hourly|Daily)<\/h3>/);
   const homeSettings = homeHtml.slice(homeHtml.indexOf('<dialog id="home-settings-dialog"'), homeHtml.indexOf('</dialog>'));
   for (const id of ['home-edit', 'home-fullscreen', 'home-retry', 'home-layout-label', 'home-dialog-save', 'home-dialog-cancel']) assert.ok(homeSettings.includes(`id="${id}"`));
+  const homeCss = await (await fetch(`${base}/styles.css`)).text(); assert.match(homeCss, /\.home-grid \.home-widget \{[^}]*border: 0;/); assert.doesNotMatch(homeCss, /\.widget-heading h2|\.home-forecast/);
+  const homeWidgetsJs = await (await fetch(`${base}/home-widgets.js`)).text(); assert.doesNotMatch(homeWidgetsJs, /createElement\('h2'\)/);
+  const homeInformationJs = await (await fetch(`${base}/home-information.js`)).text(); assert.doesNotMatch(homeInformationJs, /home-hourly|home-daily|sampleHours|temperatureRange/);
   for (const route of ['/missing', '/dashboard/missing', '/%2e%2e/package.json', '/..%2fpackage.json', '/src/app.js']) assert.equal((await fetch(base + route)).status, 404);
 });
 

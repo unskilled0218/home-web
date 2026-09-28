@@ -3,13 +3,13 @@ import assert from 'node:assert/strict';
 import { createHomeShell } from '../public/home-shell.js';
 
 function fixture() {
-  const nodes = new Map(); const listeners = new Map(); let state = { settings: null, editing: false }; let prepared = 0; let loads = 0; let cancellations = 0; let gestureCancels = 0; let time = 1000; let rejectFullscreen = false;
+  const nodes = new Map(); const listeners = new Map(); let state = { settings: null, editing: false }; let prepared = 0; let loads = 0; let cancellations = 0; let saves = 0; let gestureCancels = 0; let time = 1000; let rejectFullscreen = false; let saveSucceeds = true;
   const element = () => ({ listeners: {}, open: false, disabled: false, addEventListener(type, callback) { (this.listeners[type] ??= []).push(callback); }, async dispatch(type) { for (const callback of this.listeners[type] ?? []) await callback({}); }, showModal() { this.open = true; }, close() { this.open = false; void this.dispatch('close'); }, focus() { document.activeElement = this; } });
   const document = { activeElement: null, fullscreenEnabled: true, fullscreenElement: null, getElementById(id) { if (!nodes.has(id)) nodes.set(id, element()); return nodes.get(id); }, querySelector() { return [...nodes.values()].find((node) => node.open); }, addEventListener(type, callback) { listeners.set(type, callback); }, removeEventListener(type) { listeners.delete(type); }, async exitFullscreen() { document.fullscreenElement = null; listeners.get('fullscreenchange')(); } };
   document.documentElement = { async requestFullscreen() { if (rejectFullscreen) throw new Error('Denied'); document.fullscreenElement = this; listeners.get('fullscreenchange')(); } };
-  const settings = { getState: () => state, begin() { state = { ...state, editing: true }; }, cancel() { state = { ...state, editing: false }; cancellations++; }, async save() { state = { ...state, editing: false }; return true; }, load() { loads++; } };
+  const settings = { getState: () => state, begin() { state = { ...state, editing: true }; }, cancel() { state = { ...state, editing: false }; cancellations++; }, async save() { saves++; if (saveSucceeds) state = { ...state, editing: false }; return saveSucceeds; }, load() { loads++; } };
   const shell = createHomeShell({ document, settings, prepareSettings: () => prepared++, cancelGesture: () => gestureCancels++, now: () => time });
-  return { document, shell, settings, get state() { return state; }, set state(next) { state = next; }, get prepared() { return prepared; }, get loads() { return loads; }, get cancellations() { return cancellations; }, get gestureCancels() { return gestureCancels; }, set rejectFullscreen(value) { rejectFullscreen = value; }, set time(value) { time = value; }, node: (id) => document.getElementById(id), click: (id) => document.getElementById(id).dispatch('click'), escape: () => listeners.get('keydown')({ key: 'Escape' }) };
+  return { document, shell, settings, get state() { return state; }, set state(next) { state = next; }, get prepared() { return prepared; }, get loads() { return loads; }, get cancellations() { return cancellations; }, get saves() { return saves; }, get gestureCancels() { return gestureCancels; }, set rejectFullscreen(value) { rejectFullscreen = value; }, set saveSucceeds(value) { saveSucceeds = value; }, set time(value) { time = value; }, node: (id) => document.getElementById(id), click: (id) => document.getElementById(id).dispatch('click'), escape: () => listeners.get('keydown')({ key: 'Escape' }) };
 }
 
 test('Settings and Retry remain reachable without loaded state, then Edit/Save/Cancel run from the dialog', async () => {
@@ -19,6 +19,13 @@ test('Settings and Retry remain reachable without loaded state, then Edit/Save/C
   await f.click('home-edit'); assert.equal(f.state.editing, true); assert.equal(f.node('home-settings-dialog').open, false); assert.equal(f.document.activeElement, f.node('home-settings-open'));
   await f.click('home-settings-open'); await f.click('home-dialog-save'); assert.equal(f.state.editing, false); assert.equal(f.node('home-settings-dialog').open, false);
   f.settings.begin(); await f.click('home-settings-open'); await f.click('home-dialog-cancel'); assert.equal(f.cancellations, 1); f.shell.dispose();
+});
+
+test('toolbar Save and Cancel share draft actions and return focus without opening Settings', async () => {
+  const f = fixture(); f.state = { settings: {}, editing: true };
+  f.saveSucceeds = false; await f.click('home-toolbar-save'); assert.equal(f.saves, 1); assert.equal(f.state.editing, true); assert.equal(f.document.activeElement, null);
+  f.saveSucceeds = true; await f.click('home-toolbar-save'); assert.equal(f.saves, 2); assert.equal(f.state.editing, false); assert.equal(f.document.activeElement, f.node('home-settings-open')); assert.equal(f.node('home-settings-dialog').open, false);
+  f.settings.begin(); const before = f.gestureCancels; await f.click('home-toolbar-cancel'); assert.equal(f.cancellations, 1); assert.equal(f.gestureCancels, before + 1); assert.equal(f.state.editing, false); assert.equal(f.document.activeElement, f.node('home-settings-open')); assert.equal(f.node('home-settings-dialog').open, false); f.shell.dispose();
 });
 
 test('fullscreen denial and Escape exit preserve drafts, labels follow the browser, and cancellation stays explicit', async () => {

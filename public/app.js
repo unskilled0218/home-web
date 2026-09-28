@@ -26,7 +26,9 @@ function render(state) {
   $('home-config').disabled = !state.settings || state.saving;
   $('home-settings-open').setAttribute('aria-label', state.editing ? 'Settings, unsaved changes' : 'Settings');
   $('home-edit').textContent = state.editing ? 'Continue editing widgets' : 'Edit widgets';
-  $('home-dialog-save').disabled = !state.editing || state.saving || state.conflict; $('home-dialog-cancel').disabled = state.saving;
+  for (const id of ['home-toolbar-save', 'home-toolbar-cancel']) $(id).hidden = !state.editing;
+  for (const id of ['home-dialog-save', 'home-toolbar-save']) $(id).disabled = !state.editing || state.saving || state.conflict;
+  for (const id of ['home-dialog-cancel', 'home-toolbar-cancel']) $(id).disabled = state.saving;
   announce(state.error || (state.conflict ? 'Another device changed shared settings. Cancel / reload, then reapply your edits.' : state.saving ? 'Saving shared settings…' : state.editing ? 'Unsaved changes. Reopen Settings to save or cancel.' : state.settings ? 'Shared settings loaded.' : 'Loading shared settings…'));
   $('home-retry').hidden = Boolean(state.settings) && !state.error;
   $('home-layout-label').textContent = `${mode === 'desktop' ? 'Desktop' : 'Mobile'} layout`;

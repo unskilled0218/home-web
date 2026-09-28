@@ -14,8 +14,14 @@ export function createHomeShell({ document = globalThis.document, settings, prep
   }
   function open() { cancelGesture(); if (settings.getState().settings) prepareSettings(); dialog.showModal(); }
   function edit() { if (!settings.getState().settings) return; settings.begin(); dialog.close(); }
-  async function save() { if (await settings.save()) dialog.close(); }
-  function cancel() { cancelGesture(); settings.cancel(); dialog.close(); }
+  async function save(closeDialog) {
+    if (!await settings.save()) return;
+    if (closeDialog) dialog.close(); else $('home-settings-open').focus();
+  }
+  function cancel(closeDialog) {
+    cancelGesture(); settings.cancel();
+    if (closeDialog) dialog.close(); else $('home-settings-open').focus();
+  }
   function escape(event) {
     if (event.key !== 'Escape' || event.repeat || document.fullscreenElement || wasFullscreen || now() - lastFullscreenChange < 500 || document.querySelector('dialog[open]') || !settings.getState().editing) return;
     cancelGesture(); settings.cancel(); $('home-settings-open').focus();
@@ -24,8 +30,10 @@ export function createHomeShell({ document = globalThis.document, settings, prep
   $('home-settings-close').addEventListener('click', () => dialog.close());
   dialog.addEventListener('close', () => $('home-settings-open').focus());
   $('home-edit').addEventListener('click', edit);
-  $('home-dialog-save').addEventListener('click', save);
-  $('home-dialog-cancel').addEventListener('click', cancel);
+  $('home-dialog-save').addEventListener('click', () => save(true));
+  $('home-dialog-cancel').addEventListener('click', () => cancel(true));
+  $('home-toolbar-save').addEventListener('click', () => save(false));
+  $('home-toolbar-cancel').addEventListener('click', () => cancel(false));
   $('home-retry').addEventListener('click', () => settings.load());
   $('home-fullscreen').addEventListener('click', toggleFullscreen);
   document.addEventListener('fullscreenchange', fullscreenChange);
