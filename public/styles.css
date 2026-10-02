@@ -83,13 +83,14 @@ input:focus { outline: 3px solid #58c5bb66; border-color: #70d6cb; }
 .bookmark-status { margin: 0 0 1rem; }
 .status { margin: 0 0 1.4rem; }
 .status.error { color: #ffb4ab; }
-.bookmark-layout { display: grid; grid-template-columns: minmax(190px, 260px) minmax(0, 1fr); gap: 1rem; align-items: start; }
+.bookmark-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; align-items: start; }
 .collection-tree { min-width: 0; border: 1px solid #294964; border-radius: .8rem; padding: .65rem; background: #0d2438; }
 .collection-tree ul { list-style: none; margin: 0; padding: 0; }
 .collection-tree ul ul { margin-left: .75rem; padding-left: .55rem; border-left: 1px solid #31506a; }
-.collection-node { width: 100%; border: 0; border-radius: .45rem; padding: .55rem .65rem; background: transparent; color: #cbd9e5; text-align: left; overflow-wrap: anywhere; }
-.collection-node:hover, .collection-node:focus-visible { background: #1b3e59; }
-.collection-node.selected { background: #70d6cb; color: #082035; font-weight: 750; }
+.collection-node { width: 100%; padding: .55rem .65rem; color: #cbd9e5; font-weight: 750; overflow-wrap: anywhere; }
+.collection-tree .bookmark-grid { grid-template-columns: 1fr; margin: .2rem 0 .45rem .75rem; padding-left: .55rem; }
+.collection-tree .bookmark { border: 0; padding: .35rem .7rem; background: transparent; }
+.collection-tree .bookmark a { font-size: .85rem; }
 
 .bookmark-grid, .device-grid, .home-device-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(230px, 100%), 1fr)); gap: .8rem; min-width: 0; }
 .bookmark, .device, .home-device { min-width: 0; border: 1px solid #294964; border-radius: .8rem; padding: 1rem; background: #102a43cc; }

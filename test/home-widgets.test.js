@@ -115,3 +115,17 @@ test('removing an integration invalidates its pending device snapshot and re-add
   integrations.configure(['home-assistant'], []); integrations.configure(['home-assistant'], []); await new Promise(setImmediate); assert.equal(pending.length, 1);
   pending.shift()({ ok: true, json: async () => ({ devices: [] }) }); await new Promise(setImmediate); assert.deepEqual(snapshots, [[]]); integrations.suspend();
 });
+
+test('bookmarks load automatically and render under every collection', async () => {
+  const nodes = new Map(); const document = { activeElement: null, createElement: (tagName) => new Element(document, tagName), querySelector: (selector) => { if (!nodes.has(selector)) nodes.set(selector, new Element(document)); return nodes.get(selector); } };
+  const requests = [];
+  const integrations = createHomeIntegrations({ document, fetchImpl: async (url) => {
+    requests.push(url);
+    if (url === '/api/linkwarden') return { ok: true, json: async () => ({ linkwarden: { configured: true, username: 'user', baseUrl: 'https://links.test' } }) };
+    if (url === '/api/linkwarden/collections') return { ok: true, json: async () => ({ collections: [{ name: 'Root', collectionToken: 'root', children: [{ name: 'Child', collectionToken: 'child', children: [] }] }] }) };
+    const token = new URL(url, 'https://dashboard.test').searchParams.get('collection'); return { ok: true, json: async () => ({ bookmarks: [{ id: token, name: `${token} link`, url: `https://${token}.test/` }], stale: false }) };
+  } });
+  integrations.configure(['bookmarks'], []); await new Promise(setImmediate); await new Promise(setImmediate); await new Promise(setImmediate);
+  assert.deepEqual(requests, ['/api/linkwarden', '/api/linkwarden/collections', '/api/bookmarks?collection=root', '/api/bookmarks?collection=child']);
+  const rootItem = nodes.get('#collection-tree').children[0].children[0]; assert.equal(rootItem.children[1].children[0].children[0].textContent, 'root link'); assert.equal(rootItem.children[2].children[0].children[1].children[0].children[0].textContent, 'child link'); integrations.suspend();
+});

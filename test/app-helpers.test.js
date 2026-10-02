@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { filterHomeDevices, groupHomeDevices, homeControlPresentation, homeMeasurementPresentation, isLatestRequest, restoreCollectionFocus, runBulkWake, selectedButtonState, showDialogError, summarizeWakeResults, updateCollectionSelection, updateSelection } from '../public/app-helpers.js';
+import { filterHomeDevices, flattenCollections, groupHomeDevices, homeControlPresentation, homeMeasurementPresentation, isLatestRequest, restoreCollectionFocus, runBulkWake, selectedButtonState, showDialogError, summarizeWakeResults, updateCollectionSelection, updateSelection } from '../public/app-helpers.js';
 
 test('summarizes complete, partial, and total Wake outcomes', () => {
   assert.deepEqual(summarizeWakeResults([{ status: 'fulfilled' }, { status: 'fulfilled' }]), { succeeded: 2, failed: 0, error: false, message: 'Wake packets sent to 2 device(s).' });
@@ -42,6 +42,13 @@ test('updates collection controls in place and restores the matching focus targe
   assert.equal(controls[1].current, 'true');
   assert.equal(restoreCollectionFocus(root, 'second'), true);
   assert.equal(controls[1].focused, true);
+});
+
+test('flattens nested collections in display order for eager bookmark loading', () => {
+  const child = { name: 'Child', children: [] };
+  const sibling = { name: 'Sibling', children: [] };
+  const root = { name: 'Root', children: [child] };
+  assert.deepEqual(flattenCollections([root, sibling]), [root, child, sibling]);
 });
 
 test('filters and groups Home Assistant devices without accepting stale responses', async () => {

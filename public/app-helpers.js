@@ -39,6 +39,10 @@ export function restoreCollectionFocus(root, key) {
   return Boolean(target);
 }
 
+export function flattenCollections(collections) {
+  return collections.flatMap((collection) => [collection, ...flattenCollections(collection.children)]);
+}
+
 export function filterHomeDevices(devices, term) {
   const normalized = term.trim().toLowerCase();
   if (!normalized) return devices;
