@@ -146,10 +146,10 @@ For an upgrade, back up `data/`, run `docker compose pull`, and recreate the ser
 
 ## Publish a container release
 
-The release scripts use the same Forgejo credential as the `my-rss` reference workflow. The token must have repository-write and package-write access and remain outside this repository. Reuse the protected reference token file by injecting it only for the release process:
+The token must have repository-write and package-write access and remain outside this repository. Reuse the protected reference token file by injecting it only for the release process:
 
 ```sh
-FORGEJO_TOKEN="$(<"$HOME/.config/my-rss/forgejo-token")" ./scripts/release.sh
+FORGEJO_TOKEN="$(<"$HOME/.config/forgejo/forgejo-token")" ./scripts/release.sh
 ```
 
 `scripts/release.sh` runs only from a clean `main` checkout. It reads the exact semantic version from `package.json`, runs all tests and syntax checks, pushes `main`, builds AMD64 and ARM64 image archives with checksum files under ignored `dist/`, pushes those exact platform images and the immutable `git.lan/dev/home-web:v<version>` manifest, creates the matching Git tag and Forgejo release, uploads all four release assets, and updates `latest` only after every earlier operation succeeds. It refuses to overwrite any existing version or platform tag and fails closed when registry inspection cannot distinguish absence from a connection or authentication error. Run only one release at a time and enable immutable package tags in Forgejo when the server supports them, because client-side checks cannot make concurrent registry writes atomic. `FORGEJO_USER` defaults to `dev` and can be overridden when the shared token belongs to another account. Docker authentication uses a minimal temporary configuration with no inherited credential helper and is removed on exit, so the shared token is not left in the normal Docker credential store or host keychain.
