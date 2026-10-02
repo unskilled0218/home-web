@@ -76,7 +76,7 @@ test('serves dashboard aliases and assets while preserving home and static conta
   assert.match(homeCss, /\.home-grid \{[^}]*position: relative;/); assert.match(homeCss, /\.home-grid \.home-widget \{[^}]*position: absolute;/);
   assert.match(homeCss, /\.home-page \.home-toolbar \{[^}]*position: fixed;[^}]*pointer-events: none;/); assert.match(homeCss, /\.home-page \.home-toolbar > \* \{[^}]*pointer-events: auto;/);
   assert.match(homeCss, /@media \(min-width: 768px\) \{[\s\S]*\.home-page\[data-layout-mode="desktop"\] \.home-grid\[data-layout-mode="desktop"\] \{[^}]*flex: 1;/);
-  assert.match(homeCss, /\.home-page\[data-layout-mode="desktop"\] \{[^}]*overflow: hidden;/);
+  assert.match(homeCss, /\.home-page\[data-layout-mode="desktop"\] \{[^}]*min-height: 100dvh;/); assert.doesNotMatch(homeCss, /\.home-page\[data-layout-mode="desktop"\] \{[^}]*overflow: hidden;/);
   const homeWidgetsJs = await (await fetch(`${base}/home-widgets.js`)).text(); assert.doesNotMatch(homeWidgetsJs, /createElement\('h2'\)/);
   const homeInformationJs = await (await fetch(`${base}/home-information.js`)).text(); assert.doesNotMatch(homeInformationJs, /home-hourly|home-daily|sampleHours|temperatureRange/);
   const homeAppJs = await (await fetch(`${base}/app.js`)).text(); assert.match(homeAppJs, /document\.body\.dataset\.layoutMode = mode/); assert.match(homeAppJs, /\$\('home-grid'\)\.dataset\.layoutMode = mode/); assert.doesNotMatch(homeAppJs, /window\.innerWidth/); assert.match(homeAppJs, /removeEventListener\('resize', cancelResizeGesture\)/);
