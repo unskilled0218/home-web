@@ -150,7 +150,8 @@ test('renders Bookmarks before an accessible Wake-on-LAN section', () => {
   assert.match(html, /id="home-grid"/);
   assert.match(html, /id="home-catalog"/);
   assert.match(bookmarksSection, /aria-labelledby="bookmarks-title"/);
-  assert.match(bookmarksSection, /class="section-actions bookmark-actions"[^>]*>[\s\S]*id="linkwarden-settings"[\s\S]*id="disconnect-linkwarden"[\s\S]*id="refresh-bookmarks"/);
+  assert.doesNotMatch(bookmarksSection, /id="(?:linkwarden-settings|disconnect-linkwarden|refresh-bookmarks)"|bookmark-actions/);
+  assert.match(html, /id="linkwarden-dialog"[\s\S]*id="disconnect-linkwarden"/);
   assert.match(bookmarksSection, /id="bookmark-status" role="status" aria-live="polite"/);
   assert.match(wakeSection, /aria-labelledby="wol-title"/);
   assert.match(wakeSection, /class="section-actions"[^>]*>[\s\S]*id="new-device"/);

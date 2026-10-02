@@ -23,7 +23,6 @@ const linkwardenDialog = document.querySelector('#linkwarden-dialog');
 const linkwardenForm = document.querySelector('#linkwarden-form');
 const linkwardenError = document.querySelector('#linkwarden-error');
 const collectionTreeElement = document.querySelector('#collection-tree');
-const refreshBookmarksButton = document.querySelector('#refresh-bookmarks');
 const disconnectLinkwardenButton = document.querySelector('#disconnect-linkwarden');
 const linkwardenAccountElement = document.querySelector('#linkwarden-account');
 const homeAssistantDevicesElement = document.querySelector('#home-assistant-devices');
@@ -39,7 +38,6 @@ const homeAssistantError = document.querySelector('#home-assistant-error');
 const homeAssistantSubmit = document.querySelector('#home-assistant-submit');
 // Connection management remains reachable when the corresponding widget is absent.
 homeAssistantForm.append(disconnectHomeAssistantButton);
-linkwardenForm.append(disconnectLinkwardenButton);
 
 function setStatus(message = '', error = false) {
   statusElement.textContent = message;
@@ -232,9 +230,8 @@ function renderCollectionTree(message = '') {
   disconnectLinkwardenButton.hidden = !state.linkwarden?.configured;
   linkwardenAccountElement.hidden = !state.linkwarden?.configured;
   linkwardenAccountElement.textContent = state.linkwarden?.configured ? `${state.linkwarden.username} · ${state.linkwarden.baseUrl}` : '';
-  refreshBookmarksButton.disabled = !state.collections.length;
   bookmarkStatusElement.textContent = message;
-  if (!state.linkwarden?.configured) { bookmarkStatusElement.textContent = 'Bookmarks are not connected. Open Bookmarks settings to connect Linkwarden.'; return; }
+  if (!state.linkwarden?.configured) { bookmarkStatusElement.textContent = 'Bookmarks are not connected. Open Home Settings to connect Linkwarden.'; return; }
   if (!state.collections.length) { const empty = document.createElement('p'); empty.className = 'empty'; empty.textContent = 'No collections are available for this account.'; collectionTreeElement.append(empty); return; }
   const renderNodes = (collections) => {
     const list = document.createElement('ul');
@@ -256,7 +253,7 @@ async function load() {
   try { const result = await api('/api/devices'); if (request !== loadGeneration) return; state.devices = result.devices; state.selected = new Set([...state.selected].filter((id) => state.devices.some((device) => device.id === id))); render(); } catch (error) { if (request === loadGeneration) setStatus(error.message, true); }
 }
 
-async function loadBookmarks(refresh = false) {
+async function loadBookmarks() {
   const collections = flattenCollections(state.collections);
   if (!collections.length) { renderCollectionTree(); return; }
   const request = ++bookmarkGeneration;
@@ -264,7 +261,7 @@ async function loadBookmarks(refresh = false) {
   const results = [];
   for (let offset = 0; offset < collections.length; offset += 6) {
     results.push(...await Promise.allSettled(collections.slice(offset, offset + 6).map(async (collection) => {
-      const query = new URLSearchParams({ collection: collection.collectionToken, ...(refresh && { refresh: '1' }) });
+      const query = new URLSearchParams({ collection: collection.collectionToken });
       return { collection, result: await api(`/api/bookmarks?${query}`) };
     })));
     if (request !== bookmarkGeneration) return;
@@ -284,7 +281,7 @@ async function loadBookmarks(refresh = false) {
 
 async function loadCollections() {
   const request = ++state.collectionRequest;
-  state.bookmarks = new Map(); refreshBookmarksButton.disabled = true;
+  state.bookmarks = new Map();
   bookmarkStatusElement.textContent = 'Loading collections…';
   try { const collections = (await api('/api/linkwarden/collections')).collections; if (request !== state.collectionRequest) return; state.collections = collections; renderCollectionTree(); await loadBookmarks(); }
   catch (error) { if (request !== state.collectionRequest) return; state.collections = []; renderCollectionTree(error.message); }
@@ -352,9 +349,7 @@ function openLinkwardenForm() {
   showDialog(linkwardenDialog);
 }
 
-document.querySelector('#linkwarden-settings').addEventListener('click', openLinkwardenForm);
 document.querySelector('#linkwarden-close').addEventListener('click', () => linkwardenDialog.close());
-refreshBookmarksButton.addEventListener('click', () => loadBookmarks(true));
 disconnectLinkwardenButton.addEventListener('click', async () => {
   if (!window.confirm('Disconnect Linkwarden and delete its saved API key?')) return;
   try { await api('/api/linkwarden', { method: 'DELETE' }); state.collectionRequest += 1; state.collections = []; state.bookmarks = new Map(); await loadLinkwarden(); } catch (error) { bookmarkStatusElement.textContent = error.message; }

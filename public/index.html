@@ -16,7 +16,7 @@
       <section id="home-weather" class="home-widget" aria-label="Weather"><div class="widget-content"><p id="home-weather-status" role="status"></p><div id="home-weather-current"></div><p id="home-air"></p></div></section>
       <section id="home-calendar" class="home-widget" aria-label="Calendar"><div class="widget-content"><p id="home-calendar-status" role="status"></p><ol id="home-events"></ol></div></section>
       <section class="dashboard-section bookmarks-section" id="bookmarks-section" aria-labelledby="bookmarks-title">
-        <div class="section-heading"><div><p class="eyebrow">LINKWARDEN</p><h2 id="bookmarks-title">Bookmarks</h2><p class="connected-account" id="linkwarden-account" hidden></p></div><div class="section-actions bookmark-actions"><button class="button secondary" id="linkwarden-settings" type="button">Bookmarks settings</button><button class="text-button" id="disconnect-linkwarden" type="button" hidden>Disconnect</button><button class="button secondary" id="refresh-bookmarks" type="button" disabled>Refresh</button></div></div>
+        <div class="section-heading"><div><p class="eyebrow">LINKWARDEN</p><h2 id="bookmarks-title">Bookmarks</h2><p class="connected-account" id="linkwarden-account" hidden></p></div></div>
         <p class="bookmark-status" id="bookmark-status" role="status" aria-live="polite"></p>
         <div class="bookmark-layout"><nav class="collection-tree" id="collection-tree" aria-label="Linkwarden collections and bookmarks" hidden></nav></div>
       </section>
@@ -95,7 +95,7 @@
         <label>Username<input id="linkwarden-username" name="username" required maxlength="120" autocomplete="username" placeholder="your-linkwarden-username"></label>
         <label>Access token <span class="optional">leave blank to keep current token</span><input id="linkwarden-token" name="accessToken" type="password" autocomplete="new-password" placeholder="Paste a Linkwarden access token"></label>
         <p class="dialog-error" id="linkwarden-error" role="alert"></p>
-        <div class="dialog-actions"><button class="button" type="submit">Connect</button></div>
+        <div class="dialog-actions"><button class="text-button" id="disconnect-linkwarden" type="button" hidden>Disconnect</button><button class="button" type="submit">Connect</button></div>
       </form>
     </dialog>
     <script type="module" src="/app.js"></script>
