@@ -94,6 +94,13 @@
         <div class="dialog-actions"><button class="text-button" id="disconnect-linkwarden" type="button" hidden>Disconnect</button><button class="button" type="submit">Connect</button></div>
       </form>
     </dialog>
+    <!-- Remove after v0.17.2 has displaced cached v0.17.1 integration modules. -->
+    <div id="legacy-integration-controls" hidden inert aria-hidden="true">
+      <button id="new-device" type="button" tabindex="-1"></button>
+      <input id="search" type="search" tabindex="-1">
+      <button id="wake-selected" type="button" tabindex="-1" disabled></button>
+      <button id="home-assistant-settings" type="button" tabindex="-1"></button>
+    </div>
     <script type="module" src="/app.js"></script>
   </body>
 </html>

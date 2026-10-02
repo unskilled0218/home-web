@@ -24,14 +24,21 @@ test('serves dashboard aliases and assets while preserving home and static conta
   server.listen(0, '127.0.0.1'); await once(server, 'listening');
   context.after(() => new Promise((resolve) => server.close(resolve)));
   const base = `http://127.0.0.1:${server.address().port}`;
+  const homeResponse = await fetch(base);
+  assert.equal(homeResponse.status, 200); assert.match(homeResponse.headers.get('content-type'), /text\/html/); assert.equal(homeResponse.headers.get('cache-control'), 'no-store'); assert.equal(homeResponse.headers.get('x-content-type-options'), 'nosniff');
+  const homeDocument = await homeResponse.text();
+  const currentIntegrationIds = ['devices', 'status', 'device-dialog', 'device-form', 'device-error', 'bookmark-status', 'linkwarden-dialog', 'linkwarden-form', 'linkwarden-error', 'collection-tree', 'disconnect-linkwarden', 'linkwarden-account', 'home-assistant-devices', 'home-assistant-status', 'home-assistant-account', 'home-assistant-toolbar', 'home-device-search', 'refresh-home-devices', 'disconnect-home-assistant', 'home-assistant-dialog', 'home-assistant-form', 'home-assistant-error', 'home-assistant-submit', 'dialog-title', 'device-id', 'name', 'mac', 'broadcast', 'ip', 'group', 'cancel', 'dialog-close', 'linkwarden-url', 'linkwarden-username', 'linkwarden-help', 'linkwarden-close', 'home-assistant-url', 'home-assistant-help', 'home-assistant-close'];
+  for (const id of currentIntegrationIds) assert.equal((homeDocument.match(new RegExp(`id="${id}"`, 'g')) ?? []).length, 1, `expected one #${id}`);
+  assert.match(homeDocument, /<div id="legacy-integration-controls" hidden inert aria-hidden="true">/);
+  for (const id of ['new-device', 'search', 'wake-selected', 'home-assistant-settings']) assert.equal((homeDocument.match(new RegExp(`id="${id}"`, 'g')) ?? []).length, 1, `expected one legacy #${id}`);
   let previous;
   for (const route of ['/dashboard', '/dashboard/', '/dashboard']) {
-    const result = await fetch(base + route); assert.equal(result.status, 200); assert.match(result.headers.get('content-type'), /text\/html/);
+    const result = await fetch(base + route); assert.equal(result.status, 200); assert.match(result.headers.get('content-type'), /text\/html/); assert.equal(result.headers.get('cache-control'), 'no-store');
     const html = await result.text(); assert.match(html, /src="\/dashboard.js"/); assert.doesNotMatch(html, /src="\/app.js"/);
     if (previous) assert.equal(html, previous); previous = html;
   }
   for (const name of ['dashboard.js', 'dashboard-helpers.js', 'dashboard-weather.js', 'dashboard-photos.js', 'dashboard-calendar.js', 'dashboard.css', 'app.js', 'home-layout.js', 'home-settings.js', 'home-widgets.js', 'home-information.js', 'home-integrations.js', 'home-shell.js', 'home-responsive.js']) {
-    const result = await fetch(`${base}/${name}`); assert.equal(result.status, 200); assert.match(result.headers.get('content-type'), name.endsWith('.css') ? /text\/css/ : /text\/javascript/);
+    const result = await fetch(`${base}/${name}`); assert.equal(result.status, 200); assert.match(result.headers.get('content-type'), name.endsWith('.css') ? /text\/css/ : /text\/javascript/); assert.equal(result.headers.get('cache-control'), name.endsWith('.js') ? 'no-store' : 'no-cache'); assert.equal(result.headers.get('x-content-type-options'), 'nosniff');
   }
   const iconFiles = ['weather-cloudy.svg', 'weather-fog.svg', 'weather-lightning-rainy.svg', 'weather-lightning.svg', 'weather-night-partly-cloudy.svg', 'weather-night.svg', 'weather-partly-cloudy.svg', 'weather-pouring.svg', 'weather-rainy.svg', 'weather-snowy-rainy.svg', 'weather-snowy.svg', 'weather-sunny.svg'];
   assert.deepEqual(readdirSync(new URL('../public/weather-icons/', import.meta.url)).sort(), iconFiles);

@@ -1,5 +1,26 @@
 import { expect, test } from '@playwright/test';
 
+test('home integrations initialize and open from current or preceding release controls', async ({ page }) => {
+  const errors = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  await page.goto('/');
+  await expect(page.locator('#home-grid')).toBeVisible();
+  await expect(page.locator('#legacy-integration-controls')).toBeHidden();
+  expect(await page.evaluate(() => {
+    const selectors = ['#new-device', '#search', '#wake-selected', '#home-assistant-settings'];
+    return selectors.every((selector) => { const element = document.querySelector(selector); element.addEventListener('click', () => {}); if ('value' in element) element.value = ''; return Boolean(element); });
+  })).toBe(true);
+
+  for (const [type, dialog, close] of [['bookmarks', '#linkwarden-dialog', '#linkwarden-close'], ['home-assistant', '#home-assistant-dialog', '#home-assistant-close'], ['wol', '#device-dialog', '#dialog-close']]) {
+    await page.locator('#home-settings-open').click();
+    await page.locator(`[data-integration="${type}"]`).click();
+    await expect(page.locator(dialog)).toHaveAttribute('open', '');
+    await page.locator(close).click();
+    await expect(page.locator(dialog)).not.toHaveAttribute('open', '');
+  }
+  expect(errors).toEqual([]);
+});
+
 test('edit controls preserve canvas bounds and pixel gestures reach exact geometry', async ({ page }) => {
   await page.setViewportSize({ width: 1200, height: 800 });
   await page.goto('/');

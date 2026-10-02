@@ -257,7 +257,9 @@ export function createDashboardServer({ runtimeConfig, store, linkwarden, homeAs
     if (!target.startsWith(`${publicRoot}${path.sep}`)) return json(response, 404, { error: 'Not found.' });
     try {
       const content = await readFile(target);
-      response.writeHead(200, { 'Content-Type': MIME_TYPES[path.extname(target)] ?? 'application/octet-stream', 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-cache' });
+      const extension = path.extname(target);
+      const cacheControl = ['.html', '.js'].includes(extension) ? 'no-store' : 'no-cache';
+      response.writeHead(200, { 'Content-Type': MIME_TYPES[extension] ?? 'application/octet-stream', 'X-Content-Type-Options': 'nosniff', 'Cache-Control': cacheControl });
       response.end(content);
     } catch { json(response, 404, { error: 'Not found.' }); }
   }
