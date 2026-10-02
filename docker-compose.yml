@@ -1,10 +1,7 @@
 services:
   dashboard:
-    image: node:24-bookworm-slim
-    user: "${DASHBOARD_UID:-1000}:${DASHBOARD_GID:-1000}"
+    image: ${HOME_WEB_IMAGE:-git.lan/dev/home-web:latest}
     network_mode: host
-    working_dir: /app
-    command: node src/server.js
     environment:
       HOST: ${HOST:-127.0.0.1}
       PORT: ${PORT:-3000}
@@ -21,6 +18,6 @@ services:
       CALDAV_CACHE_SECONDS: ${CALDAV_CACHE_SECONDS:-300}
       CALDAV_CA_FILE: ${CALDAV_CA_FILE:-}
     volumes:
-      - ./:/app:ro
       - ./data:/app/data
+      - ./certs:/app/certs:ro
     restart: unless-stopped

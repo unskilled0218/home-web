@@ -63,7 +63,7 @@ NFS_MOUNT_MODE=existing
 NFS_MOUNT_PATH=/srv/dashboard-photos
 ```
 
-The standard Compose service remains unprivileged and does not install an NFS client or receive mount capabilities. The selected `DASHBOARD_UID`/`DASHBOARD_GID` must have read and traverse access to the host-mounted share. Mount NFS on the Docker host with the bounded read-only options above, then add the supplied read-only override:
+The standard Compose service runs as root but does not install an NFS client or receive mount capabilities. The host-mounted share must allow that container process to read and traverse the files; account for the NFS export's root-squash and mode settings on the host. Mount NFS on the Docker host with the bounded read-only options above, then add the supplied read-only override:
 
 ```sh
 NFS_HOST_MOUNT_PATH=/srv/dashboard-photos docker compose -f docker-compose.yml -f docker-compose.nfs.yml up -d
@@ -102,11 +102,16 @@ npm start
 
 ## Container deployment
 
-The supplied `docker-compose.yml` uses the official Node image and host networking because UDP broadcast packets need to leave through the LAN interface. It runs as UID/GID 1000 by default; set `DASHBOARD_UID` and `DASHBOARD_GID` to the owner of `data/` when the host account differs, and ensure that account can create and update files there. Existing root-owned Compose data must be reassigned by the host administrator before upgrading. The service automatically creates the integration-credential encryption key at `data/linkwarden-config-encryption.key` on first startup and reuses it after container recreation. No encryption secret must be configured before a fresh Compose deployment. On Linux, set `HOST` to the host's private address before running:
+Release images are published to the private Forgejo registry as `git.lan/dev/home-web`. The image contains Node 24 and the application source, runs as root, and installs nothing at startup. Compose uses host networking because UDP broadcast packets need to leave through the LAN interface. Log in, create the persistent directories, pull the current image, and start it with the host's private address:
 
 ```sh
+docker login git.lan
+mkdir -p data certs
+docker compose pull
 HOST=192.168.1.10 docker compose up -d
 ```
+
+Only `./data` is writable application storage. The root container creates `data/wol.db` and `data/linkwarden-config-encryption.key`, so files newly created through Compose are normally root-owned on the host. Back them up together and use host administrator privileges when ownership or permissions need to change. The source checkout is not mounted into `/app`; recreating the container always runs the code baked into the selected image.
 
 For private DNS, list the exact hostname used in the browser:
 
@@ -120,7 +125,43 @@ Restrict port 3000 at the host firewall to the trusted LAN. Host networking beha
 
 To retain an existing externally managed key, set `LINKWARDEN_CONFIG_ENCRYPTION_KEY` in Compose's `.env` file before the first startup. The legacy variable name is retained for compatibility, but the key encrypts Linkwarden, Home Assistant, and CalDAV credentials. An explicit key takes precedence and the automatic key file is not created. Keep using the same value after every restart.
 
-The project directory is mounted read-only at `/app`, so optional CA bundles under `./certs` are available to both direct runs and Compose under the same relative paths. Keep these files out of version control; `certs/` is ignored. For a CA stored elsewhere, add a read-only bind mount in a Compose override and set the relevant CA variable to its container path.
+Compose mounts `./certs` read-only at `/app/certs`, so paths such as `./certs/linkwarden-ca.pem` resolve inside the image because its working directory is `/app`. Keep certificate bundles out of version control; `certs/` is ignored. For a CA stored elsewhere, add a read-only bind mount in a Compose override and set the relevant CA variable to its container path.
+
+Run the image without Compose by supplying the same host networking, persistent paths, and host checks:
+
+```sh
+docker run -d \
+  --name home-web \
+  --restart unless-stopped \
+  --network host \
+  --volume "$PWD/data:/app/data" \
+  --volume "$PWD/certs:/app/certs:ro" \
+  --env HOST=192.168.1.10 \
+  --env DATABASE_PATH=/app/data/wol.db \
+  --env LINKWARDEN_CONFIG_ENCRYPTION_KEY_FILE=/app/data/linkwarden-config-encryption.key \
+  git.lan/dev/home-web:latest
+```
+
+For an upgrade, back up `data/`, run `docker compose pull`, and recreate the service. To pin or roll back the application image, set `HOME_WEB_IMAGE=git.lan/dev/home-web:v0.17.0` in `.env`, pull, and recreate. Rolling back an image does not reverse data migrations, so retain the matching backup until the new release is verified.
+
+## Publish a container release
+
+The release scripts use the same Forgejo credential as the `my-rss` reference workflow. The token must have repository-write and package-write access and remain outside this repository. Reuse the protected reference token file by injecting it only for the release process:
+
+```sh
+FORGEJO_TOKEN="$(<"$HOME/.config/my-rss/forgejo-token")" ./scripts/release.sh
+```
+
+`scripts/release.sh` runs only from a clean `main` checkout. It reads the exact semantic version from `package.json`, runs all tests and syntax checks, pushes `main`, builds AMD64 and ARM64 image archives with checksum files under ignored `dist/`, pushes those exact platform images and the immutable `git.lan/dev/home-web:v<version>` manifest, creates the matching Git tag and Forgejo release, uploads all four release assets, and updates `latest` only after every earlier operation succeeds. It refuses to overwrite any existing version or platform tag and fails closed when registry inspection cannot distinguish absence from a connection or authentication error. Run only one release at a time and enable immutable package tags in Forgejo when the server supports them, because client-side checks cannot make concurrent registry writes atomic. `FORGEJO_USER` defaults to `dev` and can be overridden when the shared token belongs to another account. Docker authentication uses a minimal temporary configuration with no inherited credential helper and is removed on exit, so the shared token is not left in the normal Docker credential store or host keychain.
+
+The release workstation needs Node 24, Git, curl, Docker with Buildx, a builder capable of `linux/amd64` and `linux/arm64`, and trusted TLS configuration for `git.lan` in Git, curl, and Docker. Install binfmt support once on a Linux Docker host when cross-platform emulation is required, then confirm the builder before releasing:
+
+```sh
+docker run --privileged --rm tonistiigi/binfmt --install amd64,arm64
+docker buildx inspect --bootstrap
+```
+
+The release command performs real Git, Forgejo API, and registry mutations. Never put `FORGEJO_TOKEN` in `.env`, Compose, shell scripts, command arguments, or Git. If every immutable version image, Git tag, release, and release asset was created but the final `latest` promotion failed, verify that state and run `scripts/release.sh --promote-latest` with the same token. Recovery refuses to promote unless `main`, the version tag, the two-platform manifest, and all four release assets are present and consistent with the package version. For an earlier partial failure, inspect and clean up the incomplete immutable version before starting a new release; the scripts never overwrite it silently.
 
 ## Operational checklist
 
