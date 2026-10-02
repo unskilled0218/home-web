@@ -21,17 +21,13 @@
         <div class="bookmark-layout"><nav class="collection-tree" id="collection-tree" aria-label="Linkwarden collections and bookmarks" hidden></nav></div>
       </section>
       <section class="dashboard-section home-assistant-section" id="home-assistant-section" aria-labelledby="home-assistant-title">
-        <div class="section-heading"><div><p class="eyebrow">HOME ASSISTANT</p><h2 id="home-assistant-title">Devices</h2><p class="section-copy">View current sensor readings and control supported lights, switches, fans, and input booleans.</p><p class="connected-account" id="home-assistant-account" hidden></p></div><div class="section-actions"><button class="button secondary" id="home-assistant-settings" type="button">Home Assistant settings</button><button class="text-button" id="disconnect-home-assistant" type="button" hidden>Disconnect</button><button class="button secondary" id="refresh-home-devices" type="button" disabled>Refresh</button></div></div>
+        <div class="section-heading"><div><p class="eyebrow">HOME ASSISTANT</p><h2 id="home-assistant-title">Devices</h2><p class="connected-account" id="home-assistant-account" hidden></p></div><div class="section-actions"><button class="button secondary" id="refresh-home-devices" type="button" disabled>Refresh</button></div></div>
         <div class="toolbar" id="home-assistant-toolbar" hidden><label class="search"><span class="sr-only">Search Home Assistant devices</span><input id="home-device-search" type="search" placeholder="Search devices, areas, or models"></label></div>
         <p class="status" id="home-assistant-status" role="status" aria-live="polite"></p>
         <div id="home-assistant-devices" class="home-device-groups" aria-live="polite"></div>
       </section>
       <section class="dashboard-section wol-section" id="wol-section" aria-labelledby="wol-title">
-        <div class="section-heading"><div><p class="eyebrow">LOCAL NETWORK</p><h2 id="wol-title">Wake-on-LAN</h2><p class="section-copy">Send a magic packet to a saved machine. A successful request confirms dispatch only, not that the machine powered on.</p></div><div class="section-actions"><button class="button secondary" id="new-device" type="button">Add device</button></div></div>
-        <div class="toolbar" aria-label="Device tools">
-          <label class="search"><span class="sr-only">Search devices</span><input id="search" type="search" placeholder="Search devices or groups"></label>
-          <button class="button" id="wake-selected" type="button" disabled>Wake selected</button>
-        </div>
+        <div class="section-heading"><div><p class="eyebrow">LOCAL NETWORK</p><h2 id="wol-title">Wake-on-LAN</h2></div></div>
         <p class="status" id="status" role="status" aria-live="polite"></p>
         <div id="devices" class="groups" aria-live="polite"></div>
       </section>
@@ -84,7 +80,7 @@
         <label>Home Assistant URL<input id="home-assistant-url" name="url" type="url" required placeholder="http://homeassistant.local:8123"></label>
         <label>Long-lived access token <span class="optional">leave blank to keep the current token</span><input id="home-assistant-token" name="accessToken" type="password" autocomplete="new-password" placeholder="Paste a long-lived access token"></label>
         <p class="dialog-error" id="home-assistant-error" role="alert"></p>
-        <div class="dialog-actions"><button class="button" id="home-assistant-submit" type="submit">Connect</button></div>
+        <div class="dialog-actions"><button class="text-button" id="disconnect-home-assistant" type="button" hidden>Disconnect</button><button class="button" id="home-assistant-submit" type="submit">Connect</button></div>
       </form>
     </dialog>
     <dialog id="linkwarden-dialog" aria-labelledby="linkwarden-dialog-title">

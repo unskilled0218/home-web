@@ -143,6 +143,7 @@ test('renders Bookmarks before an accessible Wake-on-LAN section', () => {
   const homeAssistantStart = html.indexOf('<section class="dashboard-section home-assistant-section"');
   const wakeStart = html.indexOf('<section class="dashboard-section wol-section"');
   const bookmarksSection = html.slice(bookmarksStart, html.indexOf('</section>', bookmarksStart));
+  const homeAssistantSection = html.slice(homeAssistantStart, html.indexOf('</section>', homeAssistantStart));
   const wakeSection = html.slice(wakeStart, html.indexOf('</section>', wakeStart));
   assert.ok(bookmarksStart > -1 && homeAssistantStart > bookmarksStart && wakeStart > homeAssistantStart);
   assert.doesNotMatch(html, /<h1>Home<\/h1>/);
@@ -154,7 +155,13 @@ test('renders Bookmarks before an accessible Wake-on-LAN section', () => {
   assert.match(html, /id="linkwarden-dialog"[\s\S]*id="disconnect-linkwarden"/);
   assert.match(bookmarksSection, /id="bookmark-status" role="status" aria-live="polite"/);
   assert.match(wakeSection, /aria-labelledby="wol-title"/);
-  assert.match(wakeSection, /class="section-actions"[^>]*>[\s\S]*id="new-device"/);
+  assert.doesNotMatch(wakeSection, /class="toolbar"|id="(?:search|wake-selected)"/);
+  assert.doesNotMatch(wakeSection, /id="new-device"|>Add device</);
+  assert.doesNotMatch(homeAssistantSection, /id="(?:home-assistant-settings|disconnect-home-assistant)"/);
+  assert.match(homeAssistantSection, /id="refresh-home-devices"/);
+  assert.match(html, /id="home-assistant-dialog"[\s\S]*id="disconnect-home-assistant"/);
+  assert.match(html, /data-integration="home-assistant"[^>]*>Home Assistant connection<\/button>/);
+  assert.match(html, /data-integration="wol"[^>]*>Add Wake-on-LAN device<\/button>/);
   assert.match(wakeSection, /id="status" role="status" aria-live="polite"/);
   assert.match(html, /id="linkwarden-url"/);
   assert.match(html, /id="linkwarden-username"/);
@@ -169,7 +176,8 @@ test('renders Bookmarks before an accessible Wake-on-LAN section', () => {
   assert.match(html, /id="home-assistant-status" role="status" aria-live="polite"/);
   assert.match(html, /id="home-assistant-error" role="alert"/);
   assert.match(html, /id="home-assistant-token"[^>]*type="password"[^>]*autocomplete="new-password"/);
-  assert.match(html, /View current sensor readings and control supported lights, switches, fans, and input booleans/);
+  assert.doesNotMatch(homeAssistantSection, /section-copy/);
+  assert.doesNotMatch(wakeSection, /section-copy/);
   assert.doesNotMatch(html, /id="(?:test-linkwarden|list-linkwarden-collections|linkwarden-collection)"/);
   const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map((match) => match[1]);
   assert.equal(new Set(ids).size, ids.length);

@@ -1,4 +1,4 @@
-import { filterHomeDevices, flattenCollections, groupHomeDevices, homeControlPresentation, homeMeasurementPresentation, isLatestRequest, runBulkWake, selectedButtonState, showDialogError, updateSelection } from './app-helpers.js';
+import { filterHomeDevices, flattenCollections, groupHomeDevices, homeControlPresentation, homeMeasurementPresentation, isLatestRequest, showDialogError } from './app-helpers.js';
 
 export function selectedHomeDevices(devices, selections) {
   return selections.map((selection) => {
@@ -10,11 +10,9 @@ export function selectedHomeDevices(devices, selections) {
 
 export function createHomeIntegrations({ document = globalThis.document, onDevices = () => {}, fetchImpl = fetch } = {}) {
 let active = new Set(); let selections = []; let loadGeneration = 0; let bookmarkGeneration = 0; let homeStatusRequest = 0;
-const state = { devices: [], selected: new Set(), bulkWakePending: false, bookmarks: new Map(), linkwarden: null, collections: [], collectionRequest: 0, homeAssistant: null, homeDevices: [], homeDeviceRequest: 0, homeAssistantRequest: 0, pendingHomeControls: new Set() };
+const state = { devices: [], bookmarks: new Map(), linkwarden: null, collections: [], collectionRequest: 0, homeAssistant: null, homeDevices: [], homeDeviceRequest: 0, homeAssistantRequest: 0, pendingHomeControls: new Set() };
 const devicesElement = document.querySelector('#devices');
 const statusElement = document.querySelector('#status');
-const searchElement = document.querySelector('#search');
-const selectedButton = document.querySelector('#wake-selected');
 const dialog = document.querySelector('#device-dialog');
 const form = document.querySelector('#device-form');
 const deviceError = document.querySelector('#device-error');
@@ -36,9 +34,6 @@ const homeAssistantDialog = document.querySelector('#home-assistant-dialog');
 const homeAssistantForm = document.querySelector('#home-assistant-form');
 const homeAssistantError = document.querySelector('#home-assistant-error');
 const homeAssistantSubmit = document.querySelector('#home-assistant-submit');
-// Connection management remains reachable when the corresponding widget is absent.
-homeAssistantForm.append(disconnectHomeAssistantButton);
-
 function setStatus(message = '', error = false) {
   statusElement.textContent = message;
   statusElement.classList.toggle('error', error);
@@ -63,32 +58,20 @@ function showDialog(target) {
   target.addEventListener('close', () => launcher?.focus(), { once: true });
 }
 
-function updateSelectedButton() {
-  const presentation = selectedButtonState(state.selected.size, state.bulkWakePending);
-  selectedButton.disabled = presentation.disabled;
-  selectedButton.textContent = presentation.text;
-}
-
 function render() {
-  const term = searchElement.value.trim().toLowerCase();
-  const filtered = state.devices.filter((device) => [device.name, device.group, device.macAddress, device.ipAddress].filter(Boolean).join(' ').toLowerCase().includes(term));
-  updateSelectedButton();
   devicesElement.replaceChildren();
-  if (!filtered.length) {
-    const empty = document.createElement('p'); empty.className = 'empty'; empty.textContent = state.devices.length ? 'No devices match that search.' : 'No devices yet. Add the first computer on your LAN.'; devicesElement.append(empty); return;
+  if (!state.devices.length) {
+    const empty = document.createElement('p'); empty.className = 'empty'; empty.textContent = 'No devices yet. Add devices in Home Settings.'; devicesElement.append(empty); return;
   }
-  const groups = Map.groupBy(filtered, (device) => device.group || 'Ungrouped');
+  const groups = Map.groupBy(state.devices, (device) => device.group || 'Ungrouped');
   for (const [group, devices] of groups) {
     const section = document.createElement('section'); section.className = 'group';
     const title = document.createElement('h3'); title.textContent = group; section.append(title);
     const grid = document.createElement('div'); grid.className = 'device-grid';
     for (const device of devices) {
       const card = document.createElement('article'); card.className = 'device';
-      const top = document.createElement('div'); top.className = 'device-top';
-      const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.className = 'select'; checkbox.checked = state.selected.has(device.id); checkbox.ariaLabel = `Select ${device.name}`;
-      checkbox.addEventListener('change', () => { updateSelection(state.selected, device.id, checkbox.checked); updateSelectedButton(); });
       const name = document.createElement('h3'); name.textContent = device.name;
-      top.append(checkbox, name); card.append(top);
+      card.append(name);
       const details = document.createElement('p'); details.textContent = `${device.macAddress}${device.ipAddress ? ` · ${device.ipAddress}` : ''}`; card.append(details);
       const actions = document.createElement('div'); actions.className = 'device-actions';
       actions.append(button('Wake', 'button', () => wake(device)), button('Edit', 'text-button', () => openForm(device)), button('Remove', 'text-button', () => removeDevice(device)));
@@ -250,7 +233,7 @@ function renderCollectionTree(message = '') {
 
 async function load() {
   const request = ++loadGeneration;
-  try { const result = await api('/api/devices'); if (request !== loadGeneration) return; state.devices = result.devices; state.selected = new Set([...state.selected].filter((id) => state.devices.some((device) => device.id === id))); render(); } catch (error) { if (request === loadGeneration) setStatus(error.message, true); }
+  try { const result = await api('/api/devices'); if (request !== loadGeneration) return; state.devices = result.devices; render(); } catch (error) { if (request === loadGeneration) setStatus(error.message, true); }
 }
 
 async function loadBookmarks() {
@@ -314,10 +297,8 @@ function openForm(device = null) {
   showDialog(dialog);
 }
 
-document.querySelector('#new-device').addEventListener('click', () => openForm());
 document.querySelector('#cancel').addEventListener('click', () => dialog.close());
 document.querySelector('#dialog-close').addEventListener('click', () => dialog.close());
-searchElement.addEventListener('input', render);
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
   showDialogError(deviceError);
@@ -327,18 +308,6 @@ form.addEventListener('submit', async (event) => {
     await api(id ? `/api/devices/${id}` : '/api/devices', { method: id ? 'PUT' : 'POST', body: JSON.stringify(payload) });
     dialog.close(); setStatus(id ? 'Device updated.' : 'Device added.'); await load();
   } catch (error) { showDialogError(deviceError, error.message); }
-});
-selectedButton.addEventListener('click', async () => {
-  if (state.bulkWakePending) return;
-  const devices = state.devices.filter((device) => state.selected.has(device.id));
-  state.bulkWakePending = true;
-  updateSelectedButton();
-  try {
-    const summary = await runBulkWake(devices, wakeRequest);
-    state.selected.clear();
-    await load();
-    setStatus(summary.message, summary.error);
-  } finally { state.bulkWakePending = false; updateSelectedButton(); }
 });
 function openLinkwardenForm() {
   const settings = state.linkwarden;
@@ -370,7 +339,6 @@ function openHomeAssistantForm() {
   showDialog(homeAssistantDialog);
 }
 
-document.querySelector('#home-assistant-settings').addEventListener('click', openHomeAssistantForm);
 document.querySelector('#home-assistant-close').addEventListener('click', () => homeAssistantDialog.close());
 homeDeviceSearch.addEventListener('input', () => renderHomeDevices());
 refreshHomeDevicesButton.addEventListener('click', () => loadHomeDevices(true));

@@ -102,12 +102,10 @@ input:focus { outline: 3px solid #58c5bb66; border-color: #70d6cb; }
 .search { flex: 1; min-width: 0; }
 .groups { display: grid; gap: 1.7rem; }
 .group h3 { margin: 0 0 .65rem; color: #b6c7d7; font-size: .9rem; letter-spacing: .08em; text-transform: uppercase; }
-.device-top { display: flex; align-items: flex-start; gap: .65rem; }
 .device h3 { flex: 1; min-width: 0; margin: 0; font-size: 1rem; overflow-wrap: anywhere; }
 .device p { margin: .55rem 0 1rem; color: #9db5c9; font-family: ui-monospace, monospace; font-size: .8rem; overflow-wrap: anywhere; }
 .device-actions { display: flex; gap: .5rem; }
 .device-actions .button { flex: 1; }
-.select { width: 1.1rem; height: 1.1rem; accent-color: #70d6cb; }
 .home-device-groups { display: grid; gap: 1.7rem; }
 .home-device-group h3 { margin: 0 0 .65rem; color: #b6c7d7; font-size: .9rem; letter-spacing: .08em; text-transform: uppercase; }
 .home-device h4 { margin: 0; font-size: 1rem; overflow-wrap: anywhere; }
