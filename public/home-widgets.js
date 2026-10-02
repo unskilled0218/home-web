@@ -1,4 +1,4 @@
-import { WIDGETS, columns, changeWidget, NO_SPACE } from './home-layout.js';
+import { WIDGETS, changeWidget, NO_SPACE, projectLayout } from './home-layout.js';
 
 // Geometry edits must not restart data owners or their refresh timers.
 export function createWidgetOwners({ integrations, information }) {
@@ -19,21 +19,20 @@ export function createWidgetOwners({ integrations, information }) {
   };
 }
 
-export function gestureLayout(items, id, kind, dx, dy, mode) {
-  const item = items.find((entry) => entry.id === id);
-  if (!item) return items;
-  return changeWidget(items, id, kind === 'resize' ? { w: item.w + dx, h: item.h + dy } : { x: item.x + dx, y: item.y + dy }, mode);
+export function gestureLayout(layout, id, kind, dx, dy, mode) {
+  const item = layout.items.find((entry) => entry.id === id);
+  if (!item) return layout;
+  return changeWidget(layout, id, kind === 'resize' ? { w: item.w + dx, h: item.h + dy } : { x: item.x + dx, y: item.y + dy }, mode);
 }
 
-export function gridMetrics(grid, mode, getStyle = globalThis.getComputedStyle) {
-  const style = getStyle(grid); const rect = grid.getBoundingClientRect();
-  const columnGap = parseFloat(style.columnGap) || 0; const rowGap = parseFloat(style.rowGap) || 0;
-  const rowHeight = parseFloat(style.gridTemplateRows) || parseFloat(style.gridAutoRows);
-  return { x: (rect.width + columnGap) / columns(mode), y: rowHeight + rowGap };
+export function canvasMetrics(grid) {
+  const rect = grid.getBoundingClientRect();
+  return { width: Math.max(1, Math.round(rect.width)), height: Math.max(1, Math.round(rect.height)) };
 }
 
-export function createWidgetEditor({ grid, roots, onChange, onRemove, announce, document = globalThis.document, measure = gridMetrics }) {
-  let items = []; let mode = 'desktop'; let editing = false; let gesture = null;
+export function createWidgetEditor({ grid, roots, onChange, onRemove, announce, document = globalThis.document, measure = canvasMetrics }) {
+  let layout = { canvas: { width: 1, height: 1 }, items: [] }; let mode = 'desktop'; let editing = false; let gesture = null;
+  let measuredCanvas = null;
   const handles = new Map(); const headings = new Map();
   for (const [id, root] of Object.entries(roots)) {
     root.classList.add('home-widget');
@@ -54,9 +53,9 @@ export function createWidgetEditor({ grid, roots, onChange, onRemove, announce, 
         button.addEventListener('keydown', (event) => {
           const delta = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[event.key];
           if (!editing || !delta) return; event.preventDefault();
-          const next = gestureLayout(items, id, kind, ...delta, mode);
+          const current = materialize(); const next = gestureLayout(current, id, kind, ...delta, mode);
           if (!next) { announce(NO_SPACE); return; }
-          onChange(next, mode); announce(`${WIDGETS[id].label} ${kind === 'resize' ? 'resized' : 'moved'}.`);
+          onChange(next, mode); announce(`${WIDGETS[id].label} ${kind === 'resize' ? 'resized' : 'moved'} by one pixel.`);
         });
       }
       controls.push(button);
@@ -64,26 +63,32 @@ export function createWidgetEditor({ grid, roots, onChange, onRemove, announce, 
     }
     root.prepend(header); handles.set(id, controls); headings.set(id, header);
   }
+  function targetCanvas() {
+    const measured = measure(grid, mode, layout);
+    measuredCanvas = measured;
+    if (mode === 'desktop') return measured;
+    return { width: measured.width, height: Math.max(1, Math.round(layout.canvas.height * measured.width / layout.canvas.width)) };
+  }
+  function materialize() { return projectLayout(layout, targetCanvas(), mode); }
   function paint(next) {
     const focused = document.activeElement;
-    for (const [id, root] of Object.entries(roots)) root.hidden = !next.some((item) => item.id === id);
-    next.forEach((item, index) => {
-      const root = roots[item.id]; root.style.gridColumn = `${item.x + 1} / span ${item.w}`; root.style.gridRow = `${item.y + 1} / span ${item.h}`;
+    grid.style.height = mode === 'mobile' ? `${next.canvas.height}px` : '';
+    for (const [id, root] of Object.entries(roots)) root.hidden = !next.items.some((item) => item.id === id);
+    next.items.forEach((item, index) => {
+      const root = roots[item.id]; root.style.left = `${item.x}px`; root.style.top = `${item.y}px`; root.style.width = `${item.w}px`; root.style.height = `${item.h}px`;
       if (!gesture && grid.children[index] !== root) grid.insertBefore(root, grid.children[index] ?? null);
     });
     if (focused && document.activeElement !== focused && !focused.closest('[hidden]')) focused.focus({ preventScroll: true });
   }
   function start(event) {
     if (!editing || event.button !== 0 || gesture) return;
-    event.preventDefault(); const button = event.currentTarget;
-    const step = measure(grid, mode);
-    if (!(step.x > 0) || !(step.y > 0)) return;
-    gesture = { button, pointerId: event.pointerId, id: button.dataset.widget, kind: button.dataset.kind, x: event.clientX, y: event.clientY, before: structuredClone(items), next: items, step };
+    event.preventDefault(); const button = event.currentTarget; const before = materialize();
+    gesture = { button, pointerId: event.pointerId, id: button.dataset.widget, kind: button.dataset.kind, x: event.clientX, y: event.clientY, before, next: before };
     button.setPointerCapture(event.pointerId);
   }
   function move(event) {
     if (!gesture || event.pointerId !== gesture.pointerId) return;
-    gesture.next = gestureLayout(gesture.before, gesture.id, gesture.kind, Math.round((event.clientX - gesture.x) / gesture.step.x), Math.round((event.clientY - gesture.y) / gesture.step.y), mode);
+    gesture.next = gestureLayout(gesture.before, gesture.id, gesture.kind, Math.round(event.clientX - gesture.x), Math.round(event.clientY - gesture.y), mode);
     paint(gesture.next ?? gesture.before);
   }
   function release() { const previous = gesture; gesture = null; if (previous?.button.hasPointerCapture(previous.pointerId)) previous.button.releasePointerCapture(previous.pointerId); return previous; }
@@ -92,10 +97,20 @@ export function createWidgetEditor({ grid, roots, onChange, onRemove, announce, 
   return {
     render(next, nextMode, isEditing) {
       if (mode !== nextMode || !isEditing) cancel();
-      items = next; mode = nextMode; editing = isEditing; grid.style.setProperty('--columns', columns(mode));
+      layout = next; mode = nextMode; editing = isEditing;
       for (const controls of handles.values()) for (const button of controls) button.hidden = !editing;
       for (const heading of headings.values()) heading.hidden = !editing;
-      grid.classList.toggle('editing', editing); if (!gesture) paint(items);
+      grid.classList.toggle('editing', editing); if (!gesture) paint(materialize());
+    },
+    materialize(next = layout, nextMode = mode) {
+      const previousLayout = layout; const previousMode = mode; layout = next; mode = nextMode;
+      const result = materialize(); layout = previousLayout; mode = previousMode; return result;
+    },
+    resize() {
+      const next = measure(grid, mode, layout);
+      const changed = !measuredCanvas || next.width !== measuredCanvas.width || (mode === 'desktop' && next.height !== measuredCanvas.height);
+      if (!changed) return;
+      cancel(); measuredCanvas = next; paint(materialize());
     },
     cancelGesture: cancel,
     dispose: cancel

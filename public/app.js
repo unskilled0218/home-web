@@ -1,4 +1,4 @@
-import { WIDGETS, addWidget, changeWidget, columns, minimumWidth, DESKTOP_ROWS, NO_SPACE } from './home-layout.js';
+import { WIDGETS, addWidget, changeWidget, minimumSize, NO_SPACE } from './home-layout.js';
 import { createHomeSettingsController } from './home-settings.js';
 import { createWidgetEditor, createWidgetOwners } from './home-widgets.js';
 import { createHomeIntegrations } from './home-integrations.js';
@@ -19,7 +19,7 @@ const information = createHomeInformation();
 const owners = createWidgetOwners({ integrations, information });
 const modeOwner = createLayoutModeOwner({ matchMediaImpl: window.matchMedia.bind(window), onChange: switchMode });
 mode = modeOwner.getMode(); document.body.dataset.layoutMode = mode; $('home-grid').dataset.layoutMode = mode;
-const editor = createWidgetEditor({ grid: $('home-grid'), roots, onChange: (items, targetMode) => change((next) => { next.layouts[targetMode] = items; return next; }, false), onRemove: (id, targetMode) => { change((next) => { next.layouts[targetMode] = next.layouts[targetMode].filter((item) => item.id !== id); return next; }, false); $('home-settings-open').focus(); }, announce });
+const editor = createWidgetEditor({ grid: $('home-grid'), roots, onChange: (layout, targetMode) => change((next) => { next.layouts[targetMode] = layout; return next; }, false), onRemove: (id, targetMode) => { change((next) => { next.layouts[targetMode] = { ...next.layouts[targetMode], items: next.layouts[targetMode].items.filter((item) => item.id !== id) }; return next; }, false); $('home-settings-open').focus(); }, announce });
 const settings = createHomeSettingsController({ onChange: render });
 const shell = createHomeShell({ settings, prepareSettings() { fillPreferences(); selectionDraft = structuredClone(current.settings.widgetSettings['home-assistant'].selections); renderSelections(); renderGeometry(); }, cancelGesture: () => editor.cancelGesture() });
 
@@ -37,9 +37,9 @@ function render(state) {
   $('home-layout-label').textContent = `${mode === 'desktop' ? 'Desktop' : 'Mobile'} layout`;
   if (!state.settings) return;
   $('home-grid').hidden = false;
-  const items = state.settings.layouts[mode]; $('home-empty').hidden = items.length > 0;
-  editor.render(items, mode, state.editing && !state.saving);
-  owners.configure(items, state.settings);
+  const layout = state.settings.layouts[mode]; $('home-empty').hidden = layout.items.length > 0;
+  editor.render(layout, mode, state.editing && !state.saving);
+  owners.configure(layout.items, state.settings);
   renderCatalog();
   if (settingsDialog.open && !state.editing && previousRevision !== state.settings.revision) { fillPreferences(); selectionDraft = structuredClone(state.settings.widgetSettings['home-assistant'].selections); renderSelections(); renderGeometry(); }
 }
@@ -56,15 +56,16 @@ async function change(transform, immediate = true) {
 }
 async function updateLayout(operation, immediate = true, targetMode = mode) {
   if (!current?.settings) return;
-  const items = operation(current.settings.layouts[targetMode]);
-  if (!items) { announce(NO_SPACE); return; }
-  await change((next) => { next.layouts[targetMode] = items; return next; }, immediate);
+  const source = targetMode === mode ? editor.materialize(current.settings.layouts[targetMode], targetMode) : current.settings.layouts[targetMode];
+  const layout = operation(source);
+  if (!layout) { announce(NO_SPACE); return; }
+  await change((next) => { next.layouts[targetMode] = layout; return next; }, immediate);
 }
 function renderCatalog() {
   if (!current?.settings) return;
   $('home-catalog-title').textContent = `Add widgets to ${mode} layout`;
   for (const [id, definition] of Object.entries(WIDGETS)) {
-    const exists = current.settings.layouts[mode].some((item) => item.id === id);
+    const exists = current.settings.layouts[mode].items.some((item) => item.id === id);
     let add = $('home-catalog').querySelector(`[data-add="${id}"]`);
     if (!add) { add = button('', async () => { const targetMode = mode; await updateLayout((items) => addWidget(items, id, targetMode), true, targetMode); if (targetMode === mode) renderGeometry(); }); add.dataset.add = id; $('home-catalog').append(add); }
     add.textContent = `${definition.label}${exists ? ' (added)' : ''}`; add.disabled = exists || current.saving;
@@ -73,13 +74,14 @@ function renderCatalog() {
 function renderGeometry() {
   const targetMode = mode;
   $('home-geometry').replaceChildren();
-  for (const item of current.settings.layouts[targetMode]) {
+  const layout = editor.materialize(current.settings.layouts[targetMode], targetMode);
+  for (const item of layout.items) {
     const form = document.createElement('form'); form.className = 'geometry-row'; form.append(make('strong', WIDGETS[item.id].label));
     for (const key of ['x', 'y', 'w', 'h']) {
-      const label = make('label', { x: 'Column (0-based)', y: 'Row (0-based)', w: 'Width', h: 'Height' }[key]); const input = document.createElement('input'); input.name = key; input.type = 'number'; input.required = true; input.step = 1; input.value = item[key]; input.min = key === 'w' ? minimumWidth(item.id, targetMode) : key === 'h' ? 3 : 0; input.max = key === 'w' ? columns(targetMode) : key === 'h' ? (targetMode === 'desktop' ? DESKTOP_ROWS : 24) : key === 'x' ? columns(targetMode) - item.w : targetMode === 'desktop' ? DESKTOP_ROWS - item.h : 144; label.append(input); form.append(label);
+      const minimum = minimumSize(item.id); const label = make('label', { x: 'Left (px)', y: 'Top (px)', w: 'Width (px)', h: 'Height (px)' }[key]); const input = document.createElement('input'); input.name = key; input.type = 'number'; input.required = true; input.step = 1; input.value = item[key]; input.min = key === 'w' ? minimum.width : key === 'h' ? minimum.height : 0; input.max = key === 'w' ? layout.canvas.width : key === 'h' ? layout.canvas.height : key === 'x' ? layout.canvas.width - item.w : layout.canvas.height - item.h; label.append(input); form.append(label);
     }
-    const submit = button('Apply size / position', () => {}); submit.type = 'submit'; form.append(submit, button('Remove', async () => { await change((next) => { next.layouts[targetMode] = next.layouts[targetMode].filter((entry) => entry.id !== item.id); return next; }); if (targetMode === mode) renderGeometry(); }));
-    form.addEventListener('submit', (event) => { event.preventDefault(); updateLayout((items) => changeWidget(items, item.id, Object.fromEntries([...new FormData(form)].map(([key, value]) => [key, Number(value)])), targetMode), false, targetMode); if (targetMode === mode) renderGeometry(); });
+    const submit = button('Apply size / position', () => {}); submit.type = 'submit'; form.append(submit, button('Remove', async () => { await change((next) => { next.layouts[targetMode] = { ...next.layouts[targetMode], items: next.layouts[targetMode].items.filter((entry) => entry.id !== item.id) }; return next; }); if (targetMode === mode) renderGeometry(); }));
+    form.addEventListener('submit', (event) => { event.preventDefault(); updateLayout((currentLayout) => changeWidget(currentLayout, item.id, Object.fromEntries([...new FormData(form)].map(([key, value]) => [key, Number(value)])), targetMode), false, targetMode); if (targetMode === mode) renderGeometry(); });
     $('home-geometry').append(form);
   }
 }
@@ -134,7 +136,7 @@ $('home-calendar-open').addEventListener('click', async () => { settingsLauncher
 for (const dialog of document.querySelectorAll('dialog:not(#home-settings-dialog)')) {
   dialog.addEventListener('close', () => { (settingsLauncher ?? $('home-settings-open')).focus(); settingsLauncher = null; });
 }
-const gridObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(() => editor.cancelGesture()) : null;
+const gridObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(() => editor.resize()) : null;
 gridObserver?.observe($('home-grid'));
 const cancelResizeGesture = () => editor.cancelGesture();
 window.addEventListener('resize', cancelResizeGesture);

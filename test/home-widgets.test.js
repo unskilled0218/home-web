@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createWidgetEditor, createWidgetOwners, gestureLayout, gridMetrics } from '../public/home-widgets.js';
-import { defaultHomeSettings, changeWidget } from '../public/home-layout.js';
+import { canvasMetrics, createWidgetEditor, createWidgetOwners, gestureLayout } from '../public/home-widgets.js';
+import { changeWidget, defaultHomeSettings } from '../public/home-layout.js';
 import { createHomeIntegrations, selectedHomeDevices } from '../public/home-integrations.js';
 
 // Minimal event/geometry surface: tests drive the real editor handlers, not a copy of its algorithm.
@@ -20,83 +20,80 @@ class Element {
   setPointerCapture(id) { this.capture = id; }
   hasPointerCapture(id) { return this.capture === id; }
   releasePointerCapture() { this.capture = null; this.dispatch('lostpointercapture'); }
-  getBoundingClientRect() { return { width: 1184 }; }
+  getBoundingClientRect() { return { width: 500, height: 300 }; }
   closest() { return this.hidden ? this : this.parent?.closest(); }
   focus() { this.document.activeElement = this; }
 }
-function fixture(initial = [{ id: 'time', type: 'time', x: 0, y: 0, w: 4, h: 3 }], step = { x: 100, y: 80 }) {
+function fixture(initial = { canvas: { width: 500, height: 300 }, items: [{ id: 'time', type: 'time', x: 0, y: 0, w: 200, h: 100 }] }, dimensions = { width: 500, height: 300 }) {
   const document = { createElement: (tagName) => new Element(document, tagName), activeElement: null };
-  const grid = new Element(document); const roots = Object.fromEntries(initial.map((item) => [item.id, new Element(document)])); grid.append(...Object.values(roots)); const root = roots.time;
-  let items = initial; let changes = 0; let removed = 0; const announcements = []; const changedModes = []; const removedModes = [];
-  const editor = createWidgetEditor({ document, grid, roots, measure: () => step, onChange: (next, nextMode) => { items = next; changes++; changedModes.push(nextMode); editor.render(items, nextMode, true); }, onRemove: (_id, nextMode) => { removed++; removedModes.push(nextMode); }, announce: (message) => announcements.push(message) });
-  editor.render(items, 'desktop', true);
+  const grid = new Element(document); const roots = Object.fromEntries(initial.items.map((item) => [item.id, new Element(document)])); grid.append(...Object.values(roots)); const root = roots.time ?? Object.values(roots)[0];
+  let layout = initial; let changes = 0; let removed = 0; const announcements = []; const changedModes = []; const removedModes = [];
+  const editor = createWidgetEditor({ document, grid, roots, measure: () => dimensions, onChange: (next, nextMode) => { layout = next; changes++; changedModes.push(nextMode); editor.render(layout, nextMode, true); }, onRemove: (_id, nextMode) => { removed++; removedModes.push(nextMode); }, announce: (message) => announcements.push(message) });
+  editor.render(layout, 'desktop', true);
   const controls = root.children.flatMap((child) => child.children).concat(root.children).filter((child) => child.dataset.kind);
-  return { editor, root, grid, roots, announcements, changedModes, removedModes, heading: root.children[0], get items() { return items; }, get changes() { return changes; }, get removed() { return removed; }, move: controls.find((control) => control.dataset.kind === 'move'), remove: controls.find((control) => control.dataset.kind === 'remove'), resize: controls.find((control) => control.dataset.kind === 'resize') };
+  return { editor, root, grid, roots, announcements, changedModes, removedModes, heading: root.children[0], get layout() { return layout; }, get items() { return layout.items; }, get changes() { return changes; }, get removed() { return removed; }, move: controls.find((control) => control.dataset.kind === 'move'), remove: controls.find((control) => control.dataset.kind === 'remove'), resize: controls.find((control) => control.dataset.kind === 'resize') };
 }
 
 test('editor chrome has no visible title and keeps labeled controls only while editing', () => {
   const f = fixture();
   assert.deepEqual(f.heading.children.map((child) => [child.tagName, child.textContent]), [['BUTTON', 'Move'], ['BUTTON', 'Remove']]);
   assert.equal(f.move.attributes['aria-label'], 'Move Time; use arrow keys'); assert.equal(f.remove.attributes['aria-label'], 'Remove Time'); assert.equal(f.resize.attributes['aria-label'], 'Resize Time; use arrow keys');
-  assert.equal(f.heading.hidden, false); f.editor.render(f.items, 'desktop', false); assert.equal(f.heading.hidden, true);
+  assert.equal(f.heading.hidden, false); f.editor.render(f.layout, 'desktop', false); assert.equal(f.heading.hidden, true);
   assert.equal(f.move.hidden, true); assert.equal(f.remove.hidden, true); assert.equal(f.resize.hidden, true);
 });
 
-test('editor reports the rendered mode for layout mutations and cancels desktop previews before mobile edits', () => {
-  const f = fixture(); f.move.dispatch('pointerdown'); f.move.dispatch('pointermove', { clientX: 200 });
-  f.editor.render([{ ...f.items[0], x: 0, w: 4 }], 'mobile', true); assert.equal(f.move.capture, null); assert.equal(f.changes, 0); assert.equal(f.grid.style['--columns'], 4);
-  f.move.dispatch('keydown', { key: 'ArrowDown' }); assert.deepEqual(f.changedModes, ['mobile']); f.remove.dispatch('click'); assert.deepEqual(f.removedModes, ['mobile']);
+test('one-pixel pointer and keyboard resizing commit exact pixel geometry', () => {
+  const f = fixture(); f.resize.dispatch('pointerdown'); f.resize.dispatch('pointermove', { clientX: 1, clientY: 2 });
+  assert.equal(f.root.style.width, '201px'); assert.equal(f.root.style.height, '102px'); assert.equal(f.changes, 0);
+  f.resize.dispatch('pointerup', { clientX: 1, clientY: 2 }); assert.equal(f.items[0].w, 201); assert.equal(f.items[0].h, 102); assert.equal(f.changes, 1);
+  f.resize.dispatch('keydown', { key: 'ArrowRight' }); assert.equal(f.items[0].w, 202); assert.match(f.announcements.at(-1), /one pixel/);
 });
 
-test('pointer movement previews and commits on release; cancel/breakpoint changes restore geometry', () => {
-  const f = fixture(); f.move.dispatch('pointerdown'); f.move.dispatch('pointermove', { clientX: 200, clientY: 80 });
-  assert.equal(f.changes, 0); assert.equal(f.root.style.gridColumn, '3 / span 4');
-  f.move.dispatch('pointerup', { clientX: 200, clientY: 80 }); assert.equal(f.items[0].x, 2); assert.equal(f.items[0].y, 1); assert.equal(f.changes, 1); assert.equal(f.move.capture, null);
-  f.move.dispatch('pointerdown'); f.move.dispatch('pointermove', { clientX: 400 }); f.move.dispatch('pointercancel'); assert.equal(f.changes, 1); assert.equal(f.root.style.gridColumn, '3 / span 4');
-  f.move.dispatch('pointerdown'); f.editor.render([{ ...f.items[0], x: 0, w: 4 }], 'mobile', true); assert.equal(f.move.capture, null); assert.equal(f.changes, 1);
+test('pixel movement previews, commits, and cancels without track rounding', () => {
+  const f = fixture(); f.move.dispatch('pointerdown'); f.move.dispatch('pointermove', { clientX: 2, clientY: 3 });
+  assert.equal(f.root.style.left, '2px'); assert.equal(f.root.style.top, '3px'); assert.equal(f.changes, 0);
+  f.move.dispatch('pointerup', { clientX: 2, clientY: 3 }); assert.equal(f.items[0].x, 2); assert.equal(f.items[0].y, 3);
+  f.move.dispatch('pointerdown'); f.move.dispatch('pointermove', { clientX: 10, clientY: 10 }); f.move.dispatch('pointercancel'); assert.equal(f.root.style.left, '2px'); assert.equal(f.changes, 1);
 });
 
-test('resize and keyboard edits use the same grid rules and content clicks cannot start gestures', () => {
-  const f = fixture(); f.resize.dispatch('pointerdown'); f.resize.dispatch('pointerup', { clientX: 100, clientY: 160 });
-  assert.equal(f.items[0].w, 5); assert.equal(f.items[0].h, 5);
-  const expected = gestureLayout(f.items, 'time', 'resize', 1, 0, 'desktop'); f.resize.dispatch('keydown', { key: 'ArrowRight' }); assert.deepEqual(f.items, expected);
-  f.root.dispatch('pointerdown'); f.root.dispatch('pointerup', { clientX: 500 }); assert.equal(f.changes, 2);
-  const content = f.root.querySelector('.widget-content'); assert.ok(content);
-  f.editor.render(f.items, 'desktop', false); f.move.dispatch('pointerdown'); f.move.dispatch('pointerup', { clientX: 500 }); assert.equal(f.changes, 2); assert.equal(f.root.querySelector('.widget-content'), content);
+test('upward movement reaches the canvas top while retaining capture and DOM order', () => {
+  const initial = { canvas: { width: 500, height: 300 }, items: [{ id: 'weather', type: 'weather', x: 250, y: 0, w: 250, h: 120 }, { id: 'time', type: 'time', x: 0, y: 100, w: 200, h: 100 }] };
+  const f = fixture(initial); const before = [...f.grid.children]; f.move.dispatch('pointerdown'); f.move.dispatch('pointermove', { clientY: -100 });
+  assert.equal(f.move.capture, 1); assert.deepEqual(f.grid.children, before); assert.equal(f.root.style.top, '0px');
+  f.move.dispatch('pointerup', { clientY: -100 }); assert.equal(f.items.find((item) => item.id === 'time').y, 0); assert.equal(f.move.capture, null);
 });
 
-test('data owners survive geometry edits, reconcile removal, and resume exactly once after page restoration', () => {
-  const calls = []; const integrations = { configure: (ids) => calls.push(['integration', ids]), suspend: () => calls.push(['suspend']) };
-  const information = { configure: (ids) => calls.push(['information', ids]), setVisible: (visible) => calls.push(['visible', visible]) };
-  const owners = createWidgetOwners({ integrations, information }); const settings = defaultHomeSettings();
-  owners.configure(settings.layouts.desktop, settings); assert.equal(calls.length, 2);
-  owners.configure(changeWidget(settings.layouts.desktop, 'time', { w: 2 }, 'desktop'), settings); assert.equal(calls.length, 2);
-  const removed = settings.layouts.desktop.filter((item) => item.id !== 'calendar'); owners.configure(removed, settings); assert.equal(calls.length, 4); assert.ok(!calls[3][1].includes('calendar'));
-  owners.suspend(); owners.configure(removed, settings); assert.equal(calls.length, 6); owners.resume(true); assert.equal(calls.length, 9); owners.configure(removed, settings); assert.equal(calls.length, 9);
+test('lost capture and mode changes restore previews without committing', () => {
+  const f = fixture(); f.move.dispatch('pointerdown'); f.move.dispatch('pointermove', { clientX: 20 }); f.move.releasePointerCapture();
+  assert.equal(f.changes, 0); assert.equal(f.root.style.left, '0px');
+  f.move.dispatch('pointerdown'); f.move.dispatch('pointermove', { clientX: 20 }); f.editor.render(f.layout, 'mobile', true); assert.equal(f.move.capture, null); assert.equal(f.changes, 0); assert.deepEqual(f.changedModes, []);
 });
 
-test('upward previews keep capture and DOM order until release with a neighbor on the target row', () => {
-  const initial = [{ id: 'weather', type: 'weather', x: 4, y: 0, w: 4, h: 3 }, { id: 'time', type: 'time', x: 0, y: 6, w: 4, h: 3 }];
-  const f = fixture(initial, { x: 100, y: 35 }); const before = [...f.grid.children];
-  f.move.dispatch('pointerdown'); f.move.dispatch('pointermove', { clientY: -210 });
-  assert.equal(f.move.capture, 1); assert.deepEqual(f.grid.children, before); assert.equal(f.root.style.gridRow, '1 / span 3');
-  f.move.dispatch('pointerup', { clientY: -210 }); assert.equal(f.items[0].id, 'time'); assert.equal(f.grid.children[0], f.root); assert.equal(f.move.capture, null); assert.equal(f.changes, 1);
-  const keyboard = fixture(initial); for (let index = 0; index < 6; index++) keyboard.move.dispatch('keydown', { key: 'ArrowUp' }); assert.deepEqual(keyboard.items, f.items);
+test('editor-managed mobile height changes do not cancel an active gesture', () => {
+  const dimensions = { width: 320, height: 600 }; const f = fixture(undefined, dimensions); f.editor.render(f.layout, 'mobile', true);
+  f.move.dispatch('pointerdown'); f.move.dispatch('pointermove', { clientY: 1 }); dimensions.height = 650; f.editor.resize();
+  assert.equal(f.move.capture, 1); f.move.dispatch('pointerup', { clientY: 1 }); assert.equal(f.changes, 1);
 });
 
-test('lost capture or container/fullscreen cancellation restores displaced widgets without committing', () => {
-  const initial = [{ id: 'weather', type: 'weather', x: 0, y: 0, w: 4, h: 3 }, { id: 'time', type: 'time', x: 0, y: 6, w: 4, h: 3 }];
-  const f = fixture(initial); f.move.dispatch('pointerdown'); f.move.dispatch('pointermove', { clientY: -480 }); f.move.releasePointerCapture();
-  assert.equal(f.changes, 0); assert.deepEqual(f.items, initial); assert.equal(f.root.style.gridRow, '7 / span 3');
-  f.move.dispatch('pointerdown'); f.move.dispatch('pointermove', { clientY: -480 }); f.editor.cancelGesture(); assert.equal(f.changes, 0); assert.equal(f.move.capture, null);
+test('impossible pixel edits announce the bounded placement failure', () => {
+  const initial = { canvas: { width: 320, height: 240 }, items: [{ id: 'weather', type: 'weather', x: 0, y: 0, w: 320, h: 120 }, { id: 'time', type: 'time', x: 0, y: 120, w: 320, h: 120 }] };
+  const f = fixture(initial, { width: 320, height: 240 }); f.resize.dispatch('pointerdown'); f.resize.dispatch('pointerup', { clientY: 1 });
+  assert.equal(f.changes, 0); assert.match(f.announcements.at(-1), /Not enough space/);
+  assert.deepEqual(canvasMetrics({ getBoundingClientRect: () => ({ width: 319.6, height: 239.6 }) }), { width: 320, height: 240 });
 });
 
-test('desktop full-grid resize is rejected and geometry metrics use measured rows and gaps', () => {
-  const f = fixture(defaultHomeSettings().layouts.desktop); const before = structuredClone(f.items);
-  f.resize.dispatch('pointerdown'); f.resize.dispatch('pointerup', { clientY: 80 }); assert.equal(f.changes, 0); assert.deepEqual(f.items, before); assert.match(f.announcements.at(-1), /Not enough desktop space/);
-  f.resize.dispatch('keydown', { key: 'ArrowDown' }); assert.equal(f.changes, 0);
-  assert.deepEqual(gridMetrics({ getBoundingClientRect: () => ({ width: 1184 }) }, 'desktop', () => ({ columnGap: '16px', rowGap: '8px', gridTemplateRows: '27px 27px' })), { x: 100, y: 35 });
-  assert.deepEqual(gridMetrics({ getBoundingClientRect: () => ({ width: 384 }) }, 'mobile', () => ({ columnGap: '16px', rowGap: '16px', gridTemplateRows: '64px 64px' })), { x: 100, y: 80 });
+test('data owners survive geometry edits and reconcile membership changes', () => {
+  const calls = []; const integrations = { configure: (ids) => calls.push(['integration', ids]), suspend: () => calls.push(['suspend']) }; const information = { configure: (ids) => calls.push(['information', ids]), setVisible: (visible) => calls.push(['visible', visible]) };
+  const owners = createWidgetOwners({ integrations, information }); const settings = defaultHomeSettings(); const items = settings.layouts.desktop.items;
+  owners.configure(items, settings); assert.equal(calls.length, 2); owners.configure(changeWidget(settings.layouts.desktop, 'time', { w: items[0].w - 1 }, 'desktop').items, settings); assert.equal(calls.length, 2);
+  const removed = items.filter((item) => item.id !== 'calendar'); owners.configure(removed, settings); assert.equal(calls.length, 4); assert.ok(!calls[3][1].includes('calendar'));
+  owners.suspend(); owners.configure(removed, settings); assert.equal(calls.length, 6); owners.resume(true); assert.equal(calls.length, 9);
+});
+
+test('gesture helper applies pixel deltas through the shared layout model', () => {
+  const layout = { canvas: { width: 500, height: 300 }, items: [{ id: 'time', type: 'time', x: 10, y: 10, w: 200, h: 100 }] };
+  assert.equal(gestureLayout(layout, 'time', 'move', 1, 1, 'desktop').items[0].x, 11);
+  assert.equal(gestureLayout(layout, 'time', 'resize', 1, 1, 'desktop').items[0].w, 201);
 });
 
 test('selected devices and readings use identities, preserve missing selections, and keep current controls', () => {

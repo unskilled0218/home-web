@@ -14,10 +14,10 @@ test('selects mobile before first render and emits only real breakpoint transiti
   f.change(false); f.change(true); assert.deepEqual(f.modes, ['desktop', 'mobile']); f.owner.dispose(); assert.equal(f.removed, 1);
 });
 
-test('responsive composition selects distinct saved arrays without writing or deriving geometry', () => {
-  const settings = { layouts: { desktop: [{ id: 'time', x: 8, y: 0, w: 4, h: 3 }], mobile: [{ id: 'weather', x: 0, y: 12, w: 4, h: 6 }] } };
+test('responsive composition selects distinct saved pixel layouts without writing or deriving geometry', () => {
+  const settings = { layouts: { desktop: { canvas: { width: 1000, height: 600 }, items: [{ id: 'time', x: 800, y: 0, w: 200, h: 100 }] }, mobile: { canvas: { width: 320, height: 800 }, items: [{ id: 'weather', x: 0, y: 400, w: 320, h: 300 }] } } };
   const rendered = []; const render = (mode) => rendered.push(structuredClone(settings.layouts[mode])); const f = fixture(true, render);
   render(f.owner.getMode()); const original = structuredClone(settings);
   f.change(false); f.change(true);
-  assert.deepEqual(rendered.map((items) => items[0].id), ['weather', 'time', 'weather']); assert.deepEqual(settings, original); f.owner.dispose();
+  assert.deepEqual(rendered.map((layout) => layout.items[0].id), ['weather', 'time', 'weather']); assert.deepEqual(settings, original); f.owner.dispose();
 });

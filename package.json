@@ -1,6 +1,6 @@
 {
   "name": "dashboard",
-  "version": "0.17.0",
+  "version": "0.17.1",
   "private": true,
   "description": "A self-hosted dashboard for CalDAV events, Home Assistant devices, Linkwarden bookmarks, and Wake-on-LAN controls.",
   "type": "module",
@@ -12,6 +12,7 @@
     "start:lan": "node --env-file-if-exists=.env src/server.js",
     "dev": "node --watch --env-file-if-exists=.env src/server.js",
     "test": "node --test",
+    "test:browser": "playwright test --browser=chromium",
     "check": "node --check src/*.js && node --check public/*.js"
   },
   "devDependencies": {

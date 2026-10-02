@@ -5,3 +5,5 @@ data/*.key
 node_modules/
 certs/
 dist/
+playwright-report/
+test-results/
