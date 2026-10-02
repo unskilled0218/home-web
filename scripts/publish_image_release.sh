@@ -105,7 +105,7 @@ if [ "$status" = "404" ]; then
   release_payload=$(mktemp)
   node - "$release_tag" "$head_commit" > "$release_payload" <<'NODE'
 const [tagName, targetCommitish] = process.argv.slice(2);
-process.stdout.write(JSON.stringify({ tag_name: tagName, target_commitish: targetCommitish, name: tagName, draft: false, prerelease: false }));
+process.stdout.write(JSON.stringify({ tag_name: tagName, target_commitish: targetCommitish, name: 'latest', draft: false, prerelease: false }));
 NODE
   status=$(curl --silent --show-error --config "$auth_config" --header 'Content-Type: application/json' --output "$response" --write-out '%{http_code}' --request POST --data-binary "@$release_payload" "$api_url/releases")
   if [ "$status" != "201" ]; then
