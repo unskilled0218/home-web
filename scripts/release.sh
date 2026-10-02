@@ -135,8 +135,15 @@ NODE
   raw_manifest=
 }
 
-promote_latest() {
-  docker buildx imagetools create --tag "$registry_image:latest" "$registry_image:$release_tag"
+publish_latest() {
+  docker buildx build \
+    --platform linux/amd64,linux/arm64 \
+    --provenance=false \
+    --build-arg "APP_VERSION=$package_version" \
+    --build-arg "VCS_REF=$head_commit" \
+    --tag "$registry_image:latest" \
+    --push \
+    "$project_root"
   verify_manifest "$registry_image:latest"
 }
 
@@ -183,60 +190,13 @@ if [ "$mode" = promote ]; then
     echo "Release tag $release_tag does not exist locally" >&2
     exit 1
   fi
-  verify_manifest "$registry_image:$release_tag"
   verify_forgejo_release
-  promote_latest
-  echo "Promoted $registry_image:$release_tag to latest"
+  publish_latest
+  echo "Published $registry_image:latest from $release_tag"
   exit 0
 fi
 
-image_exists() {
-  local image=$1
-  local output
-  if output=$(docker buildx imagetools inspect "$image" 2>&1); then
-    return 0
-  fi
-  if [[ "$output" == *"manifest unknown"* || "$output" == *"no such manifest"* || "$output" == *"$image: not found"* ]]; then
-    return 1
-  fi
-  echo "Could not confirm that registry image is absent: $image" >&2
-  echo "$output" >&2
-  return 2
-}
-
-for image in "$registry_image:$release_tag" "$registry_image:$release_tag-linux-amd64" "$registry_image:$release_tag-linux-arm64"; do
-  if image_exists "$image"; then
-    echo "Registry image already exists and will not be overwritten: $image" >&2
-    exit 1
-  else
-    inspect_status=$?
-    if [ "$inspect_status" -ne 1 ]; then
-      exit "$inspect_status"
-    fi
-  fi
-done
-
 "$project_root/scripts/export_image.sh" "$release_tag"
-for platform in linux/amd64 linux/arm64; do
-  platform_name=${platform//\//-}
-  archive="$project_root/dist/home-web-$release_tag-$platform_name.tar.gz"
-  gzip -dc "$archive" | docker image load
-  built_platform=$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "home-web:$release_tag")
-  if [ "$built_platform" != "$platform" ]; then
-    echo "Loaded image platform is $built_platform, expected $platform" >&2
-    exit 1
-  fi
-  platform_image="$registry_image:$release_tag-$platform_name"
-  docker image tag "home-web:$release_tag" "$platform_image"
-  docker image push "$platform_image"
-done
-
-docker buildx imagetools create \
-  --tag "$registry_image:$release_tag" \
-  "$registry_image:$release_tag-linux-amd64" \
-  "$registry_image:$release_tag-linux-arm64"
-verify_manifest "$registry_image:$release_tag"
-
 "$project_root/scripts/publish_image_release.sh" "$release_tag"
-promote_latest
-echo "Released $release_tag and updated $registry_image:latest"
+publish_latest
+echo "Released $release_tag and published $registry_image:latest"

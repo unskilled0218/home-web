@@ -33,7 +33,7 @@ test('Compose deploys the Forgejo image as root with only data and trust mounts'
   assert.doesNotMatch(compose, /\.\/:\/app/);
 });
 
-test('release helpers are executable, strict, and keep latest promotion last', () => {
+test('release helpers are executable, strict, and publish only latest last', () => {
   for (const name of ['export_image.sh', 'publish_image_release.sh', 'release.sh']) {
     const relative = `scripts/${name}`;
     assert.ok(statSync(path.join(root, relative)).mode & 0o100, `${relative} must be executable`);
@@ -47,11 +47,13 @@ test('release helpers are executable, strict, and keep latest promotion last', (
   assert.match(release, /export DOCKER_CONFIG=\$release_docker_config/);
   assert.match(release, /'\{"auths":\{\}\}'/);
   assert.doesNotMatch(release, /cp .*config\.json/);
-  assert.match(release, /Registry image already exists and will not be overwritten/);
-  assert.match(release, /Could not confirm that registry image is absent/);
-  assert.match(release, /gzip -dc "\$archive" \| docker image load/);
-  assert.ok(release.indexOf('publish_image_release.sh') < release.lastIndexOf('promote_latest'));
-  assert.match(release, /imagetools create --tag "\$registry_image:latest" "\$registry_image:\$release_tag"\n  verify_manifest "\$registry_image:latest"/);
+  assert.ok(release.indexOf('publish_image_release.sh') < release.lastIndexOf('publish_latest'));
+  assert.match(release, /--platform linux\/amd64,linux\/arm64/);
+  assert.match(release, /--tag "\$registry_image:latest"/);
+  assert.match(release, /--push/);
+  assert.match(release, /verify_manifest "\$registry_image:latest"/);
+  assert.doesNotMatch(release, /\$registry_image:\$release_tag/);
+  assert.doesNotMatch(release, /platform_image=/);
   assert.match(release, /require\('\$project_root\/package\.json'\)\.version/);
 });
 
