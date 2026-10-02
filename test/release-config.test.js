@@ -22,12 +22,15 @@ test('production image contains only runtime files and retains the root user', (
   assert.deepEqual(dockerignore.trim().split('\n'), ['*', '!Dockerfile', '!.dockerignore', '!package.json', '!package-lock.json', '!src/', '!src/**', '!public/', '!public/**']);
 });
 
-test('Compose deploys the Forgejo image as root with only data and trust mounts', () => {
+test('Compose deploys the Forgejo image as root with data, trust, and optional NFS mounts', () => {
   const compose = read('docker-compose.yml');
   assert.match(compose, /^    image: \$\{HOME_WEB_IMAGE:-git\.lan\/dev\/home-web:latest\}$/m);
   assert.match(compose, /^    network_mode: host$/m);
   assert.match(compose, /^      - \.\/data:\/app\/data$/m);
   assert.match(compose, /^      - \.\/certs:\/app\/certs:ro$/m);
+  assert.match(compose, /^      NFS_MOUNT_MODE: \$\{NFS_MOUNT_MODE:-disabled\}$/m);
+  assert.match(compose, /^      NFS_MOUNT_PATH: \/photos$/m);
+  assert.match(compose, /^      - \$\{NFS_HOST_MOUNT_PATH:-\.\/photos\}:\/photos:ro$/m);
   assert.doesNotMatch(compose, /^    user:/m);
   assert.doesNotMatch(compose, /^    (?:working_dir|command):/m);
   assert.doesNotMatch(compose, /\.\/:\/app/);

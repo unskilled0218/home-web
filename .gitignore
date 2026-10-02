@@ -4,6 +4,7 @@ data/*.key
 .env
 node_modules/
 certs/
+photos/
 dist/
 playwright-report/
 test-results/

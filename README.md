@@ -63,11 +63,13 @@ NFS_MOUNT_MODE=existing
 NFS_MOUNT_PATH=/srv/dashboard-photos
 ```
 
-The standard Compose service runs as root but does not install an NFS client or receive mount capabilities. The host-mounted share must allow that container process to read and traverse the files; account for the NFS export's root-squash and mode settings on the host. Mount NFS on the Docker host with the bounded read-only options above, then add the supplied read-only override:
+The standard Compose service runs as root but does not install an NFS client or receive mount capabilities. The host-mounted share must allow that container process to read and traverse the files; account for the NFS export's root-squash and mode settings on the host. Mount NFS on the Docker host with the bounded read-only options above, then enable the integrated read-only mount:
 
 ```sh
-NFS_HOST_MOUNT_PATH=/srv/dashboard-photos docker compose -f docker-compose.yml -f docker-compose.nfs.yml up -d
+NFS_MOUNT_MODE=existing NFS_HOST_MOUNT_PATH=/srv/dashboard-photos docker compose up -d
 ```
+
+Compose mounts `${NFS_HOST_MOUNT_PATH:-./photos}` at `/photos` but leaves NFS disabled unless `NFS_MOUNT_MODE=existing` is set.
 
 The browser receives only bounded relative names and temporary opaque image URLs. Absolute mount paths and the NFS source are not exposed. Photo API requests retain the dashboard's trusted-LAN and allowed-Host checks.
 
