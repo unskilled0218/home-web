@@ -135,6 +135,11 @@ NODE
   raw_manifest=
 }
 
+promote_latest() {
+  docker buildx imagetools create --tag "$registry_image:latest" "$registry_image:$release_tag"
+  verify_manifest "$registry_image:latest"
+}
+
 verify_forgejo_release() {
   forgejo_auth_config=$(mktemp)
   forgejo_response=$(mktemp)
@@ -180,7 +185,7 @@ if [ "$mode" = promote ]; then
   fi
   verify_manifest "$registry_image:$release_tag"
   verify_forgejo_release
-  docker buildx imagetools create --tag "$registry_image:latest" "$registry_image:$release_tag"
+  promote_latest
   echo "Promoted $registry_image:$release_tag to latest"
   exit 0
 fi
@@ -233,5 +238,5 @@ docker buildx imagetools create \
 verify_manifest "$registry_image:$release_tag"
 
 "$project_root/scripts/publish_image_release.sh" "$release_tag"
-docker buildx imagetools create --tag "$registry_image:latest" "$registry_image:$release_tag"
+promote_latest
 echo "Released $release_tag and updated $registry_image:latest"

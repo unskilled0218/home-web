@@ -50,7 +50,8 @@ test('release helpers are executable, strict, and keep latest promotion last', (
   assert.match(release, /Registry image already exists and will not be overwritten/);
   assert.match(release, /Could not confirm that registry image is absent/);
   assert.match(release, /gzip -dc "\$archive" \| docker image load/);
-  assert.ok(release.indexOf('publish_image_release.sh') < release.lastIndexOf('imagetools create'));
+  assert.ok(release.indexOf('publish_image_release.sh') < release.lastIndexOf('promote_latest'));
+  assert.match(release, /imagetools create --tag "\$registry_image:latest" "\$registry_image:\$release_tag"\n  verify_manifest "\$registry_image:latest"/);
   assert.match(release, /require\('\$project_root\/package\.json'\)\.version/);
 });
 
