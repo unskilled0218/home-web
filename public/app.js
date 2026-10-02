@@ -1,4 +1,4 @@
-import { WIDGETS, addWidget, changeWidget, minimumSize, NO_SPACE } from './home-layout.js';
+import { WIDGETS, addWidget, changeWidget, MAX_CANVAS_SIZE, minimumSize, NO_SPACE } from './home-layout.js';
 import { createHomeSettingsController } from './home-settings.js';
 import { createWidgetEditor, createWidgetOwners } from './home-widgets.js';
 import { createHomeIntegrations } from './home-integrations.js';
@@ -78,7 +78,7 @@ function renderGeometry() {
   for (const item of layout.items) {
     const form = document.createElement('form'); form.className = 'geometry-row'; form.append(make('strong', WIDGETS[item.id].label));
     for (const key of ['x', 'y', 'w', 'h']) {
-      const minimum = minimumSize(item.id); const label = make('label', { x: 'Left (px)', y: 'Top (px)', w: 'Width (px)', h: 'Height (px)' }[key]); const input = document.createElement('input'); input.name = key; input.type = 'number'; input.required = true; input.step = 1; input.value = item[key]; input.min = key === 'w' ? minimum.width : key === 'h' ? minimum.height : 0; input.max = key === 'w' ? layout.canvas.width : key === 'h' ? layout.canvas.height : key === 'x' ? layout.canvas.width - item.w : layout.canvas.height - item.h; label.append(input); form.append(label);
+      const minimum = minimumSize(item.id); const label = make('label', { x: 'Left (px)', y: 'Top (px)', w: 'Width (px)', h: 'Height (px)' }[key]); const input = document.createElement('input'); input.name = key; input.type = 'number'; input.required = true; input.step = 1; input.value = item[key]; input.min = key === 'w' ? minimum.width : key === 'h' ? minimum.height : 0; input.max = key === 'w' ? layout.canvas.width : key === 'x' ? layout.canvas.width - item.w : MAX_CANVAS_SIZE - (key === 'y' ? item.h : 0); label.append(input); form.append(label);
     }
     const submit = button('Apply size / position', () => {}); submit.type = 'submit'; form.append(submit, button('Remove', async () => { await change((next) => { next.layouts[targetMode] = { ...next.layouts[targetMode], items: next.layouts[targetMode].items.filter((entry) => entry.id !== item.id) }; return next; }); if (targetMode === mode) renderGeometry(); }));
     form.addEventListener('submit', (event) => { event.preventDefault(); updateLayout((currentLayout) => changeWidget(currentLayout, item.id, Object.fromEntries([...new FormData(form)].map(([key, value]) => [key, Number(value)])), targetMode), false, targetMode); if (targetMode === mode) renderGeometry(); });

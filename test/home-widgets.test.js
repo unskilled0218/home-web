@@ -69,16 +69,16 @@ test('lost capture and mode changes restore previews without committing', () => 
   f.move.dispatch('pointerdown'); f.move.dispatch('pointermove', { clientX: 20 }); f.editor.render(f.layout, 'mobile', true); assert.equal(f.move.capture, null); assert.equal(f.changes, 0); assert.deepEqual(f.changedModes, []);
 });
 
-test('editor-managed mobile height changes do not cancel an active gesture', () => {
-  const dimensions = { width: 320, height: 600 }; const f = fixture(undefined, dimensions); f.editor.render(f.layout, 'mobile', true);
-  f.move.dispatch('pointerdown'); f.move.dispatch('pointermove', { clientY: 1 }); dimensions.height = 650; f.editor.resize();
-  assert.equal(f.move.capture, 1); f.move.dispatch('pointerup', { clientY: 1 }); assert.equal(f.changes, 1);
+test('editor-managed canvas growth does not cancel an active gesture', () => {
+  const dimensions = { width: 320, height: 600 }; const initial = { canvas: { width: 320, height: 600 }, items: [{ id: 'time', type: 'time', x: 0, y: 500, w: 200, h: 100 }] }; const f = fixture(initial, dimensions); f.editor.render(f.layout, 'mobile', true);
+  f.move.dispatch('pointerdown'); f.move.dispatch('pointermove', { clientY: 25 }); dimensions.height = 625; f.editor.resize();
+  assert.equal(f.move.capture, 1); f.move.dispatch('pointerup', { clientY: 25 }); assert.equal(f.changes, 1); assert.equal(f.layout.canvas.height, 625);
 });
 
-test('impossible pixel edits announce the bounded placement failure', () => {
+test('desktop pixel edits grow the canvas when the viewport is full', () => {
   const initial = { canvas: { width: 320, height: 240 }, items: [{ id: 'weather', type: 'weather', x: 0, y: 0, w: 320, h: 120 }, { id: 'time', type: 'time', x: 0, y: 120, w: 320, h: 120 }] };
   const f = fixture(initial, { width: 320, height: 240 }); f.resize.dispatch('pointerdown'); f.resize.dispatch('pointerup', { clientY: 1 });
-  assert.equal(f.changes, 0); assert.match(f.announcements.at(-1), /Not enough space/);
+  assert.equal(f.changes, 1); assert.equal(f.items.find((item) => item.id === 'time').h, 121); assert.ok(f.layout.canvas.height > 240);
   assert.deepEqual(canvasMetrics({ getBoundingClientRect: () => ({ width: 319.6, height: 239.6 }) }), { width: 320, height: 240 });
 });
 

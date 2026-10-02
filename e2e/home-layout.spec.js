@@ -27,8 +27,11 @@ test('edit controls preserve canvas bounds and pixel gestures reach exact geomet
   await page.mouse.down(); await page.mouse.move(moveBox.x + moveBox.width / 2, moveBox.y + moveBox.height / 2 - calendarTop); await page.mouse.up();
   await expect.poll(() => calendar.evaluate((element) => Number.parseInt(element.style.top, 10))).toBe(0);
   expect(await grid.boundingBox()).toEqual(before);
+  const wol = page.locator('#wol-section'); const wolMove = wol.locator('.widget-move'); await wolMove.scrollIntoViewIfNeeded(); const wolTop = await wol.evaluate((element) => Number.parseInt(element.style.top, 10)); const wolMoveBox = await wolMove.boundingBox();
+  await page.mouse.move(wolMoveBox.x + wolMoveBox.width / 2, wolMoveBox.y + wolMoveBox.height / 2); await page.mouse.down(); await page.mouse.move(wolMoveBox.x + wolMoveBox.width / 2, wolMoveBox.y + wolMoveBox.height / 2 + 25); await page.mouse.up();
+  await expect.poll(() => wol.evaluate((element) => Number.parseInt(element.style.top, 10))).toBe(wolTop + 25); expect((await grid.boundingBox()).height).toBeGreaterThan(before.height); expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBeGreaterThan(800);
   await page.locator('#home-toolbar-save').click(); await expect(page.locator('#home-toolbar-save')).toBeHidden(); await page.reload();
-  await expect(page.locator('#home-time')).toBeHidden(); await expect.poll(() => calendar.evaluate((element) => Number.parseInt(element.style.top, 10))).toBe(0);
+  await expect(page.locator('#home-time')).toBeHidden(); await expect.poll(() => calendar.evaluate((element) => Number.parseInt(element.style.top, 10))).toBe(0); await expect.poll(() => wol.evaluate((element) => Number.parseInt(element.style.top, 10))).toBe(wolTop + 25);
 });
 
 for (const width of [320, 390]) test(`mobile ${width}px keeps its canvas stable and scrollable while editing`, async ({ page }) => {

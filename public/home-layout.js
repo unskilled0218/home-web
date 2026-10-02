@@ -29,13 +29,13 @@ function normalizedCanvas(canvas, mode) {
 function clampRect(source, canvas, mode) {
   const minimum = minimumSize(source.id);
   const w = clamp(source.w, Math.min(minimum.width, canvas.width), canvas.width);
-  const h = clamp(source.h, Math.min(minimum.height, canvas.height), mode === 'desktop' ? canvas.height : MAX_CANVAS_SIZE);
-  return { ...source, x: clamp(source.x, 0, canvas.width - w), y: clamp(source.y, 0, Math.max(0, (mode === 'desktop' ? canvas.height : MAX_CANVAS_SIZE) - h)), w, h };
+  const h = clamp(source.h, Math.min(minimum.height, canvas.height), MAX_CANVAS_SIZE);
+  return { ...source, x: clamp(source.x, 0, canvas.width - w), y: clamp(source.y, 0, MAX_CANVAS_SIZE - h), w, h };
 }
 
 function candidateCoordinates(item, placed, canvas, mode) {
   const xs = new Set([item.x, 0, canvas.width - item.w]);
-  const ys = new Set([item.y, 0, ...(mode === 'desktop' ? [canvas.height - item.h] : [])]);
+  const ys = new Set([item.y, 0, canvas.height - item.h]);
   for (const other of placed) {
     xs.add(other.x - item.w); xs.add(other.x + other.w);
     ys.add(other.y - item.h); ys.add(other.y + other.h);
@@ -43,7 +43,7 @@ function candidateCoordinates(item, placed, canvas, mode) {
   const candidates = [];
   for (const x of xs) for (const y of ys) {
     const candidate = { ...item, x, y };
-    if (x < 0 || y < 0 || x + item.w > canvas.width || y + item.h > (mode === 'desktop' ? canvas.height : MAX_CANVAS_SIZE)) continue;
+    if (x < 0 || y < 0 || x + item.w > canvas.width || y + item.h > MAX_CANVAS_SIZE) continue;
     if (placed.every((other) => !overlaps(candidate, other))) candidates.push(candidate);
   }
   candidates.sort((a, b) => (Math.abs(a.x - item.x) + Math.abs(a.y - item.y)) - (Math.abs(b.x - item.x) + Math.abs(b.y - item.y)) || spatial(a, b));
@@ -59,16 +59,16 @@ function fittedLayout(items, canvas, mode, priority) {
     if (!next) return null;
     placed.push(next);
   }
-  const height = mode === 'mobile' ? Math.max(canvas.height, ...placed.map((item) => item.y + item.h), 1) : canvas.height;
+  const height = Math.max(canvas.height, ...placed.map((item) => item.y + item.h), 1);
   return { canvas: { width: canvas.width, height }, items: placed.sort(spatial) };
 }
 
 function defaultSize(id, canvas, mode) {
   const definition = WIDGETS[id];
   const width = mode === 'mobile' ? canvas.width : Math.round(canvas.width * definition.width / 12);
-  const height = mode === 'mobile' ? definition.height * 80 - 16 : Math.round(canvas.height * definition.height / 12);
+  const height = mode === 'mobile' ? definition.height * 80 - 16 : Math.round(canvas.width * DESKTOP_CANVAS.height / DESKTOP_CANVAS.width * definition.height / 12);
   const minimum = minimumSize(id);
-  return { width: clamp(width, minimum.width, canvas.width), height: clamp(height, minimum.height, mode === 'desktop' ? canvas.height : MAX_CANVAS_SIZE) };
+  return { width: clamp(width, minimum.width, canvas.width), height: clamp(height, minimum.height, MAX_CANVAS_SIZE) };
 }
 
 export function addWidget(layout, id, mode) {
@@ -77,7 +77,7 @@ export function addWidget(layout, id, mode) {
   const source = { id, type: id, x: 0, y: 0, w: size.width, h: size.height };
   const item = candidateCoordinates(source, layout.items, layout.canvas, mode);
   if (!item) return null;
-  return fittedLayout([...layout.items, item], { ...layout.canvas, height: mode === 'mobile' ? Math.max(layout.canvas.height, item.y + item.h) : layout.canvas.height }, mode);
+  return fittedLayout([...layout.items, item], { ...layout.canvas, height: Math.max(layout.canvas.height, item.y + item.h) }, mode);
 }
 
 export function changeWidget(layout, id, delta, mode) {
@@ -90,8 +90,9 @@ export function changeWidget(layout, id, delta, mode) {
 export function projectLayout(layout, targetCanvas, mode) {
   const width = Math.max(1, Math.round(targetCanvas.width));
   const scaleX = width / layout.canvas.width;
-  const height = mode === 'desktop' ? Math.max(1, Math.round(targetCanvas.height)) : Math.max(1, Math.round(layout.canvas.height * scaleX));
-  const scaleY = mode === 'desktop' ? height / layout.canvas.height : scaleX;
+  const scaledHeight = Math.max(1, Math.round(layout.canvas.height * scaleX));
+  const height = Math.max(Math.round(targetCanvas.height), scaledHeight);
+  const scaleY = scaledHeight > targetCanvas.height ? scaleX : height / layout.canvas.height;
   const items = layout.items.map((item) => {
     const x = Math.round(item.x * scaleX); const y = Math.round(item.y * scaleY);
     const right = Math.round((item.x + item.w) * scaleX); const bottom = Math.round((item.y + item.h) * scaleY);

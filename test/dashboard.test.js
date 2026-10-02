@@ -75,7 +75,7 @@ test('serves dashboard aliases and assets while preserving home and static conta
   const homeCss = await (await fetch(`${base}/styles.css`)).text(); assert.match(homeCss, /\.home-grid \.home-widget \{[^}]*border: 0;/); assert.doesNotMatch(homeCss, /\.widget-heading h2|\.home-forecast/);
   assert.match(homeCss, /\.home-grid \{[^}]*position: relative;/); assert.match(homeCss, /\.home-grid \.home-widget \{[^}]*position: absolute;/);
   assert.match(homeCss, /\.home-page \.home-toolbar \{[^}]*position: fixed;[^}]*pointer-events: none;/); assert.match(homeCss, /\.home-page \.home-toolbar > \* \{[^}]*pointer-events: auto;/);
-  assert.match(homeCss, /@media \(min-width: 768px\) \{[\s\S]*\.home-page\[data-layout-mode="desktop"\] \.home-grid\[data-layout-mode="desktop"\] \{[^}]*flex: 1;/);
+  assert.match(homeCss, /@media \(min-width: 768px\) \{[\s\S]*\.home-page\[data-layout-mode="desktop"\] \.home-grid\[data-layout-mode="desktop"\] \{[^}]*flex: 1 0 auto;/);
   assert.match(homeCss, /\.home-page\[data-layout-mode="desktop"\] \{[^}]*min-height: 100dvh;/); assert.doesNotMatch(homeCss, /\.home-page\[data-layout-mode="desktop"\] \{[^}]*overflow: hidden;/);
   const homeWidgetsJs = await (await fetch(`${base}/home-widgets.js`)).text(); assert.doesNotMatch(homeWidgetsJs, /createElement\('h2'\)/);
   const homeInformationJs = await (await fetch(`${base}/home-information.js`)).text(); assert.doesNotMatch(homeInformationJs, /home-hourly|home-daily|sampleHours|temperatureRange/);

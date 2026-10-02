@@ -66,13 +66,12 @@ export function createWidgetEditor({ grid, roots, onChange, onRemove, announce, 
   function targetCanvas() {
     const measured = measure(grid, mode, layout);
     measuredCanvas = measured;
-    if (mode === 'desktop') return measured;
-    return { width: measured.width, height: Math.max(1, Math.round(layout.canvas.height * measured.width / layout.canvas.width)) };
+    return measured;
   }
   function materialize() { return projectLayout(layout, targetCanvas(), mode); }
   function paint(next) {
     const focused = document.activeElement;
-    grid.style.height = mode === 'mobile' ? `${next.canvas.height}px` : '';
+    grid.style.height = `${next.canvas.height}px`; measuredCanvas = { ...next.canvas };
     for (const [id, root] of Object.entries(roots)) root.hidden = !next.items.some((item) => item.id === id);
     next.items.forEach((item, index) => {
       const root = roots[item.id]; root.style.left = `${item.x}px`; root.style.top = `${item.y}px`; root.style.width = `${item.w}px`; root.style.height = `${item.h}px`;
@@ -108,7 +107,7 @@ export function createWidgetEditor({ grid, roots, onChange, onRemove, announce, 
     },
     resize() {
       const next = measure(grid, mode, layout);
-      const changed = !measuredCanvas || next.width !== measuredCanvas.width || (mode === 'desktop' && next.height !== measuredCanvas.height);
+      const changed = !measuredCanvas || next.width !== measuredCanvas.width || next.height !== measuredCanvas.height;
       if (!changed) return;
       cancel(); measuredCanvas = next; paint(materialize());
     },

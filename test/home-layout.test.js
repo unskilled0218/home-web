@@ -72,11 +72,11 @@ test('bounds pixel geometry and rejects malformed version-two shapes', () => {
   assert.throws(() => normalizeHomeSettings({ ...defaultHomeSettings(), version: 3 }));
 });
 
-test('collision relocation is deterministic and impossible edits preserve input', () => {
+test('collision relocation is deterministic and desktop placement grows downward', () => {
   const layout = { canvas: { width: 500, height: 300 }, items: [{ id: 'weather', type: 'weather', x: 250, y: 0, w: 250, h: 150 }, { id: 'time', type: 'time', x: 0, y: 150, w: 200, h: 100 }] };
   const moved = changeWidget(layout, 'time', { x: 250, y: 0 }, 'desktop'); assertValid(moved); assert.equal(moved.items.find((item) => item.id === 'time').x, 250); assert.equal(moved.items.find((item) => item.id === 'time').y, 0);
-  const full = { canvas: { width: 320, height: 240 }, items: [{ id: 'weather', type: 'weather', x: 0, y: 0, w: 320, h: 240 }] }; const before = structuredClone(full);
-  assert.equal(addWidget(full, 'time', 'desktop'), null); assert.deepEqual(full, before);
+  const full = { canvas: { width: 320, height: 240 }, items: [{ id: 'weather', type: 'weather', x: 0, y: 0, w: 320, h: 240 }] }; const before = structuredClone(full); const added = addWidget(full, 'time', 'desktop');
+  assert.deepEqual(full, before); assert.equal(added.items.find((item) => item.id === 'time').y, 240); assert.ok(added.canvas.height > full.canvas.height); assertValid(added);
 });
 
 test('mobile placement grows downward within its bounded pixel canvas', () => {
