@@ -1,0 +1,39 @@
+# Home Assistant devices
+
+Home Assistant is an optional backend integration with no controls on the photo dashboard. Existing connections remain saved. API clients can configure it through `PUT /api/home-assistant` with `url` (the instance origin, such as `http://homeassistant.local:8123`) and `accessToken` (a long-lived access token from the Home Assistant user profile). Use a dedicated non-admin Home Assistant user where practical and grant only the access needed for the entities you intend to read and control. The dashboard has no user accounts of its own and must remain restricted to a trusted LAN.
+
+The dashboard server connects to Home Assistant's `/api/websocket`, authenticates there, and reads the device registry, area registry, display entity registry, and current states before closing the connection. `GET /api/home-assistant/devices` returns the saved display name, area, manufacturer, model, disabled state, current sensor readings, and eligible controls. Adding `?refresh=1` bypasses the short snapshot cache.
+
+Readings include finite numeric `sensor` states such as temperature, humidity, pressure, battery, air quality, illuminance, moisture, energy, power, voltage, current, and signal strength. Home Assistant supplies the state and preferred unit; the API bounds and returns them without conversion or rounding. Diagnostic sensors are included, while hidden/config entities, disabled devices, orphaned sensors, arbitrary text/enum states, malformed values, and raw state attributes are excluded. `Unavailable` and `Unknown` sensors are returned explicitly.
+
+Readings are cached snapshots updated during initial load, cache expiry, explicit refresh, and the refresh after a control action. They are not a live event stream or historical chart, and the dashboard does not calculate trends, thresholds, or alerts. Sensor rows are read-only and never receive control tokens.
+
+On/off controls are available only for enabled, visible `light`, `switch`, `fan`, and `input_boolean` entities attached to a device-registry entry. Hidden, disabled, config/diagnostic, unavailable, unknown, orphaned, and unsupported entities cannot be controlled. Covers, locks, climate, media players, scenes, scripts, automations, brightness, color, speed, and arbitrary service data are intentionally unsupported.
+
+API clients receive short-lived opaque control tokens instead of Home Assistant device or entity IDs. A control request can select only `turn_on` or `turn_off`; the server resolves its token and sends one fixed `call_service` command for the allowlisted entity. Mutating calls are never retried automatically. After Home Assistant accepts an action, clients should perform a separate forced refresh to read authoritative state. Acceptance confirms the service call completed, not that the physical device changed, and a later refresh failure does not undo or reclassify the accepted action.
+
+The long-lived token is encrypted in `data/wol.db` with the same server key used for Linkwarden credentials. It is never returned to API clients. Send an empty `accessToken` to keep the saved token when the URL is unchanged; changing the URL requires a new token. A failed reconnect leaves the last working configuration intact. `DELETE /api/home-assistant` deletes the saved Home Assistant URL and token.
+
+Normal certificate-chain and hostname verification applies to `https://` Home Assistant URLs. If Home Assistant uses a private CA, save only its public issuing CA/intermediate bundle and configure it before startup. For the supplied Compose service, set the dedicated `.env` variable and restart the container:
+
+```sh
+mkdir -p certs
+cp /path/to/home-assistant-ca.pem certs/home-assistant-ca.pem
+printf '\nHOME_ASSISTANT_CA_FILE=./certs/home-assistant-ca.pem\n' >> .env
+docker compose up -d
+```
+
+For a direct Node run, use Node's native startup variable:
+
+```sh
+printf '\nNODE_EXTRA_CA_CERTS=./certs/home-assistant-ca.pem\n' >> .env
+npm start
+```
+
+The PEM file must contain one or more CA certificates and no private key. A self-signed Home Assistant leaf certificate can be used only when that certificate is itself the trust anchor. The hostname in the configured Home Assistant URL must appear in the certificate's subject alternative names; adding the CA does not bypass hostname, expiration, or chain verification. Changing or rotating the bundle requires a full dashboard process restart because Node reads `NODE_EXTRA_CA_CERTS` only during initialization.
+
+The supplied Compose service maps `HOME_ASSISTANT_CA_FILE` to Node's `NODE_EXTRA_CA_CERTS`; an explicitly supplied `NODE_EXTRA_CA_CERTS` remains a fallback for existing deployments. This augments trust for the whole Node process because the built-in WebSocket client has no per-connection CA option. Use the narrowest appropriate private CA. The existing read-only project mount makes `./certs/home-assistant-ca.pem` available at that path inside `/app`. For a CA outside the project, mount it read-only and use its container path.
+
+If a connection fails, verify that the dashboard host can reach Home Assistant, the URL uses the certificate's exact DNS name or IP SAN, the full issuing chain is present, and the certificates and system clock are current. A trust error points to `NODE_EXTRA_CA_CERTS`; a hostname error requires correcting the URL or certificate rather than adding another CA. Node 24 may report some WebSocket TLS failures only as a generic network error, so check all of these items when no narrower category is available. Plain `http://` sends the token over the local network and should be used only on a network you trust. Keep the dashboard and Home Assistant LAN-only.
+
+[Back to README](../README.md)
