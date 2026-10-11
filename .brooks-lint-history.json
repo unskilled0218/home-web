@@ -9,5 +9,16 @@
       "suggestion": 5
     },
     "scope": "Entire home-web project"
+  },
+  {
+    "date": "2026-10-11",
+    "mode": "PR Review",
+    "score": 99,
+    "findings": {
+      "critical": 0,
+      "warning": 0,
+      "suggestion": 1
+    },
+    "scope": "Plan review: tasks/33-photo-dashboard-home/2-plan.md"
   }
 ]
