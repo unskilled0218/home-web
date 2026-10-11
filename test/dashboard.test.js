@@ -19,27 +19,65 @@ function scheduler() {
   return { tasks, schedule(fn, delay) { tasks.set(++id, { fn, delay }); return id; }, cancel(key) { tasks.delete(key); } };
 }
 
-test('serves dashboard aliases and assets while preserving home and static containment', async (context) => {
+async function staticServer(context) {
   const server = createDashboardServer({ runtimeConfig: {}, store: {} });
   server.listen(0, '127.0.0.1'); await once(server, 'listening');
   context.after(() => new Promise((resolve) => server.close(resolve)));
-  const base = `http://127.0.0.1:${server.address().port}`;
-  const homeResponse = await fetch(base);
-  assert.equal(homeResponse.status, 200); assert.match(homeResponse.headers.get('content-type'), /text\/html/); assert.equal(homeResponse.headers.get('cache-control'), 'no-store'); assert.equal(homeResponse.headers.get('x-content-type-options'), 'nosniff');
-  const homeDocument = await homeResponse.text();
-  const currentIntegrationIds = ['devices', 'status', 'device-dialog', 'device-form', 'device-error', 'bookmark-status', 'linkwarden-dialog', 'linkwarden-form', 'linkwarden-error', 'collection-tree', 'disconnect-linkwarden', 'linkwarden-account', 'home-assistant-devices', 'home-assistant-status', 'home-assistant-account', 'home-assistant-toolbar', 'home-device-search', 'refresh-home-devices', 'disconnect-home-assistant', 'home-assistant-dialog', 'home-assistant-form', 'home-assistant-error', 'home-assistant-submit', 'dialog-title', 'device-id', 'name', 'mac', 'broadcast', 'ip', 'group', 'cancel', 'dialog-close', 'linkwarden-url', 'linkwarden-username', 'linkwarden-help', 'linkwarden-close', 'home-assistant-url', 'home-assistant-help', 'home-assistant-close'];
-  for (const id of currentIntegrationIds) assert.equal((homeDocument.match(new RegExp(`id="${id}"`, 'g')) ?? []).length, 1, `expected one #${id}`);
-  assert.match(homeDocument, /<div id="legacy-integration-controls" hidden inert aria-hidden="true">/);
-  for (const id of ['new-device', 'search', 'wake-selected', 'home-assistant-settings']) assert.equal((homeDocument.match(new RegExp(`id="${id}"`, 'g')) ?? []).length, 1, `expected one legacy #${id}`);
-  let previous;
-  for (const route of ['/dashboard', '/dashboard/', '/dashboard']) {
-    const result = await fetch(base + route); assert.equal(result.status, 200); assert.match(result.headers.get('content-type'), /text\/html/); assert.equal(result.headers.get('cache-control'), 'no-store');
-    const html = await result.text(); assert.match(html, /src="\/dashboard.js"/); assert.doesNotMatch(html, /src="\/app.js"/);
-    if (previous) assert.equal(html, previous); previous = html;
+  return `http://127.0.0.1:${server.address().port}`;
+}
+
+test('serves the photo dashboard at home and index without the retired widget interface', async (context) => {
+  const base = await staticServer(context);
+  let homeDocument;
+  for (const route of ['/', '/index.html']) {
+    const result = await fetch(base + route);
+    assert.equal(result.status, 200, route);
+    assert.match(result.headers.get('content-type'), /text\/html/);
+    assert.equal(result.headers.get('cache-control'), 'no-store');
+    assert.equal(result.headers.get('x-content-type-options'), 'nosniff');
+    const html = await result.text();
+    assert.match(html, /src="\/dashboard.js"/);
+    assert.match(html, /href="\/dashboard.css"/);
+    assert.doesNotMatch(html, /src="\/app.js"|href="\/"|href="\/dashboard"|id="home-|legacy-integration-controls|widget-(?:move|resize)|id="(?:device|linkwarden|home-assistant)-dialog"/);
+    for (const id of ['photos', 'information', 'clock', 'weather', 'calendar', 'open-settings', 'fullscreen', 'settings-dialog']) assert.equal((html.match(new RegExp(`id="${id}"`, 'g')) ?? []).length, 1, `expected one #${id}`);
+    const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map((match) => match[1]);
+    assert.equal(new Set(ids).size, ids.length, 'element IDs are unique');
+    if (homeDocument) assert.equal(html, homeDocument); else homeDocument = html;
   }
-  for (const name of ['dashboard.js', 'dashboard-helpers.js', 'dashboard-weather.js', 'dashboard-photos.js', 'dashboard-calendar.js', 'dashboard.css', 'app.js', 'home-layout.js', 'home-settings.js', 'home-widgets.js', 'home-information.js', 'home-integrations.js', 'home-shell.js', 'home-responsive.js']) {
+});
+
+test('redirects only legacy dashboard documents to the canonical home URL', async (context) => {
+  const base = await staticServer(context);
+  const homeDocument = await (await fetch(base)).text();
+  for (const route of ['/dashboard', '/dashboard/', '/dashboard.html', '/dashboard?old=1']) {
+    const redirect = await fetch(base + route, { redirect: 'manual' });
+    assert.equal(redirect.status, 308, route);
+    assert.equal(redirect.headers.get('location'), '/', route);
+    assert.equal(redirect.headers.get('cache-control'), 'no-store');
+    assert.equal(redirect.headers.get('x-content-type-options'), 'nosniff');
+    assert.equal(await redirect.text(), '');
+    const result = await fetch(base + route);
+    assert.equal(result.status, 200);
+    assert.equal(result.url, `${base}/`, route);
+    assert.equal(await result.text(), homeDocument, route);
+  }
+});
+
+test('serves retained dashboard assets with their MIME and cache headers', async (context) => {
+  const base = await staticServer(context);
+  for (const name of ['dashboard.js', 'dashboard-helpers.js', 'dashboard-weather.js', 'dashboard-photos.js', 'dashboard-calendar.js', 'dashboard.css', 'home-layout.js']) {
     const result = await fetch(`${base}/${name}`); assert.equal(result.status, 200); assert.match(result.headers.get('content-type'), name.endsWith('.css') ? /text\/css/ : /text\/javascript/); assert.equal(result.headers.get('cache-control'), name.endsWith('.js') ? 'no-store' : 'no-cache'); assert.equal(result.headers.get('x-content-type-options'), 'nosniff');
   }
+});
+
+test('returns not found for retired widget assets and paths outside the public directory', async (context) => {
+  const base = await staticServer(context);
+  const retired = ['app.js', 'app-helpers.js', 'styles.css', 'home-settings.js', 'home-widgets.js', 'home-information.js', 'home-integrations.js', 'home-shell.js', 'home-responsive.js'];
+  for (const route of [...retired.map((name) => `/${name}`), '/missing', '/dashboard/missing', '/%2e%2e/package.json', '/..%2fpackage.json', '/src/app.js']) assert.equal((await fetch(base + route, { redirect: 'manual' })).status, 404, route);
+});
+
+test('serves the bounded local weather icon collection', async (context) => {
+  const base = await staticServer(context);
   const iconFiles = ['weather-cloudy.svg', 'weather-fog.svg', 'weather-lightning-rainy.svg', 'weather-lightning.svg', 'weather-night-partly-cloudy.svg', 'weather-night.svg', 'weather-partly-cloudy.svg', 'weather-pouring.svg', 'weather-rainy.svg', 'weather-snowy-rainy.svg', 'weather-snowy.svg', 'weather-sunny.svg'];
   assert.deepEqual(readdirSync(new URL('../public/weather-icons/', import.meta.url)).sort(), iconFiles);
   for (const name of iconFiles) {
@@ -47,12 +85,20 @@ test('serves dashboard aliases and assets while preserving home and static conta
     const icon = await iconResponse.text(); assert.match(icon, /^<svg[^>]*viewBox="0 0 24 24"><path d="[^"]+" \/><\/svg>$/); assert.doesNotMatch(icon, /<script|<text|<animate|<foreignObject|xlink:href|\shref=/i);
   }
   assert.equal((await fetch(`${base}/weather-icons.svg`)).status, 404); assert.equal((await fetch(`${base}/weather-icons/snowflake.svg`)).status, 404);
-  const dashboardHtml = await (await fetch(`${base}/dashboard.html`)).text(); assert.match(dashboardHtml, /<img id="weather-icon"[^>]*alt=""[^>]*aria-hidden="true"[^>]*hidden>/);
+});
+
+test('home preserves forecast, calendar, and photo settings markup', async (context) => {
+  const base = await staticServer(context);
+  const dashboardHtml = await (await fetch(base)).text(); assert.match(dashboardHtml, /<img id="weather-icon"[^>]*alt=""[^>]*aria-hidden="true"[^>]*hidden>/);
   assert.match(dashboardHtml, /NFS backgrounds/); assert.doesNotMatch(dashboardHtml, /id="photo-files"|Choose photos|Reselect/);
   assert.match(dashboardHtml, /id="hourly" aria-label="Hourly forecast"/); assert.match(dashboardHtml, /id="daily" aria-label="Daily forecast"/);
   assert.match(dashboardHtml, /id="calendar-events"/); assert.match(dashboardHtml, /id="calendar-password"[^>]*type="password"[^>]*autocomplete="current-password"/);
   assert.doesNotMatch(dashboardHtml, /refresh-calendar|>Refresh<|calendar-heading/);
   assert.match(dashboardHtml, /Baikal server URL/); assert.match(dashboardHtml, /name="serverUrl"[^>]*placeholder="https:\/\/baikal\.example\.test"/); assert.doesNotMatch(dashboardHtml, /dav\.php\/calendars/);
+});
+
+test('dashboard styles preserve transparent, wrapping forecasts and calendar presentation', async (context) => {
+  const base = await staticServer(context);
   const dashboardCss = await (await fetch(`${base}/dashboard.css`)).text(); assert.match(dashboardCss, /#weather \{[^}]*background: transparent;[^}]*border-radius: 0;/); assert.doesNotMatch(dashboardCss, /#weather \{[^}]*#08101bcc/);
   assert.match(dashboardCss, /#information \{[^}]*width: calc\(100% - 2rem\);[^}]*max-width: none;/); assert.doesNotMatch(dashboardCss, /max-width: min\(55rem/);
   assert.match(dashboardCss, /:fullscreen \.page-tools \{ display: none; \}/);
@@ -67,28 +113,13 @@ test('serves dashboard aliases and assets while preserving home and static conta
   assert.match(dashboardCss, /\.forecast-icon \{[^}]*width: clamp[^}]*filter: brightness\(0\) invert\(1\) drop-shadow/);
   assert.match(dashboardCss, /#calendar \{[^}]*background: transparent;/); assert.match(dashboardCss, /\.calendar-event \{[^}]*background: transparent;/);
   assert.doesNotMatch(dashboardCss, /calendar-heading/);
+});
+
+test('dashboard modules preserve local icons and automatic calendar refresh', async (context) => {
+  const base = await staticServer(context);
   const dashboardJs = await (await fetch(`${base}/dashboard.js`)).text(); assert.match(dashboardJs, /`\/weather-icons\/\$\{weatherIconFile\(/); assert.match(dashboardJs, /icon\.hidden = true; icon\.removeAttribute\('src'\)/); assert.match(dashboardJs, /icon\.alt = ''; icon\.setAttribute\('aria-hidden', 'true'\)/); assert.match(dashboardJs, /forecastItem\(\{ code: hour\.code, day: hour\.day/); assert.match(dashboardJs, /forecastItem\(\{ code: day\.code, label/); assert.match(dashboardJs, /weatherDescription\(code, day\)/); assert.doesNotMatch(dashboardJs, /innerHTML|weather-icons\.svg/);
   assert.doesNotMatch(dashboardJs, /refresh-calendar|forceRefresh/);
   const calendarJs = await (await fetch(`${base}/dashboard-calendar.js`)).text(); assert.doesNotMatch(calendarJs, /forceRefresh|\?refresh=1/);
-  const homeHtml = await (await fetch(base)).text();
-  assert.doesNotMatch(homeHtml, /href="\/dashboard"|<h1>Home<\/h1>|id="home-save"|id="home-cancel"/);
-  const homeMain = homeHtml.slice(homeHtml.indexOf('<main'), homeHtml.indexOf('</main>'));
-  assert.match(homeMain, /class="home-toolbar"><button[^>]*id="home-settings-open"[^>]*>Settings<\/button><button[^>]*id="home-toolbar-save"[^>]*aria-label="Save widget changes"[^>]*hidden[^>]*>Save<\/button><button[^>]*id="home-toolbar-cancel"[^>]*aria-label="Cancel widget changes"[^>]*hidden[^>]*>Cancel<\/button>/);
-  assert.match(homeMain, /id="home-status" class="sr-only"/);
-  assert.doesNotMatch(homeMain, /id="home-(?:layout-label|retry|empty|edit|dialog-save|dialog-cancel|fullscreen)"/);
-  assert.doesNotMatch(homeMain, /id="home-(?:hourly|daily)"|class="home-forecast"|<h3>(?:Hourly|Daily)<\/h3>/);
-  const homeSettings = homeHtml.slice(homeHtml.indexOf('<dialog id="home-settings-dialog"'), homeHtml.indexOf('</dialog>'));
-  for (const id of ['home-edit', 'home-fullscreen', 'home-retry', 'home-layout-label', 'home-dialog-save', 'home-dialog-cancel']) assert.ok(homeSettings.includes(`id="${id}"`));
-  const homeCss = await (await fetch(`${base}/styles.css`)).text(); assert.match(homeCss, /\.home-grid \.home-widget \{[^}]*border: 0;/); assert.doesNotMatch(homeCss, /\.widget-heading h2|\.home-forecast/);
-  assert.match(homeCss, /\.home-grid \{[^}]*position: relative;/); assert.match(homeCss, /\.home-grid \.home-widget \{[^}]*position: absolute;/);
-  assert.match(homeCss, /\.home-page \.home-toolbar \{[^}]*position: fixed;[^}]*pointer-events: none;/); assert.match(homeCss, /\.home-page \.home-toolbar > \* \{[^}]*pointer-events: auto;/);
-  assert.match(homeCss, /@media \(min-width: 768px\) \{[\s\S]*\.home-page\[data-layout-mode="desktop"\] \.home-grid\[data-layout-mode="desktop"\] \{[^}]*flex: 1 0 auto;/);
-  assert.match(homeCss, /\.home-page\[data-layout-mode="desktop"\] \{[^}]*min-height: 100dvh;/); assert.doesNotMatch(homeCss, /\.home-page\[data-layout-mode="desktop"\] \{[^}]*overflow: hidden;/);
-  const homeWidgetsJs = await (await fetch(`${base}/home-widgets.js`)).text(); assert.doesNotMatch(homeWidgetsJs, /createElement\('h2'\)/);
-  const homeInformationJs = await (await fetch(`${base}/home-information.js`)).text(); assert.doesNotMatch(homeInformationJs, /home-hourly|home-daily|sampleHours|temperatureRange/);
-  const homeAppJs = await (await fetch(`${base}/app.js`)).text(); assert.match(homeAppJs, /document\.body\.dataset\.layoutMode = mode/); assert.match(homeAppJs, /\$\('home-grid'\)\.dataset\.layoutMode = mode/); assert.doesNotMatch(homeAppJs, /window\.innerWidth/); assert.match(homeAppJs, /removeEventListener\('resize', cancelResizeGesture\)/);
-  const homeResponsiveJs = await (await fetch(`${base}/home-responsive.js`)).text(); assert.match(homeResponsiveJs, /\(max-width: 767px\)/); assert.match(homeResponsiveJs, /addEventListener\('change'/); assert.match(homeResponsiveJs, /removeEventListener\('change'/);
-  for (const route of ['/missing', '/dashboard/missing', '/%2e%2e/package.json', '/..%2fpackage.json', '/src/app.js']) assert.equal((await fetch(base + route)).status, 404);
 });
 
 test('serves an injected NFS photo snapshot only through protected API routes', async (context) => {

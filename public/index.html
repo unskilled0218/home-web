@@ -3,104 +3,71 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#102a43">
-    <title>dashboard</title>
-    <link rel="stylesheet" href="/styles.css">
+    <meta name="theme-color" content="#000000">
+    <title>Photo dashboard</title>
+    <link rel="stylesheet" href="/dashboard.css">
   </head>
-  <body class="home-page">
-    <main class="shell" aria-label="Home widget dashboard">
-      <div class="home-toolbar"><button class="button secondary" id="home-settings-open" type="button">Settings</button><button class="button" id="home-toolbar-save" type="button" aria-label="Save widget changes" hidden>Save</button><button class="button secondary" id="home-toolbar-cancel" type="button" aria-label="Cancel widget changes" hidden>Cancel</button></div>
-      <p id="home-status" class="sr-only" role="status" aria-live="polite">Loading shared home settings…</p>
-      <div id="home-grid" class="home-grid" aria-label="Home widgets" hidden>
-      <section id="home-time" class="home-widget" aria-label="Time"><div class="widget-content"><p id="home-date"></p><time id="home-clock"></time></div></section>
-      <section id="home-weather" class="home-widget" aria-label="Weather"><div class="widget-content"><p id="home-weather-status" role="status"></p><div id="home-weather-current"></div><p id="home-air"></p></div></section>
-      <section id="home-calendar" class="home-widget" aria-label="Calendar"><div class="widget-content"><p id="home-calendar-status" role="status"></p><ol id="home-events"></ol></div></section>
-      <section class="dashboard-section bookmarks-section" id="bookmarks-section" aria-labelledby="bookmarks-title">
-        <div class="section-heading"><div><p class="eyebrow">LINKWARDEN</p><h2 id="bookmarks-title">Bookmarks</h2><p class="connected-account" id="linkwarden-account" hidden></p></div></div>
-        <p class="bookmark-status" id="bookmark-status" role="status" aria-live="polite"></p>
-        <div class="bookmark-layout"><nav class="collection-tree" id="collection-tree" aria-label="Linkwarden collections and bookmarks" hidden></nav></div>
+  <body>
+    <div id="photos" aria-hidden="true"></div>
+    <header class="page-tools"><button id="fullscreen" type="button">Enter fullscreen</button><button id="open-settings" type="button">Settings</button></header>
+    <p id="page-status" role="status"></p>
+    <main id="information">
+      <h1 class="sr-only">Photo dashboard</h1>
+      <section id="calendar" aria-label="Calendar">
+        <p id="calendar-status" role="status">Checking calendar connection…</p>
+        <ol id="calendar-events"></ol>
       </section>
-      <section class="dashboard-section home-assistant-section" id="home-assistant-section" aria-labelledby="home-assistant-title">
-        <div class="section-heading"><div><p class="eyebrow">HOME ASSISTANT</p><h2 id="home-assistant-title">Devices</h2><p class="connected-account" id="home-assistant-account" hidden></p></div><div class="section-actions"><button class="button secondary" id="refresh-home-devices" type="button" disabled>Refresh</button></div></div>
-        <div class="toolbar" id="home-assistant-toolbar" hidden><label class="search"><span class="sr-only">Search Home Assistant devices</span><input id="home-device-search" type="search" placeholder="Search devices, areas, or models"></label></div>
-        <p class="status" id="home-assistant-status" role="status" aria-live="polite"></p>
-        <div id="home-assistant-devices" class="home-device-groups" aria-live="polite"></div>
+      <section id="clock" aria-label="Clock"><p id="date"></p><time id="time"></time></section>
+      <section id="weather" aria-label="Weather">
+        <p id="weather-status" role="status">Choose a location in Settings to show weather.</p>
+        <div id="current-weather"><img id="weather-icon" class="weather-icon" alt="" aria-hidden="true" hidden><div id="current-weather-values"></div></div>
+        <!-- <div id="current-weather-subvalues"></div> -->
+        <div id="forecast-details"><ul id="hourly" aria-label="Hourly forecast"></ul><ul id="daily" aria-label="Daily forecast"></ul></div>
       </section>
-      <section class="dashboard-section wol-section" id="wol-section" aria-labelledby="wol-title">
-        <div class="section-heading"><div><p class="eyebrow">LOCAL NETWORK</p><h2 id="wol-title">Wake-on-LAN</h2></div></div>
-        <p class="status" id="status" role="status" aria-live="polite"></p>
-        <div id="devices" class="groups" aria-live="polite"></div>
-      </section>
-      </div>
+      <p id="photo-caption"></p>
     </main>
-    <dialog id="home-settings-dialog" aria-labelledby="home-settings-title">
-      <div class="dialog-heading"><h2 id="home-settings-title">Home settings</h2><button type="button" id="home-settings-close" class="icon-button" aria-label="Close home settings">×</button></div>
-      <button id="home-fullscreen" class="button secondary" type="button">Enter fullscreen</button><p id="home-fullscreen-status" role="status"></p>
-      <p id="home-layout-label"></p><p id="home-settings-status" role="status">Loading shared home settings…</p><button id="home-retry" class="button secondary" type="button">Reload settings</button>
-      <p id="home-empty" hidden>No widgets in this layout. Add widgets below.</p>
-      <fieldset id="home-config" disabled>
-      <button class="button" id="home-edit" type="button">Edit widgets</button>
-      <p>Saved on this server for every device. Desktop and mobile have separate layouts; display preferences are shared.</p>
-      <h3 id="home-catalog-title">Add widgets</h3><div id="home-catalog" class="home-catalog"></div>
-      <h3>Widget position and size</h3><p>Changes here edit the current layout. Save shared changes to finish, or Cancel to discard.</p><div id="home-geometry"></div>
-      <form id="home-preferences">
-        <h3>Display preferences</h3>
-        <label>Timezone<input name="timezone" value="UTC" maxlength="80" required></label>
-        <label>Date style<select name="dateStyle"><option>short</option><option>medium</option><option>long</option><option>full</option></select></label>
-        <label class="toggle"><input name="hour12" type="checkbox">12-hour clock</label><label class="toggle"><input name="seconds" type="checkbox">Show seconds</label>
-        <label>Temperature<select name="temperature"><option value="celsius">Celsius</option><option value="fahrenheit">Fahrenheit</option></select></label>
-        <label>Wind<select name="wind"><option value="kmh">km/h</option><option value="mph">mph</option><option value="ms">m/s</option><option value="kn">knots</option></select></label>
-        <label>Precipitation<select name="precipitation"><option value="mm">mm</option><option value="inch">inches</option></select></label>
-        <button type="submit" class="button">Apply display preferences</button>
+    <dialog id="settings-dialog" aria-labelledby="settings-title">
+      <div class="dialog-heading"><h2 id="settings-title">Dashboard settings</h2><button id="close-settings" type="button">Close</button></div>
+      <p id="settings-status" role="status"></p>
+      <form id="preferences">
+        <fieldset><legend>Information layout</legend>
+          <label>Position<select name="position"><option value="left">Lower left</option><option value="right">Lower right</option></select></label>
+          <label>Overall scale<input name="scale" type="number" min="0.5" max="2" step="0.1"></label>
+        </fieldset>
+        <fieldset><legend>Time</legend>
+          <label class="toggle"><input name="timeVisible" type="checkbox">Show clock</label>
+          <label>Clock scale<input name="timeScale" type="number" min="0.5" max="2" step="0.1"></label>
+          <label>Timezone<input name="timezone" maxlength="80" placeholder="Europe/London" required></label>
+          <label>Date style<select name="dateStyle"><option>short</option><option>medium</option><option>long</option><option>full</option></select></label>
+          <label class="toggle"><input name="hour12" type="checkbox">12-hour clock</label><label class="toggle"><input name="seconds" type="checkbox">Show seconds</label>
+        </fieldset>
+        <fieldset><legend>Weather</legend>
+          <label class="toggle"><input name="weatherVisible" type="checkbox">Show weather</label>
+          <label>Weather scale<input name="weatherScale" type="number" min="0.5" max="2" step="0.1"></label>
+          <label>Temperature<select name="temperature"><option value="celsius">Celsius</option><option value="fahrenheit">Fahrenheit</option></select></label>
+          <label>Wind<select name="wind"><option value="kmh">km/h</option><option value="mph">mph</option><option value="ms">m/s</option><option value="kn">knots</option></select></label>
+          <label>Precipitation<select name="precipitation"><option value="mm">mm</option><option value="inch">inches</option></select></label>
+        </fieldset>
+        <fieldset><legend>Calendar</legend>
+          <label class="toggle"><input name="calendarVisible" type="checkbox">Show calendar</label>
+          <label>Calendar scale<input name="calendarScale" type="number" min="0.5" max="2" step="0.1"></label>
+        </fieldset>
+        <fieldset><legend>Images</legend>
+          <label>Order<select name="order"><option value="random">Shuffled</option><option value="name">Name</option><option value="date">Modification date</option></select></label>
+          <label>Interval (seconds)<input name="interval" type="number" min="5" max="3600"></label>
+          <label>Transition<select name="animation"><option value="fade">Fade</option><option value="slide">Slide</option><option value="none">None</option></select></label>
+          <label>Transition duration (seconds)<input name="duration" type="number" min="0" max="10" step="0.1"></label>
+          <label>Opacity<input name="opacity" type="number" min="0" max="1" step="0.1"></label>
+          <label>Background<select name="background"><option value="color">Solid color</option><option value="blur">Blurred image</option></select></label>
+          <label>Background color<input name="color" type="color"></label><label>Background blur (pixels)<input name="blur" type="number" min="0" max="100"></label>
+          <label class="toggle"><input name="imageInfo" type="checkbox">Show filename</label>
+        </fieldset>
+        <button type="submit">Save preferences</button>
       </form>
-      <section><h3>Weather location</h3><p>Search terms and coordinates are sent to Open-Meteo.</p><form id="home-location-search"><label>City or place<input id="home-location-query" minlength="2" maxlength="120" required></label><button class="button" type="submit">Search</button><button id="home-location-clear" class="button secondary" type="button">Clear location</button></form><p id="home-location-status" role="status"></p><ul id="home-location-results"></ul></section>
-      <section><h3>Home Assistant selection</h3><button id="home-select-load" class="button secondary" type="button">Load devices</button><label>Find devices<input id="home-select-search" type="search"></label><p id="home-select-status" role="status"></p><div id="home-selections"></div><button id="home-select-save" class="button" type="button">Apply selected devices and readings</button></section>
-      <section><h3>Integration settings</h3><div class="section-actions"><button data-integration="bookmarks" class="button secondary" type="button">Bookmarks connection</button><button data-integration="home-assistant" class="button secondary" type="button">Home Assistant connection</button><button data-integration="wol" class="button secondary" type="button">Add Wake-on-LAN device</button><button id="home-calendar-open" class="button secondary" type="button">Calendar connection</button></div></section>
-      <div class="dialog-actions"><button id="home-dialog-save" class="button" type="button">Save shared changes</button><button id="home-dialog-cancel" class="button secondary" type="button">Cancel / reload</button></div>
-      </fieldset>
+      <section aria-labelledby="photos-title"><h3 id="photos-title">NFS backgrounds</h3><p>The server loads JPEG, PNG, WebP, and GIF backgrounds from its configured read-only NFS share. Reload this page after changing files on the share.</p><p id="photo-status" role="status">Loading NFS backgrounds…</p></section>
+      <section aria-labelledby="location-title"><h3 id="location-title">Weather location</h3><p>Searches and selected coordinates are sent directly to Open-Meteo. Preferences are saved only in this browser.</p><form id="location-search"><label>City or place<input id="location-query" type="search" minlength="2" maxlength="120" required></label><button type="submit">Search</button><button id="clear-location" type="button">Clear location</button></form><p id="search-status" role="status"></p><ul id="location-results"></ul></section>
+      <section aria-labelledby="calendar-settings-title"><h3 id="calendar-settings-title">Baikal calendar</h3><p>Enter the Baikal server URL. Event calendars are discovered automatically. The password is encrypted on this server and never shown again; leave it blank to retain it when the URL and username are unchanged.</p><form id="calendar-connection"><label>Baikal server URL<input id="calendar-url" name="serverUrl" type="url" maxlength="2048" placeholder="https://baikal.example.test" autocomplete="url" required></label><label>Username<input id="calendar-username" name="username" maxlength="120" autocomplete="username" required></label><label>Password<input id="calendar-password" name="password" type="password" maxlength="2000" autocomplete="current-password"></label><div class="calendar-settings-actions"><button id="connect-calendar" type="submit">Connect calendar</button><button id="disconnect-calendar" type="button">Disconnect calendar</button></div></form><p id="calendar-settings-status" role="status"></p></section>
     </dialog>
-    <dialog id="home-calendar-dialog" aria-labelledby="home-calendar-title"><div class="dialog-heading"><h2 id="home-calendar-title">Baikal calendar</h2><button id="home-calendar-close" class="icon-button" type="button" aria-label="Close calendar settings">×</button></div><form id="home-calendar-form"><label>Baikal server URL<input name="serverUrl" type="url" required maxlength="2048" placeholder="https://baikal.example.test"></label><label>Username<input name="username" required maxlength="120" autocomplete="username"></label><label>Password (leave blank to retain)<input name="password" type="password" maxlength="2000" autocomplete="current-password"></label><p id="home-calendar-message" role="status"></p><button id="home-calendar-connect" class="button" type="submit">Connect calendar</button><button id="home-calendar-disconnect" class="button secondary" type="button">Disconnect calendar</button></form></dialog>
-    <dialog id="device-dialog" aria-labelledby="dialog-title">
-      <form id="device-form">
-        <div class="dialog-heading"><h2 id="dialog-title">Add device</h2><button class="icon-button" id="dialog-close" type="button" aria-label="Close">×</button></div>
-        <input id="device-id" type="hidden">
-        <label>Name<input id="name" name="name" maxlength="80" required placeholder="Office PC"></label>
-        <label>MAC address<input id="mac" name="macAddress" required placeholder="AA:BB:CC:DD:EE:FF" pattern="([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}"></label>
-        <label>Broadcast address<input id="broadcast" name="broadcastAddress" required placeholder="192.168.1.255" inputmode="decimal"></label>
-        <label>IP address <span class="optional">optional</span><input id="ip" name="ipAddress" placeholder="192.168.1.42" inputmode="decimal"></label>
-        <label>Group <span class="optional">optional</span><input id="group" name="group" maxlength="80" placeholder="Office"></label>
-        <p class="dialog-error" id="device-error" role="alert"></p>
-        <div class="dialog-actions"><button class="button secondary" value="cancel" type="button" id="cancel">Cancel</button><button class="button" value="default" type="submit">Save device</button></div>
-      </form>
-    </dialog>
-    <dialog id="home-assistant-dialog" aria-labelledby="home-assistant-dialog-title">
-      <form id="home-assistant-form">
-        <div class="dialog-heading"><h2 id="home-assistant-dialog-title">Home Assistant settings</h2><button class="icon-button" id="home-assistant-close" type="button" aria-label="Close">×</button></div>
-        <p class="form-help" id="home-assistant-help">Connect with a long-lived access token. The token is encrypted on this server and never shown again.</p>
-        <label>Home Assistant URL<input id="home-assistant-url" name="url" type="url" required placeholder="http://homeassistant.local:8123"></label>
-        <label>Long-lived access token <span class="optional">leave blank to keep the current token</span><input id="home-assistant-token" name="accessToken" type="password" autocomplete="new-password" placeholder="Paste a long-lived access token"></label>
-        <p class="dialog-error" id="home-assistant-error" role="alert"></p>
-        <div class="dialog-actions"><button class="text-button" id="disconnect-home-assistant" type="button" hidden>Disconnect</button><button class="button" id="home-assistant-submit" type="submit">Connect</button></div>
-      </form>
-    </dialog>
-    <dialog id="linkwarden-dialog" aria-labelledby="linkwarden-dialog-title">
-      <form id="linkwarden-form">
-        <div class="dialog-heading"><h2 id="linkwarden-dialog-title">Bookmarks settings</h2><button class="icon-button" id="linkwarden-close" type="button" aria-label="Close">×</button></div>
-        <p class="form-help" id="linkwarden-help">Connect with a Linkwarden username and access token. The token is encrypted on this server and never shown again.</p>
-        <label>Linkwarden URL<input id="linkwarden-url" name="url" type="url" required placeholder="https://links.example.com"></label>
-        <label>Username<input id="linkwarden-username" name="username" required maxlength="120" autocomplete="username" placeholder="your-linkwarden-username"></label>
-        <label>Access token <span class="optional">leave blank to keep current token</span><input id="linkwarden-token" name="accessToken" type="password" autocomplete="new-password" placeholder="Paste a Linkwarden access token"></label>
-        <p class="dialog-error" id="linkwarden-error" role="alert"></p>
-        <div class="dialog-actions"><button class="text-button" id="disconnect-linkwarden" type="button" hidden>Disconnect</button><button class="button" type="submit">Connect</button></div>
-      </form>
-    </dialog>
-    <!-- Remove after v0.17.2 has displaced cached v0.17.1 integration modules. -->
-    <div id="legacy-integration-controls" hidden inert aria-hidden="true">
-      <button id="new-device" type="button" tabindex="-1"></button>
-      <input id="search" type="search" tabindex="-1">
-      <button id="wake-selected" type="button" tabindex="-1" disabled></button>
-      <button id="home-assistant-settings" type="button" tabindex="-1"></button>
-    </div>
-    <script type="module" src="/app.js"></script>
+    <script type="module" src="/dashboard.js"></script>
   </body>
 </html>
