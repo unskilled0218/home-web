@@ -181,7 +181,7 @@ $('location-search').addEventListener('submit', async (event) => {
     }
   } catch { if (request === searchGeneration) $('search-status').textContent = 'Location search unavailable. Please try again.'; }
 });
-$('clear-location').addEventListener('click', () => { cancelSearch(); settings = normalizeSettings({ ...settings, location: null }); save(); apply(); $('location-results').replaceChildren(); $('search-status').textContent = 'Location cleared.'; });
+$('clear-location').addEventListener('click', () => { cancelSearch(); $('location-results').replaceChildren(); $('search-status').textContent = 'Search results cleared.'; });
 
 $('calendar-connection').addEventListener('submit', async (event) => {
   event.preventDefault();

@@ -22,6 +22,27 @@ async function seedPreferences(page, preferences) {
   }, { key: settingsKey, value: preferences });
 }
 
+async function mockWeather(page) {
+  const requests = { forecast: 0, air: 0 };
+  const epoch = instant.getTime() / 1000;
+  await page.route('https://api.open-meteo.com/v1/forecast?*', (route) => {
+    requests.forecast++;
+    return route.fulfill({ json: {
+      current: { time: epoch, temperature_2m: 12, weather_code: 0, is_day: 1, wind_speed_10m: 8, relative_humidity_2m: 50, precipitation: 0 },
+      current_units: { temperature_2m: '°C', wind_speed_10m: 'km/h', relative_humidity_2m: '%', precipitation: 'mm' },
+      hourly: { time: Array.from({ length: 25 }, (_, index) => epoch + index * 3600), temperature_2m: Array(25).fill(13), weather_code: Array(25).fill(2), is_day: Array(25).fill(1) },
+      hourly_units: { temperature_2m: '°C' },
+      daily: { time: Array.from({ length: 7 }, (_, index) => epoch + index * 86400), temperature_2m_min: Array(7).fill(8), temperature_2m_max: Array(7).fill(15), weather_code: Array(7).fill(2) },
+      daily_units: { temperature_2m_max: '°C' }, utc_offset_seconds: 0
+    } });
+  });
+  await page.route('https://air-quality-api.open-meteo.com/v1/air-quality?*', (route) => {
+    requests.air++;
+    return route.fulfill({ json: { current: { us_aqi: 20 } } });
+  });
+  return requests;
+}
+
 test('home initializes the photo dashboard without widget requests and handles unconfigured services', async ({ page }) => {
   const retiredRequests = [];
   page.on('request', (request) => {
@@ -113,16 +134,7 @@ test('home renders a decoded background, weather forecasts, and calendar events 
   await seedPreferences(page, { timezone: 'UTC', imageInfo: true, animation: 'none', location: { latitude: 51, longitude: 0, label: 'London' } });
   await page.route('**/api/dashboard/photos', (route) => route.fulfill({ json: { available: true, photos: [{ name: 'sample.png', lastModified: instant.getTime(), url: photoUrl }] } }));
   await page.route(`**${photoUrl}`, (route) => route.fulfill({ contentType: 'image/png', body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64') }));
-  const epoch = instant.getTime() / 1000;
-  await page.route('https://api.open-meteo.com/v1/forecast?*', (route) => route.fulfill({ json: {
-    current: { time: epoch, temperature_2m: 12, weather_code: 0, is_day: 1, wind_speed_10m: 8, relative_humidity_2m: 50, precipitation: 0 },
-    current_units: { temperature_2m: '°C', wind_speed_10m: 'km/h', relative_humidity_2m: '%', precipitation: 'mm' },
-    hourly: { time: Array.from({ length: 25 }, (_, index) => epoch + index * 3600), temperature_2m: Array(25).fill(13), weather_code: Array(25).fill(2), is_day: Array(25).fill(1) },
-    hourly_units: { temperature_2m: '°C' },
-    daily: { time: Array.from({ length: 7 }, (_, index) => epoch + index * 86400), temperature_2m_min: Array(7).fill(8), temperature_2m_max: Array(7).fill(15), weather_code: Array(7).fill(2) },
-    daily_units: { temperature_2m_max: '°C' }, utc_offset_seconds: 0
-  } }));
-  await page.route('https://air-quality-api.open-meteo.com/v1/air-quality?*', (route) => route.fulfill({ json: { current: { us_aqi: 20 } } }));
+  await mockWeather(page);
   await page.route('**/api/calendar', (route) => route.fulfill({ json: { configured: true, encryptionReady: true, serverUrl: 'https://baikal.example.test', username: 'calendar' } }));
   await page.route('**/api/calendar/events', (route) => route.fulfill({ json: { configured: true, stale: false, events: [{ title: 'Planning meeting', start: '2026-10-11T13:00:00Z', end: '2026-10-11T14:00:00Z', allDay: false, location: 'Office' }] } }));
   await page.goto('/');
@@ -275,9 +287,22 @@ test('native form ownership isolates display preferences from search and calenda
   await expect(page.locator('#settings-status')).toHaveText('Preferences saved in this browser.');
 });
 
-test('Weather search, selection, and clearing stay independent of unsaved display preferences', async ({ page }) => {
-  await page.route(/^https:\/\/(?:api|air-quality-api)\.open-meteo\.com\//, (route) => route.abort());
-  await page.route('https://geocoding-api.open-meteo.com/v1/search?*', (route) => route.fulfill({ json: { results: [{ name: 'London', latitude: 51, longitude: 0, country: 'United Kingdom' }] } }));
+test('Clear results preserves the selected weather location, displayed weather, query, and drafts', async ({ page }) => {
+  await page.clock.setFixedTime(instant);
+  const weatherRequests = await mockWeather(page);
+  await page.addInitScript((key) => {
+    const setItem = Storage.prototype.setItem;
+    window.preferenceWrites = 0;
+    Storage.prototype.setItem = function (name, value) {
+      if (name === key) window.preferenceWrites++;
+      return setItem.call(this, name, value);
+    };
+  }, settingsKey);
+  await page.route('https://geocoding-api.open-meteo.com/v1/search?*', (route) => {
+    const name = new URL(route.request().url()).searchParams.get('name');
+    const location = name === 'Paris' ? { name: 'Paris', latitude: 48.85, longitude: 2.35, country: 'France' } : { name: 'London', latitude: 51, longitude: 0, country: 'United Kingdom' };
+    return route.fulfill({ json: { results: [location] } });
+  });
   await page.goto('/');
   await page.locator('#open-settings').click();
   await page.getByLabel('Overall scale', { exact: true }).fill('1.4');
@@ -286,15 +311,92 @@ test('Weather search, selection, and clearing stay independent of unsaved displa
   await page.getByRole('button', { name: 'Search', exact: true }).click();
   await page.getByRole('button', { name: 'London, United Kingdom', exact: true }).click();
   await expect(page.locator('#search-status')).toHaveText('Selected London, United Kingdom.');
-  const selected = await page.evaluate((key) => JSON.parse(localStorage.getItem(key)), settingsKey);
+  await expect(page.locator('#current-weather-values .temperature')).toHaveText('12 °C');
+  await expect(page.locator('#current-weather-subvalues')).toContainText('US AQI: 20');
+  const stored = await page.evaluate((key) => localStorage.getItem(key), settingsKey);
+  const selected = JSON.parse(stored);
   expect(selected.location).toMatchObject({ latitude: 51, longitude: 0 });
   expect(selected.scale).toBe(1);
+  const writes = await page.evaluate(() => window.preferenceWrites);
+  const requests = { ...weatherRequests };
+  const weather = await page.locator('#weather').textContent();
+  const preferenceStatus = await page.locator('#settings-status').textContent();
+  await page.getByRole('button', { name: 'Clear results', exact: true }).click();
+  await expect(page.locator('#search-status')).toHaveText('Search results cleared.');
+  await expect(page.locator('#location-results li')).toHaveCount(0);
+  await expect(page.locator('#location-query')).toHaveValue('London');
+  await expect(page.locator('#weather')).toBeVisible();
+  expect(await page.locator('#weather').textContent()).toBe(weather);
+  expect(await page.evaluate((key) => localStorage.getItem(key), settingsKey)).toBe(stored);
+  expect(await page.evaluate(() => window.preferenceWrites)).toBe(writes);
+  expect(weatherRequests).toEqual(requests);
+  await expect(page.locator('#settings-status')).toHaveText(preferenceStatus);
   await page.getByRole('tab', { name: 'General', exact: true }).click();
   await expect(page.getByLabel('Overall scale', { exact: true })).toHaveValue('1.4');
+  await page.reload();
+  expect(await page.evaluate((key) => localStorage.getItem(key), settingsKey)).toBe(stored);
+  await expect(page.locator('#current-weather-values .temperature')).toHaveText('12 °C');
+  await page.locator('#open-settings').click();
   await page.getByRole('tab', { name: 'Weather', exact: true }).click();
-  await page.getByRole('button', { name: 'Clear location', exact: true }).click();
-  await expect(page.locator('#search-status')).toHaveText('Location cleared.');
-  expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).location, settingsKey)).toBeNull();
+  await page.getByLabel('City or place', { exact: true }).fill('Paris');
+  await page.getByRole('button', { name: 'Search', exact: true }).click();
+  await page.getByRole('button', { name: 'Paris, France', exact: true }).click();
+  await expect(page.locator('#search-status')).toHaveText('Selected Paris, France.');
+  expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).location, settingsKey)).toMatchObject({ label: 'Paris, France', latitude: 48.85, longitude: 2.35 });
+});
+
+for (const outcome of ['success', 'failure']) test(`Clear results ignores a late search ${outcome} and stays safe without a selected location`, async ({ page }) => {
+  await page.addInitScript(() => {
+    const fetchImpl = window.fetch.bind(window);
+    const requests = [];
+    window.geocodingTest = {
+      requests,
+      async settle(index, failure) {
+        const request = requests[index];
+        if (request.settled) return;
+        request.settled = true;
+        if (failure) request.reject(new Error('Search unavailable'));
+        else request.resolve({ ok: true, json: async () => ({ results: [{ name: 'London', latitude: 51, longitude: 0 }] }) });
+        // The next frame runs after the search handler's awaited microtasks finish.
+        await new Promise(requestAnimationFrame);
+      }
+    };
+    window.fetch = (url, options = {}) => {
+      if (new URL(url, location.href).hostname !== 'geocoding-api.open-meteo.com') return fetchImpl(url, options);
+      // Deliberately resolve even when aborted to exercise the UI generation guard.
+      return new Promise((resolve, reject) => requests.push({ resolve, reject, signal: options.signal, settled: false }));
+    };
+  });
+  await page.goto('/');
+  try {
+    const stored = await page.evaluate((key) => localStorage.getItem(key), settingsKey);
+    expect(stored).toBeNull();
+    await page.locator('#open-settings').click();
+    await page.getByRole('tab', { name: 'Weather', exact: true }).click();
+    await page.getByLabel('City or place', { exact: true }).fill('London');
+    const clear = page.getByRole('button', { name: 'Clear results', exact: true });
+    await clear.click();
+    expect(await page.evaluate(() => window.geocodingTest.requests.length)).toBe(0);
+    await page.getByRole('button', { name: 'Search', exact: true }).click();
+    await expect(page.locator('#search-status')).toHaveText('Searching…');
+    await expect.poll(() => page.evaluate(() => window.geocodingTest.requests.length)).toBe(1);
+    await clear.click();
+    await clear.click();
+    expect(await page.evaluate(() => window.geocodingTest.requests[0].signal.aborted)).toBe(true);
+    await page.evaluate((failure) => window.geocodingTest.settle(0, failure), outcome === 'failure');
+    await expect(page.locator('#location-results li')).toHaveCount(0);
+    await expect(page.locator('#search-status')).toHaveText('Search results cleared.');
+    await expect(page.locator('#location-query')).toHaveValue('London');
+    expect(await page.evaluate((key) => localStorage.getItem(key), settingsKey)).toBe(stored);
+    await expect(page.locator('#weather-status')).toHaveText('Choose a location in Settings to show weather.');
+    expect(await page.evaluate(() => window.geocodingTest.requests.length)).toBe(1);
+    await page.getByRole('button', { name: 'Search', exact: true }).click();
+    await expect.poll(() => page.evaluate(() => window.geocodingTest.requests.length)).toBe(2);
+    await page.evaluate(() => window.geocodingTest.settle(1, false));
+    await expect(page.getByRole('button', { name: 'London', exact: true })).toBeVisible();
+  } finally {
+    if (!page.isClosed()) await page.evaluate(() => Promise.all(window.geocodingTest.requests.map((_, index) => window.geocodingTest.settle(index, true))));
+  }
 });
 
 test('Calendar connects and disconnects using only credentials from its independent form', async ({ page }) => {
