@@ -2,6 +2,7 @@ import { SETTINGS_KEY, clockText, loadSettings, normalizeSettings, sampleHours, 
 import { createWeatherController, searchLocations } from './dashboard-weather.js';
 import { createPhotoController } from './dashboard-photos.js';
 import { createCalendarController, formatCalendarEvent } from './dashboard-calendar.js';
+import { createSettingsTabs } from './dashboard-settings.js';
 
 const $ = (id) => document.getElementById(id);
 const currentWeatherSubValues = document.createElement('div');
@@ -14,6 +15,7 @@ let clockTimer; let searchController; let searchGeneration = 0; let weatherState
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 const preferences = $('preferences');
 const dialog = $('settings-dialog');
+const settingsTabs = createSettingsTabs(dialog);
 
 function save() {
   try { storage.setItem(SETTINGS_KEY, JSON.stringify(settings)); $('settings-status').textContent = 'Preferences saved in this browser.'; }
@@ -135,6 +137,8 @@ function apply() {
 
 preferences.addEventListener('submit', (event) => {
   event.preventDefault();
+  const invalid = [...preferences.elements].find((control) => control.willValidate && !control.validity.valid);
+  if (invalid) { settingsTabs.reveal(invalid); invalid.reportValidity(); return; }
   const next = { ...settings };
   for (const control of preferences.elements) {
     if (!(control.name in settings)) continue;
@@ -153,7 +157,12 @@ function setCalendarMutationPending(pending) {
   $('connect-calendar').disabled = pending;
   $('disconnect-calendar').disabled = pending || (!calendar.getState().configured && !calendar.getState().needsReauthentication);
 }
-$('open-settings').addEventListener('click', () => { fillForm(); fillCalendarForm(); $('calendar-settings-status').textContent = ''; dialog.showModal(); });
+$('open-settings').addEventListener('click', () => {
+  fillForm(); fillCalendarForm(); $('calendar-settings-status').textContent = '';
+  settingsTabs.select('settings-tab-general');
+  dialog.showModal();
+  $('settings-tab-general').focus();
+});
 $('close-settings').addEventListener('click', () => dialog.close());
 dialog.addEventListener('close', () => $('open-settings').focus());
 function cancelSearch() { searchGeneration++; searchController?.abort(); }

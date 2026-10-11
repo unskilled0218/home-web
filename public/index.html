@@ -27,46 +27,72 @@
       <p id="photo-caption"></p>
     </main>
     <dialog id="settings-dialog" aria-labelledby="settings-title">
-      <div class="dialog-heading"><h2 id="settings-title">Dashboard settings</h2><button id="close-settings" type="button">Close</button></div>
-      <p id="settings-status" role="status"></p>
-      <form id="preferences">
-        <fieldset><legend>Information layout</legend>
-          <label>Position<select name="position"><option value="left">Lower left</option><option value="right">Lower right</option></select></label>
-          <label>Overall scale<input name="scale" type="number" min="0.5" max="2" step="0.1"></label>
-        </fieldset>
-        <fieldset><legend>Time</legend>
-          <label class="toggle"><input name="timeVisible" type="checkbox">Show clock</label>
-          <label>Clock scale<input name="timeScale" type="number" min="0.5" max="2" step="0.1"></label>
-          <label>Timezone<input name="timezone" maxlength="80" placeholder="Europe/London" required></label>
-          <label>Date style<select name="dateStyle"><option>short</option><option>medium</option><option>long</option><option>full</option></select></label>
-          <label class="toggle"><input name="hour12" type="checkbox">12-hour clock</label><label class="toggle"><input name="seconds" type="checkbox">Show seconds</label>
-        </fieldset>
-        <fieldset><legend>Weather</legend>
-          <label class="toggle"><input name="weatherVisible" type="checkbox">Show weather</label>
-          <label>Weather scale<input name="weatherScale" type="number" min="0.5" max="2" step="0.1"></label>
-          <label>Temperature<select name="temperature"><option value="celsius">Celsius</option><option value="fahrenheit">Fahrenheit</option></select></label>
-          <label>Wind<select name="wind"><option value="kmh">km/h</option><option value="mph">mph</option><option value="ms">m/s</option><option value="kn">knots</option></select></label>
-          <label>Precipitation<select name="precipitation"><option value="mm">mm</option><option value="inch">inches</option></select></label>
-        </fieldset>
-        <fieldset><legend>Calendar</legend>
-          <label class="toggle"><input name="calendarVisible" type="checkbox">Show calendar</label>
-          <label>Calendar scale<input name="calendarScale" type="number" min="0.5" max="2" step="0.1"></label>
-        </fieldset>
-        <fieldset><legend>Images</legend>
-          <label>Order<select name="order"><option value="random">Shuffled</option><option value="name">Name</option><option value="date">Modification date</option></select></label>
-          <label>Interval (seconds)<input name="interval" type="number" min="5" max="3600"></label>
-          <label>Transition<select name="animation"><option value="fade">Fade</option><option value="slide">Slide</option><option value="none">None</option></select></label>
-          <label>Transition duration (seconds)<input name="duration" type="number" min="0" max="10" step="0.1"></label>
-          <label>Opacity<input name="opacity" type="number" min="0" max="1" step="0.1"></label>
-          <label>Background<select name="background"><option value="color">Solid color</option><option value="blur">Blurred image</option></select></label>
-          <label>Background color<input name="color" type="color"></label><label>Background blur (pixels)<input name="blur" type="number" min="0" max="100"></label>
-          <label class="toggle"><input name="imageInfo" type="checkbox">Show filename</label>
-        </fieldset>
-        <button type="submit">Save preferences</button>
-      </form>
-      <section aria-labelledby="photos-title"><h3 id="photos-title">NFS backgrounds</h3><p>The server loads JPEG, PNG, WebP, and GIF backgrounds from its configured read-only NFS share. Reload this page after changing files on the share.</p><p id="photo-status" role="status">Loading NFS backgrounds…</p></section>
-      <section aria-labelledby="location-title"><h3 id="location-title">Weather location</h3><p>Searches and selected coordinates are sent directly to Open-Meteo. Preferences are saved only in this browser.</p><form id="location-search"><label>City or place<input id="location-query" type="search" minlength="2" maxlength="120" required></label><button type="submit">Search</button><button id="clear-location" type="button">Clear location</button></form><p id="search-status" role="status"></p><ul id="location-results"></ul></section>
-      <section aria-labelledby="calendar-settings-title"><h3 id="calendar-settings-title">Baikal calendar</h3><p>Enter the Baikal server URL. Event calendars are discovered automatically. The password is encrypted on this server and never shown again; leave it blank to retain it when the URL and username are unchanged.</p><form id="calendar-connection"><label>Baikal server URL<input id="calendar-url" name="serverUrl" type="url" maxlength="2048" placeholder="https://baikal.example.test" autocomplete="url" required></label><label>Username<input id="calendar-username" name="username" maxlength="120" autocomplete="username" required></label><label>Password<input id="calendar-password" name="password" type="password" maxlength="2000" autocomplete="current-password"></label><div class="calendar-settings-actions"><button id="connect-calendar" type="submit">Connect calendar</button><button id="disconnect-calendar" type="button">Disconnect calendar</button></div></form><p id="calendar-settings-status" role="status"></p></section>
+      <header class="settings-header"><div><p class="settings-eyebrow">Make it yours</p><h2 id="settings-title">Dashboard settings</h2></div><button id="close-settings" type="button">Close</button></header>
+      <form id="preferences" novalidate hidden></form>
+      <div class="settings-body">
+        <div class="settings-tabs" role="tablist" aria-label="Settings categories" aria-orientation="vertical">
+          <button id="settings-tab-general" type="button" role="tab" aria-controls="settings-panel-general" aria-selected="true" tabindex="0">General</button>
+          <button id="settings-tab-time" type="button" role="tab" aria-controls="settings-panel-time" aria-selected="false" tabindex="-1">Time</button>
+          <button id="settings-tab-weather" type="button" role="tab" aria-controls="settings-panel-weather" aria-selected="false" tabindex="-1">Weather</button>
+          <button id="settings-tab-calendar" type="button" role="tab" aria-controls="settings-panel-calendar" aria-selected="false" tabindex="-1">Calendar</button>
+          <button id="settings-tab-images" type="button" role="tab" aria-controls="settings-panel-images" aria-selected="false" tabindex="-1">Images</button>
+        </div>
+        <div class="settings-panels">
+          <section id="settings-panel-general" role="tabpanel" aria-labelledby="settings-tab-general" tabindex="0">
+            <h3>General</h3><p class="settings-description">Set the position and scale of your dashboard information.</p>
+            <fieldset><legend>Information layout</legend>
+              <label>Position<select name="position" form="preferences"><option value="left">Lower left</option><option value="right">Lower right</option></select></label>
+              <label>Overall scale<input name="scale" form="preferences" type="number" min="0.5" max="2" step="0.1"></label>
+            </fieldset>
+          </section>
+          <section id="settings-panel-time" role="tabpanel" aria-labelledby="settings-tab-time" tabindex="0" hidden>
+            <h3>Time</h3><p class="settings-description">Choose how your clock looks. Timezone also applies to weather and calendar times.</p>
+            <fieldset><legend>Clock display</legend>
+              <label class="toggle"><input name="timeVisible" form="preferences" type="checkbox">Show clock</label>
+              <label>Clock scale<input name="timeScale" form="preferences" type="number" min="0.5" max="2" step="0.1"></label>
+              <label>Timezone<input name="timezone" form="preferences" maxlength="80" placeholder="Europe/London" required></label>
+              <label>Date style<select name="dateStyle" form="preferences"><option>short</option><option>medium</option><option>long</option><option>full</option></select></label>
+              <label class="toggle"><input name="hour12" form="preferences" type="checkbox">12-hour clock</label><label class="toggle"><input name="seconds" form="preferences" type="checkbox">Show seconds</label>
+            </fieldset>
+          </section>
+          <section id="settings-panel-weather" role="tabpanel" aria-labelledby="settings-tab-weather" tabindex="0" hidden>
+            <h3>Weather</h3><p class="settings-description">Local conditions, forecasts, and units at a glance.</p>
+            <fieldset><legend>Weather display</legend>
+              <label class="toggle"><input name="weatherVisible" form="preferences" type="checkbox">Show weather</label>
+              <label>Weather scale<input name="weatherScale" form="preferences" type="number" min="0.5" max="2" step="0.1"></label>
+              <label>Temperature<select name="temperature" form="preferences"><option value="celsius">Celsius</option><option value="fahrenheit">Fahrenheit</option></select></label>
+              <label>Wind<select name="wind" form="preferences"><option value="kmh">km/h</option><option value="mph">mph</option><option value="ms">m/s</option><option value="kn">knots</option></select></label>
+              <label>Precipitation<select name="precipitation" form="preferences"><option value="mm">mm</option><option value="inch">inches</option></select></label>
+            </fieldset>
+            <section class="settings-section" aria-labelledby="location-title"><h4 id="location-title">Weather location</h4><p>Searches and selected coordinates are sent directly to Open-Meteo. Preferences are saved only in this browser.</p><form id="location-search"><label>City or place<input id="location-query" type="search" minlength="2" maxlength="120" required></label><button type="submit">Search</button><button id="clear-location" type="button">Clear location</button></form><p id="search-status" role="status"></p><ul id="location-results"></ul></section>
+          </section>
+          <section id="settings-panel-calendar" role="tabpanel" aria-labelledby="settings-tab-calendar" tabindex="0" hidden>
+            <h3>Calendar</h3><p class="settings-description">Keep upcoming events close with your Baikal calendar.</p>
+            <fieldset><legend>Calendar display</legend>
+              <label class="toggle"><input name="calendarVisible" form="preferences" type="checkbox">Show calendar</label>
+              <label>Calendar scale<input name="calendarScale" form="preferences" type="number" min="0.5" max="2" step="0.1"></label>
+            </fieldset>
+            <section class="settings-section" aria-labelledby="calendar-settings-title"><h4 id="calendar-settings-title">Baikal calendar</h4><p>Enter the Baikal server URL. Event calendars are discovered automatically. The password is encrypted on this server and never shown again; leave it blank to retain it when the URL and username are unchanged.</p><form id="calendar-connection"><label>Baikal server URL<input id="calendar-url" name="serverUrl" type="url" maxlength="2048" placeholder="https://baikal.example.test" autocomplete="url" required></label><label>Username<input id="calendar-username" name="username" maxlength="120" autocomplete="username" required></label><label>Password<input id="calendar-password" name="password" type="password" maxlength="2000" autocomplete="current-password"></label><div class="calendar-settings-actions"><button id="connect-calendar" type="submit">Connect calendar</button><button id="disconnect-calendar" type="button">Disconnect calendar</button></div></form><p id="calendar-settings-status" role="status"></p></section>
+          </section>
+          <section id="settings-panel-images" role="tabpanel" aria-labelledby="settings-tab-images" tabindex="0" hidden>
+            <h3>Images</h3><p class="settings-description">Give your photos the right pace and backdrop.</p>
+            <fieldset><legend>Slideshow</legend>
+              <label>Order<select name="order" form="preferences"><option value="random">Shuffled</option><option value="name">Name</option><option value="date">Modification date</option></select></label>
+              <label>Interval (seconds)<input name="interval" form="preferences" type="number" min="5" max="3600"></label>
+              <label>Transition<select name="animation" form="preferences"><option value="fade">Fade</option><option value="slide">Slide</option><option value="none">None</option></select></label>
+              <label>Transition duration (seconds)<input name="duration" form="preferences" type="number" min="0" max="10" step="0.1"></label>
+              <label class="toggle"><input name="imageInfo" form="preferences" type="checkbox">Show filename</label>
+            </fieldset>
+            <fieldset><legend>Background</legend>
+              <label>Opacity<input name="opacity" form="preferences" type="number" min="0" max="1" step="0.1"></label>
+              <label>Background<select name="background" form="preferences"><option value="color">Solid color</option><option value="blur">Blurred image</option></select></label>
+              <label>Background color<input name="color" form="preferences" type="color"></label><label>Background blur (pixels)<input name="blur" form="preferences" type="number" min="0" max="100"></label>
+            </fieldset>
+            <section class="settings-section" aria-labelledby="photos-title"><h4 id="photos-title">NFS backgrounds</h4><p>The server loads JPEG, PNG, WebP, and GIF backgrounds from its configured read-only NFS share. Reload this page after changing files on the share.</p><p id="photo-status" role="status">Loading NFS backgrounds…</p></section>
+          </section>
+        </div>
+      </div>
+      <footer class="settings-footer"><p id="settings-status" role="status">Preferences are saved in this browser.</p><button class="settings-save" type="submit" form="preferences">Save preferences</button></footer>
     </dialog>
     <script type="module" src="/dashboard.js"></script>
   </body>

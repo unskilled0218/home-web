@@ -65,7 +65,7 @@ test('redirects only legacy dashboard documents to the canonical home URL', asyn
 
 test('serves retained dashboard assets with their MIME and cache headers', async (context) => {
   const base = await staticServer(context);
-  for (const name of ['dashboard.js', 'dashboard-helpers.js', 'dashboard-weather.js', 'dashboard-photos.js', 'dashboard-calendar.js', 'dashboard.css', 'home-layout.js']) {
+  for (const name of ['dashboard.js', 'dashboard-helpers.js', 'dashboard-weather.js', 'dashboard-photos.js', 'dashboard-calendar.js', 'dashboard-settings.js', 'dashboard.css', 'home-layout.js']) {
     const result = await fetch(`${base}/${name}`); assert.equal(result.status, 200); assert.match(result.headers.get('content-type'), name.endsWith('.css') ? /text\/css/ : /text\/javascript/); assert.equal(result.headers.get('cache-control'), name.endsWith('.js') ? 'no-store' : 'no-cache'); assert.equal(result.headers.get('x-content-type-options'), 'nosniff');
   }
 });
@@ -95,6 +95,47 @@ test('home preserves forecast, calendar, and photo settings markup', async (cont
   assert.match(dashboardHtml, /id="calendar-events"/); assert.match(dashboardHtml, /id="calendar-password"[^>]*type="password"[^>]*autocomplete="current-password"/);
   assert.doesNotMatch(dashboardHtml, /refresh-calendar|>Refresh<|calendar-heading/);
   assert.match(dashboardHtml, /Baikal server URL/); assert.match(dashboardHtml, /name="serverUrl"[^>]*placeholder="https:\/\/baikal\.example\.test"/); assert.doesNotMatch(dashboardHtml, /dav\.php\/calendars/);
+});
+
+test('Settings links five accessible tabs to panels with General initially selected', async (context) => {
+  const base = await staticServer(context);
+  const html = await (await fetch(base)).text();
+  assert.match(html, /role="tablist"[^>]*aria-label="Settings categories"[^>]*aria-orientation="vertical"/);
+  const tabs = [...html.matchAll(/<button\b[^>]*role="tab"[^>]*>([^<]+)<\/button>/g)];
+  assert.deepEqual(tabs.map((tab) => tab[1]), ['General', 'Time', 'Weather', 'Calendar', 'Images']);
+  assert.equal([...html.matchAll(/role="tabpanel"/g)].length, 5);
+  for (const tab of tabs) {
+    const name = tab[1].toLowerCase();
+    const selected = name === 'general';
+    assert.match(tab[0], new RegExp(`id="settings-tab-${name}"`));
+    assert.match(tab[0], new RegExp(`aria-controls="settings-panel-${name}"`));
+    assert.match(tab[0], new RegExp(`aria-selected="${selected}"`));
+    assert.match(tab[0], new RegExp(`tabindex="${selected ? 0 : -1}"`));
+    const panel = html.match(new RegExp(`<section id="settings-panel-${name}"[^>]*>`))?.[0];
+    assert.ok(panel, `${name} panel exists`);
+    assert.match(panel, new RegExp(`role="tabpanel"[^>]*aria-labelledby="settings-tab-${name}"`));
+    assert.equal(/\shidden/.test(panel), !selected, `${name} initial visibility`);
+  }
+  const general = html.slice(html.indexOf('<section id="settings-panel-general"'), html.indexOf('<section id="settings-panel-time"'));
+  assert.match(general, /Information layout/);
+  assert.match(general, /name="position"/);
+  assert.match(general, /name="scale"/);
+});
+
+test('Settings associates all preferences with one form and keeps service forms separate', async (context) => {
+  const base = await staticServer(context);
+  const html = await (await fetch(base)).text();
+  assert.match(html, /<form id="preferences" novalidate hidden><\/form>/);
+  const controls = [...html.matchAll(/<(?:input|select)\b[^>]*form="preferences"[^>]*>/g)];
+  const names = controls.map((control) => /name="([^"]+)"/.exec(control[0])?.[1]);
+  assert.deepEqual(names.sort(), Object.keys(normalizeSettings()).filter((name) => name !== 'location').sort());
+  assert.match(html, /<button[^>]*type="submit"[^>]*form="preferences">Save preferences<\/button>/);
+  for (const id of ['location-search', 'calendar-connection']) {
+    const form = html.match(new RegExp(`<form id="${id}">[\\s\\S]*?<\\/form>`))?.[0];
+    assert.ok(form, `${id} exists`);
+    assert.equal([...form.matchAll(/<form\b/g)].length, 1, `${id} has no nested form`);
+    assert.doesNotMatch(form, /form="preferences"/);
+  }
 });
 
 test('dashboard styles preserve transparent, wrapping forecasts and calendar presentation', async (context) => {
