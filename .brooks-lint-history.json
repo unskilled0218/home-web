@@ -119,5 +119,16 @@
       "suggestion": 0
     },
     "scope": "Plan review: tasks/38-linkwarden-bookmark-tree/2-plan.md"
+  },
+  {
+    "date": "2026-10-12",
+    "mode": "PR Review",
+    "score": 90,
+    "findings": {
+      "critical": 0,
+      "warning": 2,
+      "suggestion": 0
+    },
+    "scope": "Branch review: 38-linkwarden-bookmark-tree vs main (68c588b...bfd6df5)"
   }
 ]
