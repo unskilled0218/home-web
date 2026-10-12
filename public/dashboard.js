@@ -1,4 +1,4 @@
-import { SETTINGS_KEY, clockText, loadSettings, normalizeSettings, sampleHours, temperatureRange, weatherDescription, weatherIconFile } from './dashboard-helpers.js';
+import { MOBILE_MEDIA_QUERY, SETTINGS_KEY, clockText, loadSettings, normalizeSettings, resolveDisplayPreferences, sampleHours, temperatureRange, weatherDescription, weatherIconFile } from './dashboard-helpers.js';
 import { createWeatherController, searchLocations } from './dashboard-weather.js';
 import { createPhotoController } from './dashboard-photos.js';
 import { createCalendarController, formatCalendarEvent } from './dashboard-calendar.js';
@@ -14,6 +14,8 @@ try { storage = window.localStorage; } catch { /* Defaults work when browser sto
 let settings = { ...loadSettings(storage), location: null };
 let clockTimer; let searchController; let searchGeneration = 0; let weatherState = {}; let calendarState = {}; let animations = [];
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+const mobileViewport = matchMedia(MOBILE_MEDIA_QUERY);
+let mobileLayout;
 const preferences = $('preferences');
 const dialog = $('settings-dialog');
 const settingsTabs = createSettingsTabs(dialog);
@@ -36,7 +38,7 @@ function updateClock() {
   $('date').textContent = formatted.date; $('time').textContent = formatted.time; $('time').dateTime = now.toISOString();
 }
 
-function startClock() { clearInterval(clockTimer); updateClock(); if (!document.hidden && settings.timeVisible) clockTimer = setInterval(updateClock, 1000); }
+function startClock() { clearInterval(clockTimer); updateClock(); if (!document.hidden && resolveDisplayPreferences(settings, mobileViewport.matches).timeVisible) clockTimer = setInterval(updateClock, 1000); }
 function element(tag, content, className) { const node = document.createElement(tag); node.textContent = content; if (className) node.className = className; return node; }
 const reading = (value, unit = '') => value === null || value === undefined ? 'Unavailable' : `${value}${unit ? ` ${unit}` : ''}`;
 function forecastItem({ code, day = 1, label, temperature }) {
@@ -133,15 +135,29 @@ const photos = createPhotoController({
   }
 });
 
+function applyPresentation() {
+  const mobile = mobileViewport.matches;
+  const display = resolveDisplayPreferences(settings, mobile);
+  $('information').classList.toggle('right', display.position === 'right');
+  $('information').style.setProperty('--scale', display.scale);
+  $('clock').style.setProperty('--time-scale', display.timeScale);
+  $('weather').style.setProperty('--weather-scale', display.weatherScale);
+  $('calendar').style.setProperty('--calendar-scale', display.calendarScale);
+  $('clock').hidden = !display.timeVisible; $('weather').hidden = !display.weatherVisible; $('calendar').hidden = !display.calendarVisible;
+  if (mobileLayout !== mobile) {
+    const order = mobile ? ['clock', 'weather', 'calendar'] : ['calendar', 'clock', 'weather'];
+    $('photo-caption').before(...order.map($));
+    mobileLayout = mobile;
+  }
+  startClock();
+}
+
 function apply() {
   document.body.style.backgroundColor = settings.color;
-  $('information').classList.toggle('right', settings.position === 'right');
-  $('information').style.setProperty('--scale', settings.scale);
-  $('clock').style.setProperty('--time-scale', settings.timeScale);
-  $('weather').style.setProperty('--weather-scale', settings.weatherScale);
-  $('calendar').style.setProperty('--calendar-scale', settings.calendarScale);
-  $('clock').hidden = !settings.timeVisible; $('weather').hidden = !settings.weatherVisible; $('calendar').hidden = !settings.calendarVisible;
-  startClock(); photos.configure(settings); weather.configure(settings); calendar.configure(settings); renderWeather(); renderCalendar();
+  applyPresentation();
+  photos.configure(settings); weather.configure(settings);
+  calendar.configure({ calendarVisible: settings.calendarVisible || settings.mobileCalendarVisible });
+  renderWeather(); renderCalendar();
 }
 
 preferences.addEventListener('submit', (event) => {
@@ -232,7 +248,8 @@ $('fullscreen').addEventListener('click', async () => {
 document.addEventListener('fullscreenchange', fullscreenState);
 document.addEventListener('visibilitychange', () => { startClock(); photos.setVisible(!document.hidden); weather.setVisible(!document.hidden); calendar.setVisible(!document.hidden); if (document.hidden) stopAnimations(); });
 reducedMotion.addEventListener('change', () => { stopAnimations(); photos.configure(settings); });
+mobileViewport.addEventListener('change', applyPresentation);
 window.addEventListener('pagehide', (event) => { clearInterval(clockTimer); cancelSearch(); weather.dispose(); photos.dispose(); if (!event.persisted) calendar.dispose(); });
-window.addEventListener('pageshow', (event) => { if (event.persisted) { void photos.load(); startClock(); weather.configure(settings); void weather.refresh(); void calendar.refresh(); } });
+window.addEventListener('pageshow', (event) => { if (event.persisted) { void photos.load(); applyPresentation(); weather.configure(settings); void weather.refresh(); void calendar.refresh(); } });
 photos.setVisible(!document.hidden); weather.setVisible(!document.hidden); calendar.setVisible(!document.hidden);
 fillForm(); apply(); void photos.load();

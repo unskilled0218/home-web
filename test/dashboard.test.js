@@ -6,7 +6,7 @@ import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { createDashboardServer } from '../src/app.js';
-import { clockText, loadSettings, normalizeSettings, orderPhotos, sampleHours, temperatureRange, weatherIconFile } from '../public/dashboard-helpers.js';
+import { MOBILE_MEDIA_QUERY, clockText, loadSettings, normalizeSettings, orderPhotos, resolveDisplayPreferences, sampleHours, temperatureRange, weatherIconFile } from '../public/dashboard-helpers.js';
 import { createWeatherController, requestJson, searchLocations } from '../public/dashboard-weather.js';
 import { formatWeatherUpdated, normalizeForecast, presentForecast, validateWeatherSnapshot } from '../public/weather-data.js';
 import { weatherUrls } from '../src/weather.js';
@@ -151,7 +151,7 @@ test('dashboard styles preserve transparent, wrapping forecasts and calendar pre
   assert.match(dashboardCss, /#hourly li:only-child, #daily li:only-child \{[^}]*flex-basis: 100%;/);
   assert.match(dashboardCss, /\.forecast-item \{[^}]*flex-direction: column;/);
   assert.match(dashboardCss, /\.forecast-label, \.forecast-temperature, \.forecast-condition \{[^}]*overflow: hidden;[^}]*text-overflow: ellipsis;[^}]*white-space: nowrap;/);
-  assert.match(dashboardCss, /@media \(max-width: 600px\) \{[\s\S]*#hourly, #daily \{ gap: \.1rem; \}/);
+  assert.match(dashboardCss, /@media \(max-width: 600px\) \{[\s\S]*#hourly, #daily \{ gap: \.1rem; max-width: 100%; \}/);
   assert.match(dashboardCss, /\.weather-icon \{[^}]*filter: brightness\(0\) invert\(1\) drop-shadow/);
   assert.match(dashboardCss, /\.forecast-icon \{[^}]*width: clamp[^}]*filter: brightness\(0\) invert\(1\) drop-shadow/);
   assert.match(dashboardCss, /#calendar \{[^}]*background: transparent;/); assert.match(dashboardCss, /\.calendar-event \{[^}]*background: transparent;/);
@@ -202,6 +202,51 @@ test('recovers preferences and constrains untrusted persisted settings', () => {
   for (const storage of [undefined, { getItem() { throw new Error('blocked'); } }, { getItem: () => '{bad' }, { getItem: () => 'null' }]) assert.equal(loadSettings(storage).interval, 60);
   const result = normalizeSettings({ scale: 100, duration: 50, interval: 5, timeScale: NaN, calendarScale: 9, opacity: -1, timezone: 'not/a/zone', location: { latitude: 999, longitude: 0 }, color: 'url(x)', extra: 'discard', weatherVisible: 'false', calendarVisible: 'false' }, 'UTC');
   assert.equal(result.scale, 2); assert.equal(result.duration, 4); assert.equal(result.timeScale, 1); assert.equal(result.calendarScale, 2); assert.equal(result.opacity, 0); assert.equal(result.timezone, 'UTC'); assert.equal(result.location, null); assert.equal(result.color, '#000000'); assert.equal(result.weatherVisible, true); assert.equal(result.calendarVisible, true); assert.equal(result.extra, undefined);
+});
+
+test('legacy preferences gain independent mobile defaults without rewriting stored desktop values', () => {
+  const legacy = { timeVisible: false, weatherVisible: false, calendarVisible: false, timeScale: 0.8, weatherScale: 1.2, calendarScale: 1.5, scale: 2, position: 'right' };
+  const raw = JSON.stringify(legacy); let writes = 0;
+  const value = loadSettings({ getItem: () => raw, setItem: () => writes++ });
+  for (const view of ['Time', 'Weather', 'Calendar']) {
+    assert.equal(value[`mobile${view}Visible`], true, `${view} mobile visibility defaults independently`);
+    assert.equal(value[`mobile${view}Scale`], 1, `${view} mobile scale defaults independently`);
+  }
+  for (const [key, saved] of Object.entries(legacy)) assert.equal(value[key], saved, `${key} is preserved`);
+  assert.equal(writes, 0, 'loading normalized defaults does not save storage');
+});
+
+test('mobile fields use strict booleans and finite clamped scales matching the form step', () => {
+  const values = [[undefined, 1], [null, 1], ['1.2', 1], [NaN, 1], [Infinity, 1], [-Infinity, 1], [-3, 0.5], [9, 2], [1.25, 1.3], [1.11, 1.1], [0.55, 0.6], [0.5, 0.5], [2, 2]];
+  for (const view of ['Time', 'Weather', 'Calendar']) {
+    for (const [input, expected] of values) assert.equal(normalizeSettings({ [`mobile${view}Scale`]: input })[`mobile${view}Scale`], expected, `${view} scale ${String(input)}`);
+    for (const input of ['false', 0, null, undefined]) assert.equal(normalizeSettings({ [`mobile${view}Visible`]: input })[`mobile${view}Visible`], true, `${view} rejects non-boolean visibility`);
+    assert.equal(normalizeSettings({ [`mobile${view}Visible`]: false })[`mobile${view}Visible`], false);
+  }
+  assert.equal(normalizeSettings({ timeScale: 1.25 }).timeScale, 1.25, 'desktop scale normalization remains unchanged');
+});
+
+test('display projection selects independent profiles without mutating saved preferences', () => {
+  const value = normalizeSettings({ position: 'right', scale: 2, timeVisible: false, timeScale: 1.5, weatherVisible: true, weatherScale: 0.5, calendarVisible: false, calendarScale: 1.8, mobileTimeVisible: true, mobileTimeScale: 0.7, mobileWeatherVisible: false, mobileWeatherScale: 1.3, mobileCalendarVisible: true, mobileCalendarScale: 2 });
+  const before = structuredClone(value);
+  assert.deepEqual(resolveDisplayPreferences(value, true), { position: 'left', scale: 1, timeVisible: true, timeScale: 0.7, weatherVisible: false, weatherScale: 1.3, calendarVisible: true, calendarScale: 2 });
+  assert.deepEqual(resolveDisplayPreferences(value, false), { position: 'right', scale: 2, timeVisible: false, timeScale: 1.5, weatherVisible: true, weatherScale: 0.5, calendarVisible: false, calendarScale: 1.8 });
+  assert.deepEqual(value, before, 'projection cannot overwrite either profile');
+  assert.equal(MOBILE_MEDIA_QUERY, '(max-width: 600px)');
+});
+
+test('Settings separates profile visibility and scale from shared format and units', async (context) => {
+  const html = await (await fetch(await staticServer(context))).text();
+  for (const [panel, view] of [['time', 'Time'], ['weather', 'Weather'], ['calendar', 'Calendar']]) {
+    const markup = html.match(new RegExp(`<section id="settings-panel-${panel}"[\\s\\S]*?<\\/section>`))[0];
+    const fields = [...markup.matchAll(/<fieldset><legend>([^<]+)<\/legend>([\s\S]*?)<\/fieldset>/g)];
+    const names = (legend) => [...fields.find((field) => field[1] === legend)[2].matchAll(/name="([^"]+)"/g)].map((match) => match[1]);
+    assert.deepEqual(names('Desktop display'), [panel === 'time' ? 'timeVisible' : `${panel}Visible`, panel === 'time' ? 'timeScale' : `${panel}Scale`]);
+    assert.deepEqual(names('Mobile display'), [`mobile${view}Visible`, `mobile${view}Scale`]);
+    if (panel === 'time') assert.deepEqual(names('Shared format'), ['timezone', 'dateStyle', 'hour12', 'seconds']);
+    if (panel === 'weather') assert.deepEqual(names('Shared units'), ['temperature', 'wind', 'precipitation']);
+    assert.match(markup, new RegExp(`name="mobile${view}Scale"[^>]*form="preferences"[^>]*min="0.5"[^>]*max="2"[^>]*step="0.1"`));
+  }
 });
 
 test('formats clock across timezone date boundaries and daylight saving', () => {

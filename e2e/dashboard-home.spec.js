@@ -45,6 +45,36 @@ async function mockWeather(page, { configured = true } = {}) {
   return { requests, getState: () => state, setState(next) { state = { ...state, ...next }; } };
 }
 
+async function mockCalendar(page, { longContent = false } = {}) {
+  const requests = { status: 0, events: 0 };
+  await page.route('**/api/calendar', (route) => { requests.status++; return route.fulfill({ json: { configured: true, encryptionReady: true, serverUrl: 'https://baikal.example.test', username: 'calendar' } }); });
+  await page.route('**/api/calendar/events', (route) => {
+    requests.events++;
+    return route.fulfill({ json: { configured: true, stale: false, events: [{ title: longContent ? 'VeryLongUnbrokenCalendarTitle'.repeat(5) : 'Planning meeting', start: '2026-10-11T13:00:00Z', end: '2026-10-11T14:00:00Z', allDay: false, location: longContent ? 'A long meeting location with details that must wrap safely on a narrow screen' : 'Office' }] } });
+  });
+  return requests;
+}
+
+const sectionOrder = (page) => page.locator('#information > section').evaluateAll((sections) => sections.map((section) => section.id));
+async function mobileGeometry(page) {
+  const layout = await page.evaluate(() => {
+    const tools = document.querySelector('.page-tools').getBoundingClientRect();
+    const information = document.getElementById('information').getBoundingClientRect();
+    const sections = [...document.querySelectorAll('#information > section:not([hidden])')].map((section) => ({ id: section.id, top: section.getBoundingClientRect().top, bottom: section.getBoundingClientRect().bottom, width: section.getBoundingClientRect().width }));
+    return { toolsBottom: tools.bottom, top: information.top, right: information.right, sections, width: innerWidth, scrollWidth: document.documentElement.scrollWidth };
+  });
+  expect(layout.top).toBeGreaterThanOrEqual(layout.toolsBottom);
+  expect(layout.top - layout.toolsBottom, 'short mobile pages must not bottom-align information').toBeLessThanOrEqual(24);
+  expect(layout.scrollWidth, 'mobile document must not overflow horizontally').toBe(layout.width);
+  expect(layout.right).toBeLessThanOrEqual(layout.width);
+  for (let i = 1; i < layout.sections.length; i++) expect(layout.sections[i].top, `${layout.sections[i].id} follows the previous section without overlap`).toBeGreaterThanOrEqual(layout.sections[i - 1].bottom);
+}
+
+async function savePreferences(page) {
+  await page.getByRole('button', { name: 'Save preferences', exact: true }).click();
+  await expect(page.locator('#settings-status')).toHaveText('Preferences saved in this browser.');
+}
+
 test('home initializes the photo dashboard without widget requests and handles unconfigured services', async ({ page }) => {
   const retiredRequests = [];
   page.on('request', (request) => {
@@ -153,6 +183,225 @@ test('home renders a decoded background, weather forecasts, and calendar events 
   await page.getByRole('tab', { name: 'Calendar', exact: true }).click();
   await expect(page.locator('#calendar-url')).toHaveValue('https://baikal.example.test');
   await expect(page.locator('#calendar-password')).toHaveValue('');
+});
+
+for (const width of [320, 390]) for (const scale of [0.5, 1, 2]) test(`mobile views at ${width}px remain readable at scale ${scale}`, async ({ page }) => {
+  await page.setViewportSize({ width, height: 800 }); await page.clock.setFixedTime(instant);
+  await seedPreferences(page, { timezone: 'UTC', dateStyle: 'full', seconds: true, position: 'right', scale: 2, timeVisible: false, weatherVisible: false, calendarVisible: false, mobileTimeScale: scale, mobileWeatherScale: scale, mobileCalendarScale: scale });
+  const weather = await mockWeather(page); await mockCalendar(page, { longContent: true });
+  const forecast = normalizeForecast(rawForecast(-21.5));
+  forecast.daily = forecast.daily.map((day) => ({ ...day, min: -125.5, max: 126.5 }));
+  weather.setState({ forecast });
+  await page.goto('/');
+  await expect(page.locator('#current-weather-values .temperature')).toHaveText('-21.5 °C');
+  await expect(page.locator('#calendar-events')).toContainText('VeryLongUnbrokenCalendarTitle');
+  await expect(page.locator('#weather-updated')).toBeVisible();
+  await expect(page.locator('#hourly .forecast-item')).toHaveCount(7);
+  await expect(page.locator('#daily .forecast-item')).toHaveCount(7);
+  expect(await sectionOrder(page)).toEqual(['clock', 'weather', 'calendar']);
+  await expect(page.locator('#information')).not.toHaveClass('right');
+  for (const id of ['clock', 'weather', 'calendar']) await expect(page.locator(`#${id}`)).toHaveCSS('font-size', `${16 * scale}px`);
+  const clockSize = await page.locator('#time').evaluate((node) => parseFloat(getComputedStyle(node).fontSize));
+  expect(clockSize).toBeCloseTo(Math.max(24, Math.min(width * 0.08, 48)) * scale, 1);
+  await mobileGeometry(page);
+  for (const selector of ['#time', '.temperature', '.forecast-temperature', '.calendar-event-title', '#weather-updated']) {
+    expect(await page.locator(selector).evaluateAll((nodes) => nodes.every((node) => node.scrollWidth <= node.clientWidth + 1)), `${selector} must display its content without horizontal clipping`).toBe(true);
+  }
+});
+
+test('legacy mobile defaults start at the top even with unconfigured or hidden content', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 1000 });
+  const legacy = { timeVisible: false, weatherVisible: false, calendarVisible: false, position: 'right', scale: 2 };
+  await seedPreferences(page, legacy); await page.goto('/');
+  await expect(page.locator('#weather-status')).toHaveText('Choose a location in Settings to show weather.');
+  for (const id of ['clock', 'weather', 'calendar']) await expect(page.locator(`#${id}`)).toBeVisible();
+  await mobileGeometry(page);
+  expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key)), settingsKey)).toEqual(legacy);
+  await page.locator('#open-settings').click();
+  for (const [tab, label] of [['Time', 'Show clock on mobile'], ['Weather', 'Show weather on mobile'], ['Calendar', 'Show calendar on mobile']]) {
+    await page.getByRole('tab', { name: tab, exact: true }).click(); await page.getByLabel(label, { exact: true }).uncheck();
+  }
+  await savePreferences(page); await page.locator('#close-settings').click();
+  for (const id of ['clock', 'weather', 'calendar']) await expect(page.locator(`#${id}`)).toBeHidden();
+  await mobileGeometry(page);
+  await page.locator('#open-settings').click();
+  await expect(page.locator('#settings-dialog')).toBeVisible();
+  await page.getByRole('tab', { name: 'Weather', exact: true }).click();
+  await expect(page.getByLabel('Show weather on mobile', { exact: true })).toBeVisible();
+});
+
+test('each mobile toggle hides only its view and preserves ordering without empty gaps', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 1000 }); await page.clock.setFixedTime(instant);
+  await mockWeather(page); await mockCalendar(page); await page.goto('/');
+  await expect(page.locator('#calendar-events')).toContainText('Planning meeting');
+  await page.locator('#open-settings').click();
+  for (const [tab, label, id] of [['Time', 'Show clock on mobile', 'clock'], ['Weather', 'Show weather on mobile', 'weather'], ['Calendar', 'Show calendar on mobile', 'calendar']]) {
+    await page.getByRole('tab', { name: tab, exact: true }).click();
+    await page.getByLabel(label, { exact: true }).uncheck(); await savePreferences(page);
+    await page.locator('#close-settings').click();
+    await expect(page.locator(`#${id}`)).toBeHidden();
+    for (const other of ['clock', 'weather', 'calendar'].filter((view) => view !== id)) await expect(page.locator(`#${other}`)).toBeVisible();
+    expect(await sectionOrder(page)).toEqual(['clock', 'weather', 'calendar']); await mobileGeometry(page);
+    const firstGap = await page.locator('#information > section:not([hidden])').first().evaluate((node) => node.getBoundingClientRect().top - document.getElementById('information').getBoundingClientRect().top);
+    expect(firstGap).toBeLessThanOrEqual(1);
+    await page.locator('#open-settings').click(); await page.getByRole('tab', { name: tab, exact: true }).click();
+    await page.getByLabel(label, { exact: true }).check(); await savePreferences(page);
+  }
+});
+
+test('mobile preferences save across tabs and reload without changing desktop values', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 800 });
+  const desktop = { position: 'right', scale: 1.4, timeVisible: false, timeScale: 0.7, weatherVisible: true, weatherScale: 1.6, calendarVisible: false, calendarScale: 0.8 };
+  await seedPreferences(page, desktop); await page.goto('/'); await page.locator('#open-settings').click();
+  await page.getByRole('tab', { name: 'Time', exact: true }).click();
+  await page.getByLabel('Show clock on mobile', { exact: true }).uncheck(); await page.getByLabel('Clock scale on mobile', { exact: true }).fill('1.2');
+  await page.getByRole('tab', { name: 'Weather', exact: true }).click();
+  await page.getByLabel('Weather scale on mobile', { exact: true }).fill('0.8');
+  await page.getByRole('tab', { name: 'Calendar', exact: true }).click();
+  await page.getByLabel('Show calendar on mobile', { exact: true }).uncheck(); await page.getByLabel('Calendar scale on mobile', { exact: true }).fill('1.7');
+  await page.getByRole('tab', { name: 'Time', exact: true }).click(); await expect(page.getByLabel('Clock scale on mobile', { exact: true })).toHaveValue('1.2');
+  await savePreferences(page);
+  const saved = await page.evaluate((key) => JSON.parse(localStorage.getItem(key)), settingsKey);
+  expect(saved).toMatchObject({ ...desktop, mobileTimeVisible: false, mobileTimeScale: 1.2, mobileWeatherVisible: true, mobileWeatherScale: 0.8, mobileCalendarVisible: false, mobileCalendarScale: 1.7 });
+  await page.reload(); await expect(page.locator('#clock')).toBeHidden(); await expect(page.locator('#calendar')).toBeHidden(); await expect(page.locator('#weather')).toHaveCSS('font-size', '12.8px');
+  await page.setViewportSize({ width: 900, height: 800 });
+  await expect(page.locator('#information')).toHaveClass('right'); expect(await sectionOrder(page)).toEqual(['calendar', 'clock', 'weather']);
+  expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key)), settingsKey)).toEqual(saved);
+  await page.setViewportSize({ width: 320, height: 800 }); await page.locator('#open-settings').click();
+  await page.getByRole('tab', { name: 'Time', exact: true }).click(); await page.getByLabel('Show clock', { exact: true }).check(); await page.getByLabel('Clock scale', { exact: true }).fill('1.5');
+  await savePreferences(page); await page.locator('#close-settings').click();
+  await expect(page.locator('#clock')).toBeHidden();
+  await page.setViewportSize({ width: 900, height: 800 }); await expect(page.locator('#clock')).toBeVisible();
+  const edited = await page.evaluate((key) => JSON.parse(localStorage.getItem(key)), settingsKey);
+  expect(edited).toMatchObject({ timeVisible: true, timeScale: 1.5, mobileTimeVisible: false, mobileTimeScale: 1.2 });
+});
+
+test('fractional stored mobile scales remain valid when saving an unrelated preference', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 800 });
+  await seedPreferences(page, { mobileTimeScale: 1.25, mobileWeatherScale: 0.55, mobileCalendarScale: 1.11 });
+  await page.goto('/'); await page.locator('#open-settings').click();
+  const valid = await page.locator('[name^="mobile"][type="number"]').evaluateAll((inputs) => inputs.map((input) => ({ value: input.valueAsNumber, valid: input.validity.valid, form: input.form.id })));
+  expect(valid).toEqual([{ value: 1.3, valid: true, form: 'preferences' }, { value: 0.6, valid: true, form: 'preferences' }, { value: 1.1, valid: true, form: 'preferences' }]);
+  await page.getByRole('combobox', { name: 'Position', exact: true }).selectOption('right'); await savePreferences(page);
+  expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key)), settingsKey)).toMatchObject({ position: 'right', mobileTimeScale: 1.3, mobileWeatherScale: 0.6, mobileCalendarScale: 1.1 });
+});
+
+test('invalid hidden mobile scales reveal their panel and preserve other drafts', async ({ page }) => {
+  await page.goto('/'); await page.locator('#open-settings').click();
+  await page.getByRole('tab', { name: 'Time', exact: true }).click(); await page.getByLabel('Clock scale on mobile', { exact: true }).fill('3');
+  await page.getByRole('tab', { name: 'Weather', exact: true }).click(); await page.getByLabel('Weather scale on mobile', { exact: true }).fill('1.4');
+  await page.getByRole('button', { name: 'Save preferences', exact: true }).click();
+  await expect(page.getByRole('tab', { name: 'Time', exact: true })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByLabel('Clock scale on mobile', { exact: true })).toBeFocused();
+  expect(await page.evaluate((key) => localStorage.getItem(key), settingsKey)).toBeNull();
+  await page.getByLabel('Clock scale on mobile', { exact: true }).fill('1.3'); await savePreferences(page);
+  expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key)), settingsKey)).toMatchObject({ mobileTimeScale: 1.3, mobileWeatherScale: 1.4 });
+});
+
+test('changing one mobile scale leaves the other view sizes and desktop scales intact', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 800 });
+  await seedPreferences(page, { scale: 2, timeScale: 2, weatherScale: 1.8, calendarScale: 0.5 });
+  await page.goto('/'); await page.locator('#open-settings').click();
+  const sizes = { clock: 16, weather: 16, calendar: 16 };
+  for (const [tab, label, id, scale] of [['Weather', 'Weather scale on mobile', 'weather', 1.4], ['Time', 'Clock scale on mobile', 'clock', 0.5], ['Calendar', 'Calendar scale on mobile', 'calendar', 2]]) {
+    await page.getByRole('tab', { name: tab, exact: true }).click(); await page.getByLabel(label, { exact: true }).fill(String(scale)); await savePreferences(page);
+    sizes[id] = 16 * scale;
+    for (const [view, expected] of Object.entries(sizes)) expect(await page.locator(`#${view}`).evaluate((node) => parseFloat(getComputedStyle(node).fontSize)), `${view} responds only to its own mobile scale`).toBeCloseTo(expected, 2);
+  }
+  expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key)), settingsKey)).toMatchObject({ scale: 2, timeScale: 2, weatherScale: 1.8, calendarScale: 0.5 });
+});
+
+test('shared format and units apply in both layouts outside the profile display groups', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 800 }); await page.clock.setFixedTime(instant); await mockWeather(page);
+  await page.goto('/'); await page.locator('#open-settings').click();
+  await page.getByRole('tab', { name: 'Time', exact: true }).click();
+  const time = page.getByRole('tabpanel', { name: 'Time', exact: true });
+  await expect(time.getByRole('group', { name: 'Desktop display', exact: true }).locator('[name="timezone"]')).toHaveCount(0);
+  await expect(time.getByRole('group', { name: 'Shared format', exact: true }).getByLabel('Timezone', { exact: true })).toHaveCount(1);
+  await page.getByLabel('Timezone', { exact: true }).fill('Asia/Tokyo'); await page.getByLabel('12-hour clock', { exact: true }).uncheck(); await page.getByLabel('Show seconds', { exact: true }).uncheck();
+  await page.getByRole('tab', { name: 'Weather', exact: true }).click();
+  const weather = page.getByRole('tabpanel', { name: 'Weather', exact: true });
+  await expect(weather.getByRole('group', { name: 'Desktop display', exact: true }).locator('[name="temperature"]')).toHaveCount(0);
+  await expect(weather.getByRole('group', { name: 'Shared units', exact: true }).getByRole('combobox', { name: 'Temperature', exact: true })).toHaveCount(1);
+  await page.getByRole('combobox', { name: 'Temperature', exact: true }).selectOption('fahrenheit');
+  await page.getByRole('combobox', { name: 'Wind', exact: true }).selectOption('kn'); await page.getByRole('combobox', { name: 'Precipitation', exact: true }).selectOption('inch');
+  await savePreferences(page); await page.locator('#close-settings').click();
+  for (const width of [390, 900]) {
+    await page.setViewportSize({ width, height: 800 });
+    await expect(page.locator('#time')).toHaveText('21:00'); await expect(page.locator('#weather-updated')).toContainText('21:00');
+    await expect(page.locator('#current-weather-values .temperature')).toHaveText('53.6 °F');
+    await expect(page.locator('#current-weather-subvalues')).toContainText('Wind 4.3 kn'); await expect(page.locator('#current-weather-subvalues')).toContainText('Precipitation 1 inch');
+  }
+});
+
+test('breakpoint and orientation changes switch profiles without saving or losing Settings drafts', async ({ page }) => {
+  const saved = { position: 'right', scale: 1.4, timeVisible: false, timeScale: 0.8, weatherVisible: true, weatherScale: 1.5, calendarVisible: true, calendarScale: 1.2, mobileTimeVisible: true, mobileTimeScale: 0.6, mobileWeatherVisible: false, mobileWeatherScale: 1.7, mobileCalendarVisible: true, mobileCalendarScale: 0.9 };
+  await page.setViewportSize({ width: 600, height: 900 }); await seedPreferences(page, saved); await page.goto('/');
+  await page.evaluate(() => { window.originalSections = [...document.querySelectorAll('#information > section')]; });
+  await page.locator('#open-settings').click(); await page.getByRole('tab', { name: 'Time', exact: true }).click(); await page.getByLabel('Clock scale on mobile', { exact: true }).fill('1.7');
+  for (const [width, height] of [[601, 800], [600, 900], [720, 390], [390, 720], [601, 800], [600, 900]]) {
+    await page.setViewportSize({ width, height }); const mobile = width <= 600;
+    await expect.poll(() => sectionOrder(page)).toEqual(mobile ? ['clock', 'weather', 'calendar'] : ['calendar', 'clock', 'weather']);
+    for (const [id, visible] of [['clock', mobile], ['weather', !mobile], ['calendar', true]]) await expect(page.locator(`#${id}`)).toHaveJSProperty('hidden', !visible);
+    expect(await page.locator('#information').evaluate((node) => node.classList.contains('right'))).toBe(!mobile);
+    expect(await page.locator('#clock').evaluate((node) => parseFloat(getComputedStyle(node).fontSize))).toBeCloseTo(mobile ? 9.6 : 17.92, 2);
+    await expect(page.getByRole('tab', { name: 'Time', exact: true })).toHaveAttribute('aria-selected', 'true'); await expect(page.getByLabel('Clock scale on mobile', { exact: true })).toHaveValue('1.7');
+    expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key)), settingsKey)).toEqual(saved);
+    expect(await page.evaluate(() => window.originalSections.every((node) => document.getElementById(node.id) === node))).toBe(true);
+    await expect(page.locator('#information > section')).toHaveCount(3);
+  }
+  await page.locator('#close-settings').click(); await mobileGeometry(page);
+  await page.setViewportSize({ width: 900, height: 1000 });
+  const desktop = await page.locator('#information').boundingBox();
+  expect(desktop.y, 'short desktop dashboard stays bottom-aligned').toBeGreaterThan(500);
+  expect(await page.locator('#information').evaluate((node) => [node.firstElementChild.tagName, node.lastElementChild.id])).toEqual(['H1', 'photo-caption']);
+});
+
+for (const mobileOnly of [true, false]) test(`resizing keeps one refresh owner with calendar visible only on ${mobileOnly ? 'mobile' : 'desktop'}`, async ({ page }) => {
+  await page.clock.install({ time: instant });
+  await page.addInitScript(() => {
+    const intervals = new Set(); const create = window.setInterval.bind(window); const remove = window.clearInterval.bind(window);
+    window.setInterval = (...args) => { const id = create(...args); if (args[1] === 1000) intervals.add(id); return id; };
+    window.clearInterval = (id) => { intervals.delete(id); remove(id); };
+    window.activeClockIntervals = () => intervals.size;
+  });
+  await seedPreferences(page, { timezone: 'UTC', calendarVisible: !mobileOnly, mobileCalendarVisible: mobileOnly, interval: 3600, animation: 'fade' });
+  const weather = await mockWeather(page); const calendar = await mockCalendar(page);
+  let manifests = 0; let images = 0;
+  await page.route('**/api/dashboard/photos', (route) => { manifests++; return route.fulfill({ json: { available: true, photos: [{ name: 'first.png', lastModified: 1, url: photoUrl }, { name: 'second.png', lastModified: 2, url: '/api/dashboard/photos/qrstuvwxyzABCDEF' }] } }); });
+  await page.route('**/api/dashboard/photos/*', (route) => { images++; return route.fulfill({ contentType: 'image/png', body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64') }); });
+  await page.goto('/');
+  await expect.poll(() => weather.requests.refresh).toBe(1); await expect.poll(() => calendar.events).toBe(1);
+  await expect(page.locator('#photos .photo-layer img')).toBeVisible();
+  await page.evaluate(() => { window.initialPhotoLayer = document.querySelector('.photo-layer'); });
+  const before = { weather: { ...weather.requests }, calendar: { ...calendar }, manifests, images };
+  for (const width of [600, 601, 390, 720, 600, 601]) {
+    await page.setViewportSize({ width, height: 800 });
+    await expect(page.locator('#calendar')).toHaveJSProperty('hidden', (width <= 600) !== mobileOnly);
+    expect(await page.evaluate(() => window.activeClockIntervals())).toBe(1);
+    expect(await page.evaluate(() => window.initialPhotoLayer === document.querySelector('.photo-layer'))).toBe(true);
+  }
+  expect({ weather: weather.requests, calendar, manifests, images }).toEqual(before);
+  for (let i = 1; i <= 5; i++) {
+    await page.clock.fastForward(60000);
+    await expect.poll(() => weather.requests.refresh).toBe(before.weather.refresh + i);
+  }
+  await expect.poll(() => calendar.events).toBe(before.calendar.events + 1);
+  expect(calendar.status).toBe(before.calendar.status); expect(weather.requests.snapshot).toBe(before.weather.snapshot + 5);
+  expect(manifests).toBe(before.manifests); expect(images).toBe(before.images); expect(await page.evaluate(() => window.activeClockIntervals())).toBe(1);
+});
+
+test('hiding calendar in both profiles pauses events while retaining connection controls', async ({ page }) => {
+  await page.clock.install({ time: instant }); await seedPreferences(page, { calendarVisible: false, mobileCalendarVisible: true });
+  const calendar = await mockCalendar(page); await page.goto('/'); await expect.poll(() => calendar.events).toBe(1);
+  await page.locator('#open-settings').click(); await page.getByRole('tab', { name: 'Calendar', exact: true }).click();
+  await page.getByLabel('Show calendar on mobile', { exact: true }).uncheck(); await savePreferences(page);
+  await expect(page.getByRole('button', { name: 'Disconnect calendar', exact: true })).toBeEnabled();
+  await expect(page.getByLabel('Baikal server URL', { exact: true })).toHaveValue('https://baikal.example.test');
+  await page.locator('#close-settings').click();
+  for (const width of [390, 900]) { await page.setViewportSize({ width, height: 800 }); await expect(page.locator('#calendar')).toBeHidden(); }
+  await page.clock.fastForward(300000);
+  expect(calendar.events).toBe(1); expect(calendar.status).toBe(1);
 });
 
 test('fullscreen enters and exits when the browser supports it', async ({ page }) => {

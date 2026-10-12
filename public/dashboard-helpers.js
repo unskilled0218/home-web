@@ -1,7 +1,9 @@
 export const SETTINGS_KEY = 'dashboard.preferences.v1';
+export const MOBILE_MEDIA_QUERY = '(max-width: 600px)';
 const choice = (value, options, fallback) => options.includes(value) ? value : fallback;
 const number = (value, min, max, fallback) => typeof value === 'number' && Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;
 const boolean = (value, fallback) => typeof value === 'boolean' ? value : fallback;
+const mobileScale = (value) => Math.round(number(value, 0.5, 2, 1) * 10) / 10;
 export const text = (value, limit = 120) => typeof value === 'string' ? value.trim().slice(0, limit) : '';
 export const finite = (value) => typeof value === 'number' && Number.isFinite(value);
 
@@ -24,6 +26,7 @@ export function normalizeSettings(input = {}, fallbackZone = Intl.DateTimeFormat
     position: choice(value.position, ['left', 'right'], 'left'), scale: number(value.scale, 0.5, 2, 1),
     timezone, dateStyle: choice(value.dateStyle, ['short', 'medium', 'long', 'full'], 'medium'), hour12: boolean(value.hour12, false), seconds: boolean(value.seconds, true),
     timeVisible: boolean(value.timeVisible, true), timeScale: number(value.timeScale, 0.5, 2, 1), weatherVisible: boolean(value.weatherVisible, true), weatherScale: number(value.weatherScale, 0.5, 2, 1), calendarVisible: boolean(value.calendarVisible, true), calendarScale: number(value.calendarScale, 0.5, 2, 1),
+    mobileTimeVisible: boolean(value.mobileTimeVisible, true), mobileTimeScale: mobileScale(value.mobileTimeScale), mobileWeatherVisible: boolean(value.mobileWeatherVisible, true), mobileWeatherScale: mobileScale(value.mobileWeatherScale), mobileCalendarVisible: boolean(value.mobileCalendarVisible, true), mobileCalendarScale: mobileScale(value.mobileCalendarScale),
     location: normalizeLocation(value.location), temperature: choice(value.temperature, ['celsius', 'fahrenheit'], 'celsius'), wind: choice(value.wind, ['kmh', 'mph', 'ms', 'kn'], 'kmh'), precipitation: choice(value.precipitation, ['mm', 'inch'], 'mm'),
     order: choice(value.order, ['name', 'date', 'random'], 'random'), interval, duration: number(value.duration, 0, Math.min(10, interval - 1), 3), animation: choice(value.animation, ['none', 'fade', 'slide'], 'fade'),
     opacity: number(value.opacity, 0, 1, 1), background: choice(value.background, ['color', 'blur'], 'color'), color: /^#[0-9a-f]{6}$/i.test(value.color) ? value.color : '#000000', blur: number(value.blur, 0, 100, 100), imageInfo: boolean(value.imageInfo, false)
@@ -32,6 +35,20 @@ export function normalizeSettings(input = {}, fallbackZone = Intl.DateTimeFormat
 
 export function loadSettings(storage) {
   try { return normalizeSettings(JSON.parse(storage.getItem(SETTINGS_KEY))); } catch { return normalizeSettings(); }
+}
+
+// Projection changes presentation without replacing either saved profile.
+export function resolveDisplayPreferences(settings, mobile) {
+  return {
+    position: mobile ? 'left' : settings.position,
+    scale: mobile ? 1 : settings.scale,
+    timeVisible: mobile ? settings.mobileTimeVisible : settings.timeVisible,
+    timeScale: mobile ? settings.mobileTimeScale : settings.timeScale,
+    weatherVisible: mobile ? settings.mobileWeatherVisible : settings.weatherVisible,
+    weatherScale: mobile ? settings.mobileWeatherScale : settings.weatherScale,
+    calendarVisible: mobile ? settings.mobileCalendarVisible : settings.calendarVisible,
+    calendarScale: mobile ? settings.mobileCalendarScale : settings.calendarScale
+  };
 }
 
 export function clockText(date, settings, locale = undefined) {

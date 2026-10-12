@@ -109,5 +109,22 @@ input[type=color] { min-height: 2.5rem; }
   #settings-dialog #settings-status { flex-basis: 100%; }
   #settings-dialog .settings-save { width: 100%; }
 }
-@media (max-width: 600px) { #information { width: calc(100% - 1rem); margin-left: .5rem; margin-right: .5rem; } .page-tools { padding: .5rem; } fieldset { grid-template-columns: 1fr; } #weather, #calendar { font-size: min(1em, 1.25rem); } #current-weather { align-items: flex-start; } .weather-icon { width: clamp(2.75rem, 16vw, 4.5rem); height: clamp(2.75rem, 16vw, 4.5rem); } #hourly, #daily { gap: .1rem; } #hourly li, #daily li { flex-basis: 5.5em; min-width: min(5.5em, 100%); padding: .25em .05em; } .forecast-icon { width: clamp(1.5rem, 10vw, 2.5rem); height: clamp(1.5rem, 10vw, 2.5rem); } .calendar-event, .right .calendar-event { grid-template-columns: 1fr; } .calendar-event-date, .right .calendar-event-date, .right .calendar-event-title, .right .calendar-event-time, .right .calendar-event-location { grid-column: 1; grid-row: auto; } }
+@media (max-width: 600px) {
+  #information { width: calc(100% - 1rem); margin: .5rem .5rem 1rem; padding-top: 0; min-width: 0; }
+  #information > section { display: flow-root; min-width: 0; margin-top: 0; overflow-wrap: anywhere; }
+  #information > section:not([hidden]) ~ section { margin-top: .9rem; }
+  .page-tools { padding: .5rem; }
+  fieldset { grid-template-columns: 1fr; }
+  #time { font-size: calc(clamp(1.5rem, 8vw, 3rem) * var(--time-scale, 1)); }
+  #current-weather { align-items: flex-start; flex-wrap: wrap; }
+  #current-weather-values { flex: 1 1 10em; overflow-wrap: anywhere; }
+  #current-weather-values > *, #current-weather-subvalues > * { max-width: 100%; min-width: 0; }
+  .weather-icon { width: clamp(2rem, 4em, 6rem); height: clamp(2rem, 4em, 6rem); max-width: 100%; }
+  #hourly, #daily { gap: .1rem; max-width: 100%; }
+  #hourly li, #daily li { flex-basis: 5.5em; min-width: min(5.5em, 100%); padding: .25em .05em; }
+  .forecast-icon { width: clamp(1.5rem, 2.5em, 4rem); height: clamp(1.5rem, 2.5em, 4rem); }
+  .forecast-label, .forecast-temperature, .forecast-condition { overflow: visible; white-space: normal; overflow-wrap: anywhere; }
+  .calendar-event, .right .calendar-event { grid-template-columns: minmax(0, 1fr); }
+  .calendar-event-date, .right .calendar-event-date, .right .calendar-event-title, .right .calendar-event-time, .right .calendar-event-location { grid-column: 1; grid-row: auto; }
+}
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
