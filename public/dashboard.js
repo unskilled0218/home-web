@@ -4,6 +4,9 @@ import { createPhotoController } from './dashboard-photos.js';
 import { createCalendarController, formatCalendarEvent } from './dashboard-calendar.js';
 import { createSettingsTabs } from './dashboard-settings.js';
 import { formatWeatherUpdated } from './weather-data.js';
+import { createBookmarkController } from './dashboard-bookmarks.js';
+import { createBookmarkTree } from './dashboard-bookmark-tree.js';
+import { safeBookmarkUrl } from './bookmark-data.js';
 
 const $ = (id) => document.getElementById(id);
 const currentWeatherSubValues = document.createElement('div');
@@ -19,6 +22,15 @@ let mobileLayout;
 const preferences = $('preferences');
 const dialog = $('settings-dialog');
 const settingsTabs = createSettingsTabs(dialog);
+const bookmarkTree = createBookmarkTree({ root: $('bookmark-tree'), status: $('bookmarks-status'), onToggle: (id, open) => bookmarks.setFolderOpen(id, open), onRetry: (id) => bookmarks.retryFolder(id) });
+const bookmarks = createBookmarkController({ onChange(state) {
+  bookmarkTree.render(state);
+  const link = $('open-linkwarden'); const url = safeBookmarkUrl(state.baseUrl);
+  link.hidden = !url; if (url) link.href = url; else link.removeAttribute('href');
+  $('connect-linkwarden').disabled = state.mutationPending || (state.discovered && !state.encryptionReady);
+  $('linkwarden-token').required = state.needsReauthentication || !state.accessTokenPresent;
+  $('disconnect-linkwarden').disabled = state.mutationPending || (!state.configured && !state.accessTokenPresent);
+} });
 
 function save() {
   try { storage.setItem(SETTINGS_KEY, JSON.stringify(settings)); $('settings-status').textContent = 'Preferences saved in this browser.'; }
@@ -150,6 +162,14 @@ function applyPresentation() {
     mobileLayout = mobile;
   }
   startClock();
+  applyBookmarkPresentation();
+}
+
+function applyBookmarkPresentation() {
+  const hidden = settings.hideBookmarksFullscreen && Boolean(document.fullscreenElement);
+  $('bookmarks').hidden = hidden;
+  document.body.classList.toggle('bookmarks-shown', !hidden);
+  bookmarks.setPresentation({ mobile: mobileViewport.matches, mode: settings.mobileBookmarksMode, hidden });
 }
 
 function apply() {
@@ -169,7 +189,10 @@ preferences.addEventListener('submit', (event) => {
     if (!(control.name in settings)) continue;
     next[control.name] = control.type === 'checkbox' ? control.checked : control.type === 'number' ? control.valueAsNumber : control.value;
   }
-  settings = normalizeSettings(next); save(); fillForm(); apply();
+  const previous = settings;
+  settings = normalizeSettings(next); save(); fillForm();
+  const sharedChanged = Object.keys(settings).some((name) => !['mobileBookmarksMode', 'hideBookmarksFullscreen'].includes(name) && JSON.stringify(settings[name]) !== JSON.stringify(previous[name]));
+  if (sharedChanged) apply(); else applyBookmarkPresentation();
 });
 function fillCalendarForm() {
   const state = calendar.getState();
@@ -178,12 +201,17 @@ function fillCalendarForm() {
   $('calendar-password').value = '';
   $('disconnect-calendar').disabled = !state.configured && !state.needsReauthentication;
 }
+function fillLinkwardenForm() {
+  const state = bookmarks.getState();
+  $('linkwarden-url').value = state.baseUrl ?? ''; $('linkwarden-username').value = state.username ?? ''; $('linkwarden-token').value = '';
+  $('linkwarden-settings-status').textContent = state.needsReauthentication ? 'Linkwarden needs re-authentication. Enter an access token.' : !state.encryptionReady && state.discovered ? 'Configure the server encryption key before connecting Linkwarden.' : '';
+}
 function setCalendarMutationPending(pending) {
   $('connect-calendar').disabled = pending;
   $('disconnect-calendar').disabled = pending || (!calendar.getState().configured && !calendar.getState().needsReauthentication);
 }
 $('open-settings').addEventListener('click', () => {
-  fillForm(); fillCalendarForm(); $('calendar-settings-status').textContent = '';
+  fillForm(); fillCalendarForm(); fillLinkwardenForm(); $('calendar-settings-status').textContent = '';
   settingsTabs.select('settings-tab-general');
   void weather.refresh();
   dialog.showModal();
@@ -239,17 +267,32 @@ $('disconnect-calendar').addEventListener('click', async () => {
   } finally { setCalendarMutationPending(false); }
 });
 
-function fullscreenState() { $('fullscreen').textContent = document.fullscreenElement ? 'Exit fullscreen' : 'Enter fullscreen'; }
+$('linkwarden-connection').addEventListener('submit', async (event) => {
+  event.preventDefault(); $('linkwarden-settings-status').textContent = 'Connecting to Linkwarden…';
+  try {
+    await bookmarks.connect({ url: $('linkwarden-url').value, username: $('linkwarden-username').value, accessToken: $('linkwarden-token').value });
+    $('linkwarden-token').value = ''; $('linkwarden-settings-status').textContent = 'Linkwarden connected.';
+  } catch (error) { $('linkwarden-settings-status').textContent = error.message || 'Linkwarden could not be connected.'; }
+});
+$('disconnect-linkwarden').addEventListener('click', async () => {
+  if (!confirm('Disconnect Linkwarden and delete its saved access token?')) return;
+  $('linkwarden-settings-status').textContent = 'Disconnecting Linkwarden…';
+  try { await bookmarks.disconnect(); fillLinkwardenForm(); $('linkwarden-settings-status').textContent = 'Linkwarden disconnected.'; }
+  catch (error) { $('linkwarden-settings-status').textContent = error.message || 'Linkwarden could not be disconnected.'; }
+});
+
+function fullscreenState() { $('fullscreen').textContent = document.fullscreenElement ? 'Exit fullscreen' : 'Enter fullscreen'; applyBookmarkPresentation(); }
 if (!document.fullscreenEnabled) { $('fullscreen').disabled = true; $('fullscreen').textContent = 'Fullscreen unavailable'; }
 $('fullscreen').addEventListener('click', async () => {
   try { if (document.fullscreenElement) await document.exitFullscreen(); else await document.documentElement.requestFullscreen(); $('page-status').textContent = ''; }
   catch { $('page-status').textContent = 'Fullscreen could not be enabled in this browser.'; }
 });
 document.addEventListener('fullscreenchange', fullscreenState);
-document.addEventListener('visibilitychange', () => { startClock(); photos.setVisible(!document.hidden); weather.setVisible(!document.hidden); calendar.setVisible(!document.hidden); if (document.hidden) stopAnimations(); });
+document.addEventListener('visibilitychange', () => { startClock(); photos.setVisible(!document.hidden); weather.setVisible(!document.hidden); calendar.setVisible(!document.hidden); bookmarks.setVisible(!document.hidden); if (document.hidden) stopAnimations(); });
 reducedMotion.addEventListener('change', () => { stopAnimations(); photos.configure(settings); });
 mobileViewport.addEventListener('change', applyPresentation);
-window.addEventListener('pagehide', (event) => { clearInterval(clockTimer); cancelSearch(); weather.dispose(); photos.dispose(); if (!event.persisted) calendar.dispose(); });
-window.addEventListener('pageshow', (event) => { if (event.persisted) { void photos.load(); applyPresentation(); weather.configure(settings); void weather.refresh(); void calendar.refresh(); } });
+window.addEventListener('pagehide', (event) => { clearInterval(clockTimer); cancelSearch(); weather.dispose(); photos.dispose(); if (event.persisted) bookmarks.setVisible(false); else { calendar.dispose(); bookmarks.dispose(); } });
+window.addEventListener('pageshow', (event) => { if (event.persisted) { void photos.load(); applyPresentation(); weather.configure(settings); void weather.refresh(); void calendar.refresh(); bookmarks.setVisible(!document.hidden); } });
 photos.setVisible(!document.hidden); weather.setVisible(!document.hidden); calendar.setVisible(!document.hidden);
-fillForm(); apply(); void photos.load();
+bookmarks.setVisible(!document.hidden);
+fillForm(); apply(); void photos.load(); void bookmarks.start();

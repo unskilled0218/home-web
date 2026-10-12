@@ -11,7 +11,7 @@
     <div id="photos" aria-hidden="true"></div>
     <header class="page-tools"><button id="fullscreen" type="button">Enter fullscreen</button><button id="open-settings" type="button">Settings</button></header>
     <p id="page-status" role="status"></p>
-    <main id="information">
+    <div id="dashboard-content"><main id="information">
       <h1 class="sr-only">Photo dashboard</h1>
       <section id="calendar" aria-label="Calendar">
         <p id="calendar-status" role="status">Checking calendar connection…</p>
@@ -26,7 +26,7 @@
         <div id="forecast-details"><ul id="hourly" aria-label="Hourly forecast"></ul><ul id="daily" aria-label="Daily forecast"></ul></div>
       </section>
       <p id="photo-caption"></p>
-    </main>
+    </main><aside id="bookmarks" aria-labelledby="bookmarks-title"><h2 id="bookmarks-title">Bookmarks</h2><p id="bookmarks-status" role="status">Checking Linkwarden connection…</p><p><a id="open-linkwarden" hidden>Open Linkwarden</a></p><ul id="bookmark-tree" aria-label="Bookmark folders"></ul></aside></div>
     <dialog id="settings-dialog" aria-labelledby="settings-title">
       <header class="settings-header"><div><p class="settings-eyebrow">Make it yours</p><h2 id="settings-title">Dashboard settings</h2></div><button id="close-settings" type="button">Close</button></header>
       <form id="preferences" novalidate hidden></form>
@@ -36,6 +36,7 @@
           <button id="settings-tab-time" type="button" role="tab" aria-controls="settings-panel-time" aria-selected="false" tabindex="-1">Time</button>
           <button id="settings-tab-weather" type="button" role="tab" aria-controls="settings-panel-weather" aria-selected="false" tabindex="-1">Weather</button>
           <button id="settings-tab-calendar" type="button" role="tab" aria-controls="settings-panel-calendar" aria-selected="false" tabindex="-1">Calendar</button>
+          <button id="settings-tab-bookmarks" type="button" role="tab" aria-controls="settings-panel-bookmarks" aria-selected="false" tabindex="-1">Bookmarks</button>
           <button id="settings-tab-images" type="button" role="tab" aria-controls="settings-panel-images" aria-selected="false" tabindex="-1">Images</button>
         </div>
         <div class="settings-panels">
@@ -94,6 +95,17 @@
             </fieldset>
             <p class="settings-description">Mobile display applies up to 600px wide, with scale in 0.1 increments. The connection is shared; events refresh when either profile shows the calendar.</p>
             <section class="settings-section" aria-labelledby="calendar-settings-title"><h4 id="calendar-settings-title">Baikal calendar</h4><p>Enter the Baikal server URL. Event calendars are discovered automatically. The password is encrypted on this server and never shown again; leave it blank to retain it when the URL and username are unchanged.</p><form id="calendar-connection"><label>Baikal server URL<input id="calendar-url" name="serverUrl" type="url" maxlength="2048" placeholder="https://baikal.example.test" autocomplete="url" required></label><label>Username<input id="calendar-username" name="username" maxlength="120" autocomplete="username" required></label><label>Password<input id="calendar-password" name="password" type="password" maxlength="2000" autocomplete="current-password"></label><div class="calendar-settings-actions"><button id="connect-calendar" type="submit">Connect calendar</button><button id="disconnect-calendar" type="button">Disconnect calendar</button></div></form><p id="calendar-settings-status" role="status"></p></section>
+          </section>
+          <section id="settings-panel-bookmarks" role="tabpanel" aria-labelledby="settings-tab-bookmarks" tabindex="0" hidden>
+            <h3>Bookmarks</h3><p class="settings-description">Linkwarden collections and their direct bookmarks form the tree. Desktop starts expanded; Compact mobile opens roots and keeps child folders closed.</p>
+            <fieldset><legend>Bookmark display</legend>
+              <label>Mobile bookmark display<select name="mobileBookmarksMode" form="preferences"><option value="compact">Compact</option><option value="expanded">Expanded</option></select></label>
+              <label class="toggle"><input name="hideBookmarksFullscreen" form="preferences" type="checkbox">Hide bookmarks in fullscreen</label>
+            </fieldset>
+            <section class="settings-section" aria-labelledby="linkwarden-title"><h4 id="linkwarden-title">Linkwarden connection</h4><p>The access token is encrypted on this server. Leave it blank to retain a readable saved token when URL and username are unchanged. A new token is required for re-authentication.</p>
+              <form id="linkwarden-connection"><label>Linkwarden URL<input id="linkwarden-url" type="url" maxlength="2048" required></label><label>Linkwarden username<input id="linkwarden-username" maxlength="120" required autocomplete="username"></label><label>Linkwarden access token<input id="linkwarden-token" type="password" maxlength="2000" autocomplete="off"></label><div class="calendar-settings-actions"><button id="connect-linkwarden" type="submit">Connect Linkwarden</button><button id="disconnect-linkwarden" type="button">Disconnect Linkwarden</button></div></form>
+              <p id="linkwarden-settings-status" role="status"></p>
+            </section>
           </section>
           <section id="settings-panel-images" role="tabpanel" aria-labelledby="settings-tab-images" tabindex="0" hidden>
             <h3>Images</h3><p class="settings-description">Give your photos the right pace and backdrop.</p>

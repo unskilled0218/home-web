@@ -52,6 +52,25 @@ summary { cursor: pointer; padding: .5rem 0; }
 .forecast-label, .forecast-temperature { font-weight: 700; }
 .forecast-condition { font-size: .85em; }
 #photo-caption { overflow-wrap: anywhere; }
+#dashboard-content { display: contents; }
+.bookmarks-shown #dashboard-content { display: grid; flex: 1; grid-template-columns: minmax(0, 1fr) clamp(10rem, 28vw, 22rem); gap: 1rem; margin: 0 1rem 1rem; align-items: end; }
+.bookmarks-shown #information { width: 100%; margin: 0; min-width: 0; }
+.bookmarks-shown #information > section { min-width: 0; overflow-wrap: anywhere; }
+.bookmarks-shown #current-weather { flex-wrap: wrap; }
+.bookmarks-shown #current-weather-values { flex: 1 1 10em; overflow-wrap: anywhere; }
+.bookmarks-shown #current-weather-values > *, .bookmarks-shown #current-weather-subvalues > * { max-width: 100%; min-width: 0; }
+.bookmarks-shown .forecast-temperature { white-space: normal; overflow-wrap: anywhere; }
+.bookmarks-shown .calendar-event { grid-template-columns: minmax(min(6.5em, 45%), auto) minmax(0, 1fr); }
+.bookmarks-shown .right .calendar-event { grid-template-columns: minmax(0, 1fr) minmax(min(6.5em, 45%), auto); }
+#bookmarks { position: relative; z-index: 1; align-self: start; min-width: 0; max-height: calc(100dvh - 8rem); overflow-y: auto; overflow-wrap: anywhere; padding: .5rem; text-shadow: 0 2px 5px #000; }
+#bookmarks h2 { font-size: 1.1rem; }
+#bookmark-tree, .bookmark-links, .bookmark-children { list-style: none; padding: 0; margin: .35rem 0; }
+.bookmark-folder { min-width: 0; }
+.bookmark-folder summary { padding-inline-start: min(calc(var(--folder-depth, 0) * .6rem), 3rem); overflow-wrap: anywhere; }
+.bookmark-link { display: block; padding: .25rem 0; padding-inline-start: min(calc(var(--folder-depth, 0) * .6rem + .75rem), 3rem); overflow-wrap: anywhere; }
+.bookmark-folder-status { font-size: .8rem; }
+.bookmark-retry { font-size: .8rem; padding: .3rem .5rem; max-width: 100%; }
+#linkwarden-connection { display: grid; gap: .7rem; }
 fieldset { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: .8rem; border: 1px solid #62758a; margin: 1rem 0; border-radius: .5rem; }
 label { display: flex; flex-direction: column; gap: .3rem; }
 .toggle { flex-direction: row; align-items: center; }
@@ -110,6 +129,10 @@ input[type=color] { min-height: 2.5rem; }
   #settings-dialog .settings-save { width: 100%; }
 }
 @media (max-width: 600px) {
+  .bookmarks-shown #dashboard-content { display: contents; }
+  .bookmarks-shown #information { width: calc(100% - 1rem); margin: .5rem .5rem 1rem; padding-top: 0; }
+  #bookmarks { width: calc(100% - 1rem); margin: 0 .5rem 1rem; padding: 0; max-height: none; overflow-y: visible; }
+  .bookmarks-shown .calendar-event, .bookmarks-shown .right .calendar-event { grid-template-columns: minmax(0, 1fr); }
   #information { width: calc(100% - 1rem); margin: .5rem .5rem 1rem; padding-top: 0; min-width: 0; }
   #information > section { display: flow-root; min-width: 0; margin-top: 0; overflow-wrap: anywhere; }
   #information > section:not([hidden]) ~ section { margin-top: .9rem; }

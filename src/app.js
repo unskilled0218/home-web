@@ -101,6 +101,12 @@ export function createDashboardServer({ runtimeConfig, store, linkwarden, homeAs
   const integrationEncryptionKey = runtimeConfig.integrationEncryptionKey ?? runtimeConfig.linkwardenEncryptionKey;
   let homeAssistantMutation = Promise.resolve();
   let calDavMutation = Promise.resolve();
+  let linkwardenMutation = Promise.resolve();
+  const queueLinkwardenMutation = (operation) => {
+    const result = linkwardenMutation.then(operation, operation);
+    linkwardenMutation = result.catch(() => {});
+    return result;
+  };
   const homeAssistantActions = new Set();
   const queueHomeAssistantMutation = (operation) => {
     const result = homeAssistantMutation.then(operation, operation);
@@ -113,13 +119,17 @@ export function createDashboardServer({ runtimeConfig, store, linkwarden, homeAs
     return result;
   };
 
+  function linkwardenConfigurationId(saved = store.getLinkwarden()) {
+    return saved ? createHash('sha256').update(JSON.stringify(['linkwarden-configuration-v1', saved.baseUrl, saved.username, saved.encryptedAccessToken])).digest('base64url') : null;
+  }
+
   function linkwardenStatus() {
     const saved = store.getLinkwarden();
     let encryptionReady = false;
     let credentialsReadable = false;
     try { encryptionKey(integrationEncryptionKey); encryptionReady = true; if (saved) { decryptApiKey(saved.encryptedAccessToken, integrationEncryptionKey); credentialsReadable = true; } } catch { /* The optional integration remains disabled until valid credentials can be decrypted. */ }
     const configured = Boolean(saved?.username && credentialsReadable);
-    return { configured, accessTokenPresent: Boolean(saved), encryptionReady, needsReauthentication: Boolean(saved) && !configured, ...(configured && { baseUrl: saved.baseUrl, username: saved.username, updatedAt: saved.updatedAt }) };
+    return { configured, configurationId: linkwardenConfigurationId(saved), accessTokenPresent: Boolean(saved), encryptionReady, needsReauthentication: Boolean(saved) && !configured, ...(configured && { baseUrl: saved.baseUrl, username: saved.username, updatedAt: saved.updatedAt }) };
   }
 
   function savedLinkwardenSettings() {
@@ -134,6 +144,7 @@ export function createDashboardServer({ runtimeConfig, store, linkwarden, homeAs
     const expiresAt = now() + 60 * 60_000;
     const tokenize = (collection) => ({
       name: collection.name,
+      selectionId: createHash('sha256').update(JSON.stringify(['linkwarden-collection-v1', settings.baseUrl, settings.username, collection.id])).digest('base64url'),
       collectionToken: collectionSelections.issue({ id: collection.id, fingerprint, expiresAt }),
       children: collection.children.map(tokenize)
     });
@@ -142,8 +153,15 @@ export function createDashboardServer({ runtimeConfig, store, linkwarden, homeAs
 
   function selectedCollection(token, settings) {
     const selection = collectionSelections.resolve(token, selectionFingerprint(settings));
-    if (!selection) throw new Error('Select a collection from the current Linkwarden tree.');
+    if (!selection) throw Object.assign(new Error('Select a collection from the current Linkwarden tree.'), { code: 'COLLECTION_SELECTION_EXPIRED' });
     return selection;
+  }
+
+  function linkwardenReadError(response, error, configurationId, fallback) {
+    const changed = configurationId !== linkwardenConfigurationId() || error.code === 'LINKWARDEN_CONFIGURATION_CHANGED';
+    const code = changed ? 'LINKWARDEN_CONFIGURATION_CHANGED' : error.code ?? 'LINKWARDEN_UNAVAILABLE';
+    const status = code === 'LINKWARDEN_CONFIGURATION_CHANGED' ? 409 : code === 'COLLECTION_SELECTION_EXPIRED' ? 400 : code === 'LINKWARDEN_AUTHENTICATION_REQUIRED' ? 401 : code === 'LINKWARDEN_ACCESS_DENIED' ? 403 : 503;
+    return json(response, status, { configurationId, code, error: ['COLLECTION_SELECTION_EXPIRED', 'COLLECTION_LIMIT', 'LINKWARDEN_AUTHENTICATION_REQUIRED', 'LINKWARDEN_ACCESS_DENIED'].includes(code) ? error.message : fallback, ...(status === 401 && { needsReauthentication: true }), ...(status === 403 && { accessDenied: true }) });
   }
 
   function credentialsFromInput(input) {
@@ -358,18 +376,24 @@ export function createDashboardServer({ runtimeConfig, store, linkwarden, homeAs
       } catch (error) { return json(response, 503, { configured: true, error: isHomeAssistantClientError(error) ? error.message : HOME_ASSISTANT_UNAVAILABLE }); }
     }
     if (request.method === 'GET' && pathname === '/api/linkwarden/collections') {
-      try { const settings = savedLinkwardenSettings(); return json(response, 200, { collections: storeCollectionTree(settings, await linkwarden.listCollections(settings)) }); }
-      catch { return json(response, 503, { error: 'Linkwarden collections are currently unavailable.' }); }
+      const configurationId = linkwardenConfigurationId();
+      try {
+        const settings = savedLinkwardenSettings(); const collections = await linkwarden.listCollections(settings);
+        if (configurationId !== linkwardenConfigurationId()) return json(response, 409, { code: 'LINKWARDEN_CONFIGURATION_CHANGED', error: 'Linkwarden source changed. Reload the connection.' });
+        return json(response, 200, { configurationId, collections: storeCollectionTree(settings, collections) });
+      } catch (error) { return linkwardenReadError(response, error, configurationId, 'Linkwarden collections are currently unavailable.'); }
     }
     if (request.method === 'GET' && pathname === '/api/bookmarks') {
-      if (!store.getLinkwarden()) return json(response, 200, { configured: false, bookmarks: [] });
+      const configurationId = linkwardenConfigurationId();
+      if (!configurationId) return json(response, 200, { configured: false, configurationId: null, bookmarks: [] });
       try {
         const url = new URL(request.url, 'http://localhost');
         const settings = savedLinkwardenSettings();
         const collection = selectedCollection(url.searchParams.get('collection') ?? '', settings);
         const result = await linkwarden.getBookmarks({ ...settings, collectionId: collection.id }, { force: url.searchParams.get('refresh') === '1' });
-        return json(response, 200, { configured: true, ...result });
-      } catch (error) { return json(response, error.message.startsWith('Select a collection') ? 400 : 503, { configured: true, error: error.message.startsWith('Select a collection') ? error.message : 'Bookmarks are currently unavailable.' }); }
+        if (configurationId !== linkwardenConfigurationId()) return json(response, 409, { code: 'LINKWARDEN_CONFIGURATION_CHANGED', error: 'Linkwarden source changed. Reload the connection.' });
+        return json(response, 200, { configured: true, configurationId, ...result });
+      } catch (error) { return linkwardenReadError(response, error, configurationId, 'Bookmarks are currently unavailable.'); }
     }
 
     const controlToken = homeAssistantControlToken(pathname);
@@ -398,16 +422,19 @@ export function createDashboardServer({ runtimeConfig, store, linkwarden, homeAs
     try {
       if (request.method === 'POST' && pathname === '/api/devices') return json(response, 201, { device: store.create(validateDevice(await readJson(request))) });
       if (request.method === 'PUT' && pathname === '/api/linkwarden') {
-        const settings = credentialsFromInput(await readJson(request));
-        encryptionKey(integrationEncryptionKey);
-        const collections = await linkwarden.listCollections(settings);
-        const encryptedAccessToken = encryptApiKey(settings.accessToken, integrationEncryptionKey);
-        store.saveLinkwarden({ ...settings, encryptedAccessToken });
-        linkwarden.clearCache(); collectionSelections.clear();
-        return json(response, 200, { linkwarden: linkwardenStatus(), collections: storeCollectionTree(settings, collections) });
+        return await queueLinkwardenMutation(async () => {
+          const settings = credentialsFromInput(await readJson(request));
+          encryptionKey(integrationEncryptionKey);
+          const collections = await linkwarden.listCollections(settings, { provisional: true });
+          const encryptedAccessToken = encryptApiKey(settings.accessToken, integrationEncryptionKey);
+          store.saveLinkwarden({ ...settings, encryptedAccessToken });
+          linkwarden.clearCache(); collectionSelections.clear();
+          const status = linkwardenStatus();
+          return json(response, 200, { linkwarden: status, configurationId: status.configurationId, collections: storeCollectionTree(settings, collections) });
+        });
       }
       if (request.method === 'DELETE' && pathname === '/api/linkwarden') {
-        store.removeLinkwarden(); linkwarden.clearCache(); collectionSelections.clear(); return json(response, 204, {});
+        return await queueLinkwardenMutation(() => { store.removeLinkwarden(); linkwarden.clearCache(); collectionSelections.clear(); return json(response, 204, {}); });
       }
       if (request.method === 'PUT' && pathname === '/api/home-assistant') {
         return await queueHomeAssistantMutation(async () => {

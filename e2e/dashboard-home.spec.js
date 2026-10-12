@@ -13,6 +13,7 @@ const test = base.extend({
     page.on('console', (message) => { if (/invalid form control|not focusable/i.test(message.text())) errors.push(message.text()); });
     await page.route('**/api/calendar', (route) => route.fulfill({ json: { configured: false, encryptionReady: true } }));
     await page.route('**/api/dashboard/photos', (route) => route.fulfill({ json: { available: true, photos: [] } }));
+    await page.route('**/api/linkwarden', (route) => route.fulfill({ json: { linkwarden: { configured: false, configurationId: null, encryptionReady: true } } }));
     await mockWeather(page, { configured: false });
     const providerRequests = [];
     await page.route(/https:\/\/(?:api|air-quality-api)\.open-meteo\.com\//, (route) => { providerRequests.push(route.request().url()); return route.abort(); });
@@ -53,6 +54,30 @@ async function mockCalendar(page, { longContent = false } = {}) {
     return route.fulfill({ json: { configured: true, stale: false, events: [{ title: longContent ? 'VeryLongUnbrokenCalendarTitle'.repeat(5) : 'Planning meeting', start: '2026-10-11T13:00:00Z', end: '2026-10-11T14:00:00Z', allDay: false, location: longContent ? 'A long meeting location with details that must wrap safely on a narrow screen' : 'Office' }] } });
   });
   return requests;
+}
+
+async function mockBookmarks(page, { long = false } = {}) {
+  const ids = ['collection-root-0001', 'collection-child-001', 'collection-deep-0001'];
+  const names = long ? ['Long root collection name '.repeat(8), 'LongChildFolderName'.repeat(8), 'Grandchild'] : ['Root', 'Child', 'Grandchild'];
+  const folders = ids.map((selectionId, i) => ({ selectionId, name: names[i], collectionToken: `token-${selectionId}`, children: [] }));
+  folders[0].children = [folders[1]]; folders[1].children = [folders[2]];
+  let collections = [folders[0]]; let version = 1;
+  let status = { configured: true, configurationId: 'bookmark-configuration-one', encryptionReady: true, accessTokenPresent: true, baseUrl: 'https://linkwarden.test', username: 'sam' };
+  const failures = new Map(); const requests = { status: 0, tree: 0, folders: [], mutations: [] };
+  await page.route('**/api/linkwarden', (route) => {
+    const request = route.request();
+    if (request.method() === 'PUT') { const body = request.postDataJSON(); requests.mutations.push(body); status = { ...status, configured: true, configurationId: `bookmark-configuration-${++version}`, baseUrl: body.url, username: body.username }; return route.fulfill({ json: { linkwarden: status, configurationId: status.configurationId, collections } }); }
+    if (request.method() === 'DELETE') { requests.mutations.push('DELETE'); status = { configured: false, configurationId: null, encryptionReady: true }; return route.fulfill({ status: 204 }); }
+    requests.status++; return route.fulfill({ json: { linkwarden: status } });
+  });
+  await page.route('**/api/linkwarden/collections', (route) => { requests.tree++; return route.fulfill({ json: { configurationId: status.configurationId, collections } }); });
+  await page.route('**/api/bookmarks?*', (route) => {
+    const token = new URL(route.request().url()).searchParams.get('collection'); const index = folders.findIndex((folder) => folder.collectionToken === token);
+    requests.folders.push(index); const failure = failures.get(index);
+    if (failure) return route.fulfill({ status: failure.status, json: { error: failure.error, code: failure.code } });
+    return route.fulfill({ json: { configured: true, configurationId: status.configurationId, stale: false, bookmarks: [{ id: index + 1, name: ['Root bookmark', 'Child bookmark', 'Deep bookmark'][index], url: `https://example.test/${index}` }, ...(index === 0 ? [{ id: 99, name: 'Unsafe', url: 'javascript:alert(1)' }, { id: 98, name: '<img src=x onerror=alert(1)>', url: 'https://safe.test' }] : [])] } });
+  });
+  return { ids, requests, fail(index, failure) { failures.set(index, failure); }, setTree(next) { collections = next; }, renew() { for (const folder of folders) folder.collectionToken += '-renewed'; folders[0].name = 'Renamed root'; }, getStatus: () => status };
 }
 
 const sectionOrder = (page) => page.locator('#information > section').evaluateAll((sections) => sections.map((section) => section.id));
@@ -138,7 +163,7 @@ for (const width of [1200, 320, 390]) test(`Settings remains usable at ${width}p
   expect(bounds.x + bounds.width).toBeLessThanOrEqual(width);
   for (const height of [800, 360]) {
     await page.setViewportSize({ width, height });
-    for (const name of ['General', 'Time', 'Weather', 'Calendar', 'Images']) {
+    for (const name of ['General', 'Time', 'Weather', 'Calendar', 'Bookmarks', 'Images']) {
       const tab = page.getByRole('tab', { name, exact: true });
       await tab.click();
       const panel = page.getByRole('tabpanel', { name, exact: true });
@@ -402,6 +427,125 @@ test('hiding calendar in both profiles pauses events while retaining connection 
   for (const width of [390, 900]) { await page.setViewportSize({ width, height: 800 }); await expect(page.locator('#calendar')).toBeHidden(); }
   await page.clock.fastForward(300000);
   expect(calendar.events).toBe(1); expect(calendar.status).toBe(1);
+});
+
+for (const position of ['left', 'right']) test(`desktop bookmark tree stays expanded to the right without overlapping ${position} information`, async ({ page }) => {
+  await page.setViewportSize({ width: 1200, height: 900 }); await seedPreferences(page, { position }); const mock = await mockBookmarks(page);
+  await page.goto('/'); await expect(page.getByRole('link', { name: 'Deep bookmark', exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Root bookmark', exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Unsafe', exact: true })).toHaveCount(0); await expect(page.locator('#bookmark-tree img')).toHaveCount(0);
+  await expect(page.getByRole('link', { name: '<img src=x onerror=alert(1)>', exact: true })).toHaveAttribute('href', 'https://safe.test/');
+  for (const width of [1200, 601]) {
+    await page.setViewportSize({ width, height: 900 });
+    const information = await page.locator('#information').boundingBox(); const bookmarks = await page.locator('#bookmarks').boundingBox(); const tools = await page.locator('.page-tools').boundingBox();
+    expect(information.x + information.width).toBeLessThanOrEqual(bookmarks.x); expect(bookmarks.y).toBeGreaterThanOrEqual(tools.y + tools.height); expect(bookmarks.x + bookmarks.width).toBeLessThanOrEqual(width);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(width);
+  }
+  expect(mock.requests.tree).toBe(1); expect(mock.requests.folders.sort()).toEqual([0, 1, 2]);
+});
+
+for (const width of [320, 390]) test(`mobile Compact bookmarks open roots and reveal only the clicked child at ${width}px`, async ({ page }) => {
+  await page.setViewportSize({ width, height: 800 }); const mock = await mockBookmarks(page, { long: true }); await page.goto('/');
+  await expect(page.getByRole('link', { name: 'Root bookmark', exact: true })).toBeVisible();
+  const root = page.locator(`details[data-selection-id="${mock.ids[0]}"]`); const child = page.locator(`details[data-selection-id="${mock.ids[1]}"]`); const deep = page.locator(`details[data-selection-id="${mock.ids[2]}"]`);
+  await expect(root).toHaveJSProperty('open', true); await expect(child).toHaveJSProperty('open', false); await expect(deep).toHaveJSProperty('open', false); expect(mock.requests.folders).toEqual([0]);
+  const info = await page.locator('#information').boundingBox(); const bookmarkBounds = await page.locator('#bookmarks').boundingBox(); expect(bookmarkBounds.y).toBeGreaterThanOrEqual(info.y + info.height);
+  await child.locator(':scope > summary').focus(); await page.keyboard.press('Enter');
+  await expect(page.getByRole('link', { name: 'Child bookmark', exact: true })).toBeVisible(); await expect(deep).toHaveJSProperty('open', false); expect(mock.requests.folders).toEqual([0, 1]);
+  await deep.locator(':scope > summary').focus(); await page.keyboard.press('Space'); await expect(page.getByRole('link', { name: 'Deep bookmark', exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(width);
+  await child.locator(':scope > summary').click(); await expect(child).toHaveJSProperty('open', false);
+  await child.locator(':scope > summary').click(); await expect(page.getByRole('link', { name: 'Deep bookmark', exact: true })).toBeVisible(); expect(mock.requests.folders).toEqual([0, 1, 2]);
+});
+
+test('mobile bookmark mode persists and repeated presentation changes keep fresh folder data', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 800 }); const mock = await mockBookmarks(page); await page.goto('/');
+  await expect(page.getByRole('link', { name: 'Root bookmark', exact: true })).toBeVisible(); await page.locator('#open-settings').click(); await page.getByRole('tab', { name: 'Bookmarks', exact: true }).click();
+  await page.getByRole('combobox', { name: 'Mobile bookmark display', exact: true }).selectOption('expanded'); await savePreferences(page); await page.locator('#close-settings').click();
+  await expect(page.getByRole('link', { name: 'Deep bookmark', exact: true })).toBeVisible();
+  const reads = mock.requests.folders.length;
+  for (const width of [601, 390, 900, 320]) { await page.setViewportSize({ width, height: 800 }); await expect(page.getByRole('link', { name: 'Deep bookmark', exact: true })).toBeVisible(); }
+  expect(mock.requests.folders.length).toBe(reads);
+  await page.reload(); await expect(page.getByRole('link', { name: 'Deep bookmark', exact: true })).toBeVisible();
+  expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).mobileBookmarksMode, settingsKey)).toBe('expanded');
+});
+
+test('a failed bookmark folder preserves its siblings and retry does not reload the whole tree', async ({ page }) => {
+  const mock = await mockBookmarks(page); mock.fail(1, { status: 503, error: 'Child unavailable.' }); await page.goto('/');
+  await expect(page.getByRole('link', { name: 'Root bookmark', exact: true })).toBeVisible(); await expect(page.getByRole('link', { name: 'Deep bookmark', exact: true })).toBeVisible();
+  await expect(page.locator('#bookmark-tree')).toContainText('Child unavailable.'); const trees = mock.requests.tree;
+  mock.fail(1, null); await page.getByRole('button', { name: 'Retry folder Child', exact: true }).click(); await expect(page.getByRole('link', { name: 'Child bookmark', exact: true })).toBeVisible();
+  expect(mock.requests.tree).toBe(trees); expect(mock.requests.folders.filter((id) => id === 0)).toHaveLength(1);
+});
+
+test('Linkwarden connection controls stay independent from display drafts and never save the access token', async ({ page }) => {
+  const mock = await mockBookmarks(page); await page.goto('/'); await expect(page.getByRole('link', { name: 'Root bookmark', exact: true })).toBeVisible();
+  await page.locator('#open-settings').click(); await page.getByLabel('Overall scale', { exact: true }).fill('0.1'); await page.getByRole('tab', { name: 'Bookmarks', exact: true }).click();
+  await expect(page.getByLabel('Linkwarden access token', { exact: true })).toHaveValue(''); await expect(page.getByLabel('Linkwarden URL', { exact: true })).toHaveValue('https://linkwarden.test');
+  await page.getByLabel('Linkwarden access token', { exact: true }).fill('private-test-token'); await page.getByRole('button', { name: 'Connect Linkwarden', exact: true }).click();
+  await expect(page.locator('#linkwarden-settings-status')).toHaveText('Linkwarden connected.'); await expect(page.getByLabel('Linkwarden access token', { exact: true })).toHaveValue('');
+  expect(mock.requests.mutations[0]).toEqual({ url: 'https://linkwarden.test', username: 'sam', accessToken: 'private-test-token' }); expect(await page.evaluate((key) => localStorage.getItem(key), settingsKey)).toBeNull();
+  await page.getByRole('button', { name: 'Connect Linkwarden', exact: true }).click(); await expect.poll(() => mock.requests.mutations.length).toBe(2); expect(mock.requests.mutations[1].accessToken).toBe('');
+  page.once('dialog', (dialog) => dialog.accept()); await page.getByRole('button', { name: 'Disconnect Linkwarden', exact: true }).click(); await expect(page.locator('#linkwarden-settings-status')).toHaveText('Linkwarden disconnected.');
+  await expect(page.locator('#bookmark-tree a')).toHaveCount(0); await expect(page.getByRole('button', { name: 'Disconnect Linkwarden', exact: true })).toBeDisabled();
+  await page.getByRole('tab', { name: 'General', exact: true }).click(); await expect(page.getByLabel('Overall scale', { exact: true })).toHaveValue('0.1');
+});
+
+for (const width of [390, 1200]) test(`fullscreen bookmark hiding releases space and restores disclosure state at ${width}px`, async ({ page }) => {
+  await page.setViewportSize({ width, height: 800 }); const mock = await mockBookmarks(page); await page.goto('/'); await expect(page.getByRole('link', { name: 'Root bookmark', exact: true })).toBeVisible();
+  const child = page.locator(`details[data-selection-id="${mock.ids[1]}"]`); await child.locator(':scope > summary').click();
+  const openBefore = await child.evaluate((node) => node.open);
+  await page.locator('#open-settings').click(); await page.getByRole('tab', { name: 'Bookmarks', exact: true }).click(); await page.getByLabel('Hide bookmarks in fullscreen', { exact: true }).check(); await savePreferences(page); await page.locator('#close-settings').click();
+  const requests = mock.requests.folders.length; await page.locator('#fullscreen').click(); await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(true); await expect(page.locator('#bookmarks')).toBeHidden();
+  await expect(page.locator('body')).not.toHaveClass(/bookmarks-shown/);
+  expect(await page.locator('#dashboard-content').evaluate((node) => getComputedStyle(node).display)).toBe('contents');
+  // Headless Chromium's synthetic Escape does not invoke its browser-level fullscreen exit.
+  await page.evaluate(() => document.exitFullscreen());
+  await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(false);
+  await expect(page.locator('#bookmarks')).toBeVisible(); await expect(child).toHaveJSProperty('open', openBefore); expect(mock.requests.folders.length).toBe(requests);
+  await page.locator('#open-settings').click(); await page.getByRole('tab', { name: 'Bookmarks', exact: true }).click(); await page.getByLabel('Hide bookmarks in fullscreen', { exact: true }).uncheck(); await savePreferences(page); await page.locator('#close-settings').click();
+  await page.locator('#fullscreen').click(); await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(true); await expect(page.locator('#bookmarks')).toBeVisible(); await page.evaluate(() => document.exitFullscreen());
+});
+
+test('bookmark-only preference saves and fullscreen keep the photo and unrelated request owners intact', async ({ page }) => {
+  const mock = await mockBookmarks(page); await mockWeather(page); await mockCalendar(page);
+  const calls = [];
+  page.on('request', (request) => { const path = new URL(request.url()).pathname; if (path.startsWith('/api/weather') || path.startsWith('/api/calendar') || path.startsWith('/api/dashboard/photos')) calls.push(path); });
+  await page.route('**/api/dashboard/photos', (route) => route.fulfill({ json: { available: true, photos: [{ name: 'photo.png', lastModified: 1, url: photoUrl }] } }));
+  await page.route(`**${photoUrl}`, (route) => route.fulfill({ contentType: 'image/png', body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64') }));
+  await page.goto('/'); await expect(page.getByRole('link', { name: 'Deep bookmark', exact: true })).toBeVisible(); await expect(page.locator('#photos .photo-layer img')).toBeVisible();
+  await page.locator('#open-settings').click(); await page.getByRole('tab', { name: 'Bookmarks', exact: true }).click();
+  await page.evaluate(() => { window.savedPhoto = document.querySelector('.photo-layer'); }); const before = calls.length;
+  await page.getByRole('combobox', { name: 'Mobile bookmark display', exact: true }).selectOption('expanded'); await page.getByLabel('Hide bookmarks in fullscreen', { exact: true }).check(); await savePreferences(page); await page.locator('#close-settings').click();
+  await page.locator('#fullscreen').click(); await expect(page.locator('#bookmarks')).toBeHidden(); await page.evaluate(() => document.exitFullscreen()); await expect(page.locator('#bookmarks')).toBeVisible();
+  expect(calls.length).toBe(before); expect(await page.evaluate(() => window.savedPhoto === document.querySelector('.photo-layer'))).toBe(true); expect(mock.requests.tree).toBe(1);
+});
+
+test('renewed bookmark tokens retain folder and link focus while updating labels', async ({ page }) => {
+  await page.clock.install({ time: instant }); const mock = await mockBookmarks(page); await page.goto('/'); await expect(page.getByRole('link', { name: 'Deep bookmark', exact: true })).toBeVisible();
+  await page.getByRole('link', { name: 'Root bookmark', exact: true }).focus(); await page.getByRole('link', { name: 'Root bookmark', exact: true }).evaluate((node) => { window.initialBookmarkLink = node; });
+  mock.renew(); await page.clock.fastForward(300000);
+  await expect(page.locator('#bookmark-tree')).toContainText('Renamed root'); await expect(page.getByRole('link', { name: 'Root bookmark', exact: true })).toBeFocused();
+  expect(await page.evaluate(() => window.initialBookmarkLink.isConnected)).toBe(true); expect(mock.requests.tree).toBe(2);
+});
+
+test('empty bookmark trees and empty folder data have distinct accessible statuses', async ({ page }) => {
+  const mock = await mockBookmarks(page); mock.setTree([]); await page.goto('/'); await expect(page.locator('#bookmarks-status')).toHaveText('No bookmark collections.');
+  mock.setTree([{ selectionId: mock.ids[0], name: 'Empty folder', collectionToken: `token-${mock.ids[0]}`, children: [] }]);
+  await page.route('**/api/bookmarks?*', (route) => route.fulfill({ json: { configurationId: mock.getStatus().configurationId, bookmarks: [], stale: false } }));
+  await page.reload(); await expect(page.locator('#bookmark-tree')).toContainText('No bookmarks in this folder.'); await expect(page.locator('#bookmarks-status')).toHaveText('');
+});
+
+test('deep bookmark indentation and large desktop scales fit the narrow sidebar layout', async ({ page }) => {
+  await page.setViewportSize({ width: 601, height: 700 }); await page.clock.setFixedTime(instant); await seedPreferences(page, { position: 'right', scale: 2, timeScale: 2, weatherScale: 2, calendarScale: 2 });
+  const mock = await mockBookmarks(page); await mockWeather(page); await mockCalendar(page, { longContent: true });
+  let folder = { selectionId: 'collection-deep-test-15', name: 'Deep label'.repeat(12), collectionToken: 'token-deep-test-15', children: [] };
+  for (let i = 14; i >= 0; i--) folder = { selectionId: `collection-deep-test-${String(i).padStart(2, '0')}`, name: 'Deep label'.repeat(12), collectionToken: `token-deep-test-${String(i).padStart(2, '0')}`, children: [folder] };
+  mock.setTree([folder]); await page.route('**/api/bookmarks?*', (route) => route.fulfill({ json: { configurationId: mock.getStatus().configurationId, bookmarks: [], stale: false } }));
+  await page.goto('/'); await expect(page.locator('#bookmark-tree details')).toHaveCount(16); await expect(page.locator('#calendar-events')).toContainText('VeryLongUnbrokenCalendarTitle');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(601);
+  expect(await page.locator('#bookmarks').evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
+  await page.setViewportSize({ width: 320, height: 700 }); expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(320);
 });
 
 test('fullscreen enters and exits when the browser supports it', async ({ page }) => {

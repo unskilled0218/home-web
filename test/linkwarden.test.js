@@ -10,6 +10,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { createStore } from '../src/db.js';
 import { decryptApiKey, encryptApiKey, encryptionKey } from '../src/linkwarden-crypto.js';
 import { buildCollectionTree, createLinkwardenClient, normalizeBookmarks, normalizeCollections, normalizeLinkwardenCredentials } from '../src/linkwarden.js';
+import { jsonBytes, MAX_FOLDER_BYTES } from '../public/bookmark-data.js';
 
 const secret = Buffer.alloc(32, 7).toString('base64');
 
@@ -177,7 +178,7 @@ test('does not repopulate a cleared cache from an obsolete request', async () =>
   const pending = client.getBookmarks(settings);
   client.clearCache();
   resolveRequest(Response.json({ data: { links: [{ id: 1, name: 'Old account', url: 'https://old.example.test' }], nextCursor: null } }));
-  await pending;
+  await assert.rejects(pending, { code: 'LINKWARDEN_CONFIGURATION_CHANGED' });
   offline = true;
   await assert.rejects(client.getBookmarks(settings, { force: true }), /currently unavailable/);
 });
@@ -191,6 +192,79 @@ test('lists every valid Linkwarden collection tree with Bearer authorization', a
   assert.deepEqual(await client.listCollections({ baseUrl: 'https://links.example.test', accessToken: 'private-token' }), [{ id: 2, name: 'Reading', parentId: null, children: [{ id: 3, name: 'Work', parentId: 2, children: [] }] }]);
   assert.equal(requests[0].url, 'https://links.example.test/api/v1/collections');
   assert.equal(requests[0].options.headers.Authorization, 'Bearer private-token');
+});
+
+test('fresh denied cache entries cannot reappear and allowed siblings remain cached', async () => {
+  let denial = false; const calls = [];
+  const client = createLinkwardenClient({ fetchImpl: async (url) => {
+    const id = Number(new URL(url).searchParams.get('collectionId')); calls.push(id);
+    if (id === 1 && denial) return new Response('denied', { status: 403 });
+    return Response.json({ data: { links: [{ id, name: `Link ${id}`, url: `https://example.test/${id}` }], nextCursor: null } });
+  } });
+  const settings = { baseUrl: 'https://links.test', accessToken: 'secret' };
+  await client.getBookmarks({ ...settings, collectionId: 1 }); await client.getBookmarks({ ...settings, collectionId: 2 }); denial = true;
+  await assert.rejects(client.getBookmarks({ ...settings, collectionId: 1 }, { force: true }), { code: 'LINKWARDEN_ACCESS_DENIED' });
+  await assert.rejects(client.getBookmarks({ ...settings, collectionId: 1 }), { code: 'LINKWARDEN_ACCESS_DENIED' });
+  await client.getBookmarks({ ...settings, collectionId: 2 }); assert.deepEqual(calls, [1, 2, 1, 1]);
+});
+
+test('committed authentication and listing denial retire pending work, but provisional failure preserves cache', async () => {
+  let mode = 'good'; let resolveLate; let calls = 0;
+  const client = createLinkwardenClient({ fetchImpl: async (url) => {
+    calls++;
+    if (mode === 'pending' && new URL(url).searchParams.get('collectionId') === '2') return await new Promise((resolve) => { resolveLate = resolve; });
+    if (mode === 'denied') return new Response('unauthorized', { status: 401 });
+    if (url.endsWith('/collections')) return Response.json({ response: [] });
+    return Response.json({ data: { links: [{ id: 1, name: 'Saved', url: 'https://example.test' }], nextCursor: null } });
+  } });
+  const settings = { baseUrl: 'https://links.test', accessToken: 'token', collectionId: 1 };
+  await client.getBookmarks(settings); mode = 'denied';
+  await assert.rejects(client.listCollections(settings, { provisional: true }), { code: 'LINKWARDEN_AUTHENTICATION_REQUIRED' });
+  const before = calls; await client.getBookmarks(settings); assert.equal(calls, before, 'bad replacement credentials cannot retire the saved cache');
+  mode = 'pending'; const pending = client.getBookmarks({ ...settings, collectionId: 2 });
+  const rejected = assert.rejects(pending, { code: 'LINKWARDEN_AUTHENTICATION_REQUIRED' });
+  await new Promise(setImmediate); mode = 'denied';
+  await assert.rejects(client.listCollections(settings), { code: 'LINKWARDEN_AUTHENTICATION_REQUIRED' });
+  resolveLate(Response.json({ data: { links: [{ id: 2, name: 'Obsolete', url: 'https://obsolete.test' }] } })); await rejected;
+  await assert.rejects(client.getBookmarks(settings), { code: 'LINKWARDEN_AUTHENTICATION_REQUIRED' });
+});
+
+test('provider deadlines cover body consumption and cancel early rejected bodies', async () => {
+  let canceled = 0;
+  const client = createLinkwardenClient({ timeoutMs: 5, fetchImpl: async () => new Response(new ReadableStream({ cancel() { canceled++; } })) });
+  await assert.rejects(client.listCollections({ baseUrl: 'https://links.test', accessToken: 'token' }), /timeout/);
+  assert.equal(canceled, 1);
+  for (const fixture of [{ status: 503 }, { headers: { 'content-length': '1000001' } }]) {
+    const early = createLinkwardenClient({ fetchImpl: async () => new Response(new ReadableStream({ cancel() { canceled++; } }), fixture) });
+    await assert.rejects(early.listCollections({ baseUrl: 'https://links.test', accessToken: 'token' }));
+  }
+  assert.equal(canceled, 3, 'all failed requests release unread bodies');
+});
+
+test('total pagination deadline, result limits, and bounded cache have observable outcomes', async () => {
+  let calls = 0;
+  const timed = createLinkwardenClient({ timeoutMs: 1000, collectionTimeoutMs: 5, fetchImpl: async (_url, { signal }) => {
+    calls++; if (calls === 1) return Response.json({ data: { links: [], nextCursor: 1 } });
+    return await new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
+  } });
+  await assert.rejects(timed.test({ baseUrl: 'https://links.test', accessToken: 'token', collectionId: 1 }), /timeout/);
+  const many = createLinkwardenClient({ fetchImpl: async () => Response.json({ data: { links: Array.from({ length: 2001 }, (_, i) => ({ id: i + 1, name: 'A', url: 'https://example.test' })), nextCursor: null } }) });
+  const limited = await many.getBookmarks({ baseUrl: 'https://links.test', accessToken: 'token', collectionId: 1 });
+  assert.equal(limited.bookmarks.length, 2000); assert.equal(limited.truncated, true);
+  let page = 0;
+  const bytes = createLinkwardenClient({ fetchImpl: async () => { const offset = page++ * 100; return Response.json({ data: { links: Array.from({ length: 100 }, (_, i) => ({ id: offset + i + 1, name: 'x'.repeat(300), description: 'd'.repeat(1000), url: `https://example.test/${'q'.repeat(5000)}` })), nextCursor: page } }); } });
+  const prefix = await bytes.getBookmarks({ baseUrl: 'https://links.test', accessToken: 'token', collectionId: 1 });
+  assert.equal(prefix.truncated, true); assert.ok(jsonBytes(prefix.bookmarks) <= MAX_FOLDER_BYTES); assert.ok(page < 100);
+  const seen = [];
+  const lru = createLinkwardenClient({ cacheEntries: 2, fetchImpl: async (url) => { const id = Number(new URL(url).searchParams.get('collectionId')); seen.push(id); return Response.json({ data: { links: [{ id, name: 'Link', url: 'https://example.test' }] } }); } });
+  const settings = { baseUrl: 'https://links.test', accessToken: 'token' };
+  for (const collectionId of [1, 2, 1, 3, 2]) await lru.getBookmarks({ ...settings, collectionId });
+  assert.deepEqual(seen, [1, 2, 3, 2], 'LRU protects the recently read collection');
+  let misses = 0;
+  const tiny = createLinkwardenClient({ cacheBytes: 1, fetchImpl: async () => { misses++; return Response.json({ data: { links: [] } }); } });
+  await tiny.getBookmarks({ ...settings, collectionId: 1 }); await tiny.getBookmarks({ ...settings, collectionId: 1 }); assert.equal(misses, 2);
+  assert.throws(() => createLinkwardenClient({ cacheEntries: 0 }));
+  assert.throws(() => normalizeCollections({ response: Array.from({ length: 257 }, (_, i) => ({ id: i + 1, name: 'Folder' })) }), { code: 'COLLECTION_LIMIT' });
 });
 
 test('requires explicit trust for a private CA and still verifies hostnames', async (context) => {

@@ -93,10 +93,14 @@ test('connects atomically and navigates collections through opaque tokens', asyn
     assert.equal(JSON.stringify(connected.body).includes('working-token'), false);
     assert.equal(Object.hasOwn(connected.body.collections[0], 'id'), false);
     const oldCollectionToken = connected.body.collections[0].children[0].collectionToken;
+    const configurationId = connected.body.configurationId;
+    const selectionId = connected.body.collections[0].children[0].selectionId;
+    assert.match(configurationId, /^[A-Za-z0-9_-]{43}$/); assert.match(selectionId, /^[A-Za-z0-9_-]{43}$/);
 
     const listed = await api('/api/linkwarden/collections');
     assert.equal(listed.response.status, 200);
     const collectionToken = listed.body.collections[0].children[0].collectionToken;
+    assert.equal(listed.body.configurationId, configurationId); assert.equal(listed.body.collections[0].children[0].selectionId, selectionId); assert.notEqual(collectionToken, oldCollectionToken);
     const bookmarks = await api(`/api/bookmarks?collection=${encodeURIComponent(collectionToken)}`);
     assert.equal(bookmarks.response.status, 200);
     assert.deepEqual(bookmarks.body.bookmarks, [{ id: 9, name: 'Docs', url: 'https://example.test/docs' }]);
@@ -109,6 +113,7 @@ test('connects atomically and navigates collections through opaque tokens', asyn
     assert.equal((await api('/api/linkwarden', { method: 'PUT', body: JSON.stringify({ url: baseUrl, username: 'musty', accessToken: '' }) })).response.status, 400);
     await stopDashboard();
     await startDashboard();
+    assert.equal((await api('/api/linkwarden')).body.linkwarden.configurationId, configurationId, 'configuration identity survives process/database restart');
     assert.equal((await api('/api/linkwarden')).body.linkwarden.configured, true);
     assert.equal((await api('/api/linkwarden/collections')).body.collections[0].children[0].name, 'Child');
     assert.equal((await api(`/api/bookmarks?collection=${encodeURIComponent(collectionToken)}`)).response.status, 400);
@@ -120,8 +125,10 @@ test('connects atomically and navigates collections through opaque tokens', asyn
 
     const reconnected = await api('/api/linkwarden', { method: 'PUT', body: JSON.stringify({ url: baseUrl, username: 'musty', accessToken: '' }) });
     assert.equal(reconnected.response.status, 200);
+    assert.notEqual(reconnected.body.configurationId, configurationId); assert.equal(reconnected.body.collections[0].children[0].selectionId, selectionId);
     const expiredSelection = await api(`/api/bookmarks?collection=${encodeURIComponent(oldCollectionToken)}`);
     assert.equal(expiredSelection.response.status, 400);
+    assert.equal(expiredSelection.body.code, 'COLLECTION_SELECTION_EXPIRED');
 
     collectionResponse = [];
     const emptyConnection = await api('/api/linkwarden', { method: 'PUT', body: JSON.stringify({ url: baseUrl, username: 'musty', accessToken: '' }) });

@@ -1,6 +1,6 @@
 # dashboard
 
-A self-hosted photo dashboard with a clock, weather forecasts, and an optional Baikal calendar. Designed for a trusted local network.
+A self-hosted photo dashboard with a clock, weather forecasts, an optional Baikal calendar, and Linkwarden bookmarks. Designed for a trusted local network.
 
 ## Quick start
 
@@ -15,7 +15,7 @@ Open [http://127.0.0.1:3000](http://127.0.0.1:3000). A clock and dark background
 
 ## Settings
 
-Use the **General**, **Time**, **Weather**, **Calendar**, and **Images** tabs to customize the dashboard. Display preferences are saved in your browser. **Clear results** clears weather search results while keeping the selected location.
+Use the **General**, **Time**, **Weather**, **Calendar**, **Bookmarks**, and **Images** tabs to customize the dashboard. Display preferences are saved in your browser. **Clear results** clears weather search results while keeping the selected location. See [Linkwarden setup](docs/linkwarden.md) for the bookmark tree and fullscreen option.
 
 ## Documentation
 
@@ -29,4 +29,4 @@ Run documented commands from the repository root.
 - [Operations and backups](docs/operations.md)
 - [Tests](docs/testing.md) and [publishing releases](docs/releases.md)
 
-Home Assistant, Linkwarden, and Wake-on-LAN remain backend APIs without dashboard controls. See [Home Assistant](docs/home-assistant.md), [Linkwarden](docs/linkwarden.md), and [Wake-on-LAN](docs/wake-on-lan.md).
+Home Assistant and Wake-on-LAN remain backend APIs without dashboard controls. See [Home Assistant](docs/home-assistant.md) and [Wake-on-LAN](docs/wake-on-lan.md).
