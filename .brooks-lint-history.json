@@ -64,5 +64,16 @@
       "suggestion": 0
     },
     "scope": "Branch review: 35-clear-weather-search-results vs main (8bc6229...b8c5b0c)"
+  },
+  {
+    "date": "2026-10-12",
+    "mode": "PR Review",
+    "score": 85,
+    "findings": {
+      "critical": 0,
+      "warning": 3,
+      "suggestion": 0
+    },
+    "scope": "Plan review: tasks/36-server-weather-location-cache/2-plan.md"
   }
 ]
