@@ -10,13 +10,13 @@ LABEL org.opencontainers.image.title="home-web" \
   org.opencontainers.image.revision="$VCS_REF" \
   org.opencontainers.image.source="$SOURCE_URL"
 
+RUN mkdir -p /app/data
+
 WORKDIR /app
 
 COPY package.json package-lock.json ./
 COPY src/ ./src/
 COPY public/ ./public/
-
-RUN mkdir -p /app/data
 
 EXPOSE 3000
 
