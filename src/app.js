@@ -15,6 +15,7 @@ import { createHomeAssistantControlStore } from './home-assistant-controls.js';
 import { isCalDavClientError, normalizeCalDavCredentials } from './caldav.js';
 import { createUnavailablePhotoLibrary } from './photo-library.js';
 import { MAX_HOME_SETTINGS_BYTES, normalizeHomeSettings } from './home-settings.js';
+import { validateWeatherLocation, weatherTimezone } from '../public/weather-data.js';
 
 export const MAX_JSON_BODY_BYTES = 16_384;
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -95,7 +96,7 @@ function selectionFingerprint(settings) {
   return createHash('sha256').update(`${settings.baseUrl}\0${settings.username}\0${settings.accessToken}`).digest('base64url');
 }
 
-export function createDashboardServer({ runtimeConfig, store, linkwarden, homeAssistant, calDav, photoLibrary = createUnavailablePhotoLibrary(), homeAssistantControls = createHomeAssistantControlStore(), wakeExecutor = executeWakeRequest, collectionSelections = createCollectionSelectionStore(), now = Date.now, publicRoot = defaultPublicRoot }) {
+export function createDashboardServer({ runtimeConfig, store, linkwarden, homeAssistant, calDav, weather, photoLibrary = createUnavailablePhotoLibrary(), homeAssistantControls = createHomeAssistantControlStore(), wakeExecutor = executeWakeRequest, collectionSelections = createCollectionSelectionStore(), now = Date.now, publicRoot = defaultPublicRoot }) {
   const wakeRequests = new Map();
   const integrationEncryptionKey = runtimeConfig.integrationEncryptionKey ?? runtimeConfig.linkwardenEncryptionKey;
   let homeAssistantMutation = Promise.resolve();
@@ -280,6 +281,32 @@ export function createDashboardServer({ runtimeConfig, store, linkwarden, homeAs
     if (!isTrustedAddress(request.socket.remoteAddress)) return json(response, 403, { error: 'This service only accepts local-network requests.' });
     if (!apiRequestAllowed(request, runtimeConfig.allowedHosts)) return json(response, 403, { error: 'Request host or origin is not allowed.' });
     if (request.method === 'GET' && pathname === '/api/health') return json(response, 200, { status: 'ok' });
+    if (['/api/weather', '/api/weather/location', '/api/weather/refresh'].includes(pathname)) {
+      const method = pathname === '/api/weather' ? 'GET' : pathname.endsWith('/location') ? 'PUT' : 'POST';
+      if (request.method !== method) return json(response, 405, { error: 'Method not allowed.' });
+      if (!weather) return json(response, 503, { error: 'Weather service is unavailable.' });
+      let input; let timezone;
+      try {
+        if (method === 'GET') timezone = weatherTimezone(new URL(request.url, 'http://localhost').searchParams.get('timezone') ?? 'UTC');
+        else {
+          input = await readJson(request);
+          if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Invalid weather request.');
+          if (method === 'PUT') {
+            if (Object.keys(input).length !== 2 || !Number.isSafeInteger(input.revision) || input.revision < 0) throw new Error('Weather location requires a valid revision.');
+            input.location = validateWeatherLocation(input.location);
+          } else {
+            if (Object.keys(input).length !== 1 || !('timezone' in input)) throw new Error('Weather refresh requires a timezone.');
+            timezone = weatherTimezone(input.timezone);
+          }
+        }
+      } catch (error) { return json(response, 400, { error: error.message }); }
+      try {
+        if (method === 'GET') return json(response, 200, weather.snapshot(timezone));
+        if (method === 'POST') return json(response, 202, weather.ensureFresh(timezone));
+        const saved = weather.saveLocation(input.location, input.revision);
+        return saved ? json(response, 200, saved) : json(response, 409, { error: 'Weather location changed on another device. Reload and select the location again.' });
+      } catch { return json(response, 503, { error: 'Saved weather could not be loaded or updated.' }); }
+    }
     if (pathname === '/api/home/settings') {
       if (request.method === 'GET') {
         try { return json(response, 200, store.getHomeSettings()); }

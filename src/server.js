@@ -9,6 +9,7 @@ import { createHomeAssistantControlStore } from './home-assistant-controls.js';
 import { createCalDavClient } from './caldav.js';
 import { prepareNfs } from './nfs.js';
 import { createPhotoLibrary, createUnavailablePhotoLibrary } from './photo-library.js';
+import { createWeatherService } from './weather.js';
 
 await validateCaFile(config.nodeExtraCaFile);
 const ca = await loadLinkwardenCa(config.linkwardenCaFile);
@@ -21,7 +22,15 @@ const calDav = createCalDavClient({ cacheSeconds: config.calDavCacheSeconds, ca:
 const nfs = await prepareNfs(config.nfs);
 if (config.nfs.error || nfs.reason === 'failed') console.warn('NFS backgrounds are unavailable; starting the dashboard without photos.');
 const photoLibrary = nfs.available ? createPhotoLibrary({ root: nfs.root }) : createUnavailablePhotoLibrary();
-const server = createDashboardServer({ runtimeConfig: config, store, linkwarden, homeAssistant, homeAssistantControls, calDav, photoLibrary });
+const weather = createWeatherService({ store });
+const server = createDashboardServer({ runtimeConfig: config, store, linkwarden, homeAssistant, homeAssistantControls, calDav, photoLibrary, weather });
+weather.start();
 
 server.listen(config.port, config.host, () => console.log(`dashboard listening at http://${config.host}:${config.port}`));
-for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => server.close(() => { store.close(); process.exit(0); }));
+let shuttingDown = false;
+for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  const closed = new Promise((resolve) => server.close(resolve));
+  void Promise.all([closed, weather.stop()]).then(() => { store.close(); process.exit(0); });
+});

@@ -3,6 +3,7 @@ import { createWeatherController, searchLocations } from './dashboard-weather.js
 import { createPhotoController } from './dashboard-photos.js';
 import { createCalendarController, formatCalendarEvent } from './dashboard-calendar.js';
 import { createSettingsTabs } from './dashboard-settings.js';
+import { formatWeatherUpdated } from './weather-data.js';
 
 const $ = (id) => document.getElementById(id);
 const currentWeatherSubValues = document.createElement('div');
@@ -10,7 +11,7 @@ currentWeatherSubValues.id = 'current-weather-subvalues';
 
 let storage;
 try { storage = window.localStorage; } catch { /* Defaults work when browser storage is blocked. */ }
-let settings = loadSettings(storage);
+let settings = { ...loadSettings(storage), location: null };
 let clockTimer; let searchController; let searchGeneration = 0; let weatherState = {}; let calendarState = {}; let animations = [];
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 const preferences = $('preferences');
@@ -47,8 +48,15 @@ function forecastItem({ code, day = 1, label, temperature }) {
 
 function renderWeather(state = weatherState) {
   weatherState = state;
+  if (state.discovered) settings = { ...settings, location: state.location };
+  $('current-location').textContent = state.serviceError ? (state.location ? `Current location: ${state.location.label} (server unavailable).` : 'Saved weather location unavailable.') : !state.discovered ? 'Loading saved weather location…' : state.location ? `Current location: ${state.location.label}` : 'No weather location saved.';
+  for (const button of $('location-results').querySelectorAll('button')) button.disabled = Boolean(state.mutationPending) || !state.discovered;
   const forecast = state.forecast;
-  $('weather-status').textContent = !settings.location ? 'Choose a location in Settings to show weather.' : state.forecastError ? (forecast ? 'Forecast is stale; refresh failed. Retrying hourly.' : 'Forecast unavailable. Retrying hourly.') : state.loading ? 'Updating weather…' : state.forecastUpdated ? '' /* Show nothing when successfully updated */ : '';
+  $('weather-status').textContent = state.serviceError ? 'Weather server unavailable. Retrying automatically.' : !state.discovered ? 'Loading saved weather…' : !settings.location ? 'Choose a location in Settings to show weather.' : state.forecastError ? (forecast ? 'Forecast is stale; refresh failed. Retrying hourly.' : 'Forecast unavailable. Retrying hourly.') : state.loading ? 'Updating weather…' : !forecast ? 'Weather is not available yet.' : '';
+  const updated = $('weather-updated');
+  updated.hidden = !forecast || state.forecastUpdated === null || state.forecastUpdated === undefined;
+  updated.textContent = updated.hidden ? '' : formatWeatherUpdated(state.forecastUpdated, settings);
+  if (updated.hidden) updated.removeAttribute('datetime'); else updated.dateTime = new Date(state.forecastUpdated).toISOString();
   const icon = $('weather-icon');
   icon.hidden = true; icon.removeAttribute('src');
   $('current-weather-values').replaceChildren(); currentWeatherSubValues.replaceChildren(); $('hourly').replaceChildren(); $('daily').replaceChildren();
@@ -56,7 +64,7 @@ function renderWeather(state = weatherState) {
   if (forecast) {
     const current = forecast.current; const units = forecast.units;
     icon.src = `/weather-icons/${weatherIconFile(current.weather_code, current.is_day)}`; icon.hidden = false;
-    $('current-weather-values').append(element('strong', reading(current.temperature_2m, units.temperature_2m), 'temperature'), element('span', weatherDescription(current.weather_code, current.is_day), 'condition'), currentWeatherSubValues);
+    $('current-weather-values').append(element('strong', reading(current.temperature_2m, units.temperature_2m), 'temperature'), element('span', weatherDescription(current.weather_code, current.is_day), 'condition'));
     currentWeatherSubValues.append(element('span', `Wind ${reading(current.wind_speed_10m, units.wind_speed_10m)}`), element('span', `Humidity ${reading(current.relative_humidity_2m, units.relative_humidity_2m)}`), element('span', `Precipitation ${reading(current.precipitation, units.precipitation)}`));
     for (const hour of sampleHours(forecast.hourly)) {
       const label = new Intl.DateTimeFormat(undefined, { timeZone: settings.timezone, weekday: 'short', hour: 'numeric', minute: '2-digit', hour12: settings.hour12 }).format(new Date(hour.time * 1000));
@@ -70,6 +78,7 @@ function renderWeather(state = weatherState) {
     if (!$('daily').children.length) $('daily').append(element('li', 'Daily forecast unavailable.'));
   }
   currentWeatherSubValues.append(element('span', `${!settings.location ? '' : state.air ? `US AQI: ${state.air.aqi}${state.airError ? ' (stale; refresh failed)' : ''}` : state.airError ? 'Air quality unavailable.' : state.loading ? 'Loading air quality…' : ''}`));
+  $('current-weather-values').append(currentWeatherSubValues);
 }
 
 const weather = createWeatherController({ onChange: renderWeather });
@@ -160,6 +169,7 @@ function setCalendarMutationPending(pending) {
 $('open-settings').addEventListener('click', () => {
   fillForm(); fillCalendarForm(); $('calendar-settings-status').textContent = '';
   settingsTabs.select('settings-tab-general');
+  void weather.refresh();
   dialog.showModal();
   $('settings-tab-general').focus();
 });
@@ -176,7 +186,16 @@ $('location-search').addEventListener('submit', async (event) => {
     $('search-status').textContent = results.length ? 'Select a location.' : 'No matching locations.';
     for (const location of results) {
       const item = document.createElement('li'); const button = element('button', location.label); button.type = 'button';
-      button.addEventListener('click', () => { settings = normalizeSettings({ ...settings, location }); save(); apply(); $('search-status').textContent = `Selected ${location.label}.`; });
+      button.disabled = Boolean(weatherState.mutationPending) || !weatherState.discovered;
+      button.addEventListener('click', async () => {
+        const resultGeneration = searchGeneration;
+        $('location-settings-status').textContent = 'Saving weather location…';
+        try {
+          const saved = await weather.saveLocation(location);
+          $('location-settings-status').textContent = `Saved ${saved.label} on this server.`;
+          if (resultGeneration === searchGeneration) $('search-status').textContent = `Selected ${saved.label}.`;
+        } catch (error) { $('location-settings-status').textContent = error.message || 'Weather location could not be saved.'; }
+      });
       item.append(button); $('location-results').append(item);
     }
   } catch { if (request === searchGeneration) $('search-status').textContent = 'Location search unavailable. Please try again.'; }
@@ -214,6 +233,6 @@ document.addEventListener('fullscreenchange', fullscreenState);
 document.addEventListener('visibilitychange', () => { startClock(); photos.setVisible(!document.hidden); weather.setVisible(!document.hidden); calendar.setVisible(!document.hidden); if (document.hidden) stopAnimations(); });
 reducedMotion.addEventListener('change', () => { stopAnimations(); photos.configure(settings); });
 window.addEventListener('pagehide', (event) => { clearInterval(clockTimer); cancelSearch(); weather.dispose(); photos.dispose(); if (!event.persisted) calendar.dispose(); });
-window.addEventListener('pageshow', (event) => { if (event.persisted) { void photos.load(); startClock(); void weather.refresh(); void calendar.refresh(); } });
+window.addEventListener('pageshow', (event) => { if (event.persisted) { void photos.load(); startClock(); weather.configure(settings); void weather.refresh(); void calendar.refresh(); } });
 photos.setVisible(!document.hidden); weather.setVisible(!document.hidden); calendar.setVisible(!document.hidden);
 fillForm(); apply(); void photos.load();

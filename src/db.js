@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { defaultHomeSettings, normalizeHomeSettings } from './home-settings.js';
+import { createWeatherStore } from './weather-store.js';
 
 export function createStore(databasePath) {
   mkdirSync(path.dirname(databasePath), { recursive: true });
@@ -152,6 +153,7 @@ export function createStore(databasePath) {
   const mapHomeAssistant = (row) => row && ({ baseUrl: row.base_url, encryptedAccessToken: { ciphertext: row.token_ciphertext, iv: row.token_iv, tag: row.token_tag }, updatedAt: row.updated_at });
   const mapCalDav = (row) => row && ({ serverUrl: row.base_url, username: row.username, encryptedPassword: { ciphertext: row.password_ciphertext, iv: row.password_iv, tag: row.password_tag }, updatedAt: row.updated_at });
   return {
+    ...createWeatherStore(db),
     getHomeSettings() {
       queries.initializeHomeSettings.run(JSON.stringify(defaultHomeSettings()));
       const row = queries.getHomeSettings.get();

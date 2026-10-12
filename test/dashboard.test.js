@@ -7,7 +7,9 @@ import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { createDashboardServer } from '../src/app.js';
 import { clockText, loadSettings, normalizeSettings, orderPhotos, sampleHours, temperatureRange, weatherIconFile } from '../public/dashboard-helpers.js';
-import { createWeatherController, normalizeForecast, requestJson, searchLocations, weatherUrls } from '../public/dashboard-weather.js';
+import { createWeatherController, requestJson, searchLocations } from '../public/dashboard-weather.js';
+import { formatWeatherUpdated, normalizeForecast, presentForecast, validateWeatherSnapshot } from '../public/weather-data.js';
+import { weatherUrls } from '../src/weather.js';
 import { createPhotoController } from '../public/dashboard-photos.js';
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
@@ -65,7 +67,7 @@ test('redirects only legacy dashboard documents to the canonical home URL', asyn
 
 test('serves retained dashboard assets with their MIME and cache headers', async (context) => {
   const base = await staticServer(context);
-  for (const name of ['dashboard.js', 'dashboard-helpers.js', 'dashboard-weather.js', 'dashboard-photos.js', 'dashboard-calendar.js', 'dashboard-settings.js', 'dashboard.css', 'home-layout.js']) {
+  for (const name of ['dashboard.js', 'dashboard-helpers.js', 'dashboard-weather.js', 'weather-data.js', 'dashboard-photos.js', 'dashboard-calendar.js', 'dashboard-settings.js', 'dashboard.css', 'home-layout.js']) {
     const result = await fetch(`${base}/${name}`); assert.equal(result.status, 200); assert.match(result.headers.get('content-type'), name.endsWith('.css') ? /text\/css/ : /text\/javascript/); assert.equal(result.headers.get('cache-control'), name.endsWith('.js') ? 'no-store' : 'no-cache'); assert.equal(result.headers.get('x-content-type-options'), 'nosniff');
   }
 });
@@ -235,8 +237,8 @@ test('samples future hours with gaps, exhausted forecasts, and daily offset date
 });
 
 test('constructs bounded provider queries and normalizes geocoding', async () => {
-  const urls = weatherUrls(settings({ temperature: 'fahrenheit', wind: 'kn', precipitation: 'inch' }));
-  assert.equal(urls.forecast.hostname, 'api.open-meteo.com'); assert.equal(urls.forecast.searchParams.get('timeformat'), 'unixtime'); assert.equal(urls.forecast.searchParams.get('wind_speed_unit'), 'kn'); assert.equal(urls.forecast.searchParams.get('precipitation_unit'), 'inch'); assert.deepEqual(urls.forecast.searchParams.get('hourly').split(','), ['temperature_2m', 'weather_code', 'is_day']); assert.equal(urls.forecast.searchParams.getAll('hourly').length, 1); assert.equal(urls.air.searchParams.get('current'), 'us_aqi');
+  const urls = weatherUrls(settings().location, settings().timezone);
+  assert.equal(urls.forecast.hostname, 'api.open-meteo.com'); assert.equal(urls.forecast.searchParams.get('timeformat'), 'unixtime'); assert.equal(urls.forecast.searchParams.get('wind_speed_unit'), 'kmh'); assert.equal(urls.forecast.searchParams.get('precipitation_unit'), 'mm'); assert.deepEqual(urls.forecast.searchParams.get('hourly').split(','), ['temperature_2m', 'weather_code', 'is_day']); assert.equal(urls.forecast.searchParams.getAll('hourly').length, 1); assert.equal(urls.air.searchParams.get('current'), 'us_aqi');
   const results = await searchLocations('x'.repeat(200), { fetchImpl: async (url, options) => {
     assert.equal(url.hostname, 'geocoding-api.open-meteo.com'); assert.equal(url.searchParams.get('name').length, 120); assert.equal(options.credentials, 'omit');
     return response({ results: [{ name: 'London', latitude: 51, longitude: 0 }, { name: 'Invalid', latitude: 999, longitude: 0 }] });
@@ -256,30 +258,73 @@ test('aborts provider requests on deadline and caller cancellation', async () =>
   await assert.rejects(requestJson('https://example.test', { fetchImpl: async () => response({ error: true }) }));
 });
 
-test('weather keeps same-location stale data, handles partial failure, and owns one refresh timer', async () => {
-  const timers = scheduler(); let mode = 'partial'; let latest; let calls = 0;
-  const client = createWeatherController({ ...timers, now: () => 123, onChange: (state) => { latest = state; }, fetchImpl: async (url) => {
-    calls++; if (mode === 'fail' || (mode === 'partial' && url.hostname.startsWith('air-'))) throw new Error('offline');
-    return response(url.hostname.startsWith('air-') ? { current: { us_aqi: 20 } } : forecast());
+function weatherSnapshot(extra = {}) {
+  return { configured: true, revision: 1, location: settings().location, timezone: 'Europe/London', forecastRegistered: true, forecast: normalizeForecast(forecast()), air: { aqi: 20 }, forecastUpdated: 123, airUpdated: 123, forecastError: false, airError: false, refreshing: false, ...extra };
+}
+
+test('weather renders cached data before ensuring freshness and changes units without requests', async () => {
+  const timers = scheduler(); let latest; let calls = 0; let clock = 123;
+  const client = createWeatherController({ ...timers, now: () => clock, onChange: (state) => { latest = state; }, fetchImpl: async (url) => {
+    calls++;
+    if (url === '/api/weather/refresh') {
+      assert.equal(latest.forecast.current.temperature_2m, 12, 'cached forecast already rendered');
+      return response({ scheduled: true, refreshing: true });
+    }
+    return response(weatherSnapshot());
   } });
-  client.configure(settings()); await tick();
-  assert.equal(latest.forecast.current.temperature_2m, 12); assert.equal(latest.airError, true); assert.equal(timers.tasks.size, 1);
-  client.configure(settings({ scale: 2 })); assert.equal(calls, 2);
-  mode = 'good'; await client.refresh(); assert.equal(latest.air.aqi, 20); assert.equal(timers.tasks.size, 1);
-  mode = 'fail'; await client.refresh(); assert.equal(latest.forecastError, true); assert.equal(latest.forecastUpdated, 123); assert.equal(latest.air.aqi, 20);
+  client.configure(settings({ location: { label: 'Wrong local place', latitude: 0, longitude: 0 } })); await tick();
+  assert.equal(latest.location.label, 'London'); assert.equal(latest.forecastUpdated, 123);
+  assert.equal(timers.tasks.size, 1); assert.equal([...timers.tasks.values()][0].delay, 5000);
+  client.configure(settings({ temperature: 'fahrenheit', scale: 2 }));
+  assert.equal(latest.forecast.current.temperature_2m, 53.6); assert.equal(calls, 2);
+  clock += 5000; await client.refresh({ ensure: false });
+  assert.equal(calls, 3); assert.equal([...timers.tasks.values()][0].delay, 60000);
   client.setVisible(false); assert.equal(timers.tasks.size, 0);
   client.setVisible(true); await tick(); assert.equal(timers.tasks.size, 1);
-  client.configure(settings({ location: null })); assert.equal(latest.forecast, null); assert.equal(timers.tasks.size, 0); client.dispose();
+  client.dispose(); assert.equal(timers.tasks.size, 0);
 });
 
-test('late weather results cannot overwrite a changed location', async () => {
+test('normal polling recovers an evicted timezone, but empty idle snapshots stop fast polling', async () => {
+  const timers = scheduler(); let latest; let requests = 0; let clock = 0; let registered = true;
+  const client = createWeatherController({ ...timers, now: () => clock, onChange: (state) => { latest = state; }, fetchImpl: async (url) => {
+    if (url === '/api/weather/refresh') { requests++; registered = true; return response({ scheduled: false, refreshing: false }); }
+    return response(weatherSnapshot({ forecastRegistered: registered, forecast: null, forecastUpdated: null, forecastError: true }));
+  } });
+  client.configure(settings()); await tick();
+  assert.equal([...timers.tasks.values()][0].delay, 60000);
+  registered = false; clock += 60000; await client.refresh();
+  assert.equal(requests, 2); assert.equal(registered, true); assert.equal(latest.refreshing, false);
+  assert.equal([...timers.tasks.values()][0].delay, 60000); client.dispose();
+});
+
+test('late Settings and polling responses cannot overwrite a newer location or timezone', async () => {
   const timers = scheduler(); const pending = []; let latest;
-  const client = createWeatherController({ ...timers, onChange: (state) => { latest = state; }, fetchImpl: (url) => new Promise((resolve) => pending.push({ url, resolve })) });
-  client.configure(settings()); client.configure(settings({ location: { label: 'Tokyo', latitude: 35, longitude: 139 } }));
-  for (const item of pending.slice(2)) item.resolve(response(item.url.hostname.startsWith('air-') ? { current: { us_aqi: 30 } } : { ...forecast(), current: { ...forecast().current, temperature_2m: 25 } }));
-  await tick(); assert.equal(latest.forecast.current.temperature_2m, 25);
-  for (const item of pending.slice(0, 2)) item.resolve(response(item.url.hostname.startsWith('air-') ? { current: { us_aqi: 1 } } : forecast()));
-  await tick(); assert.equal(latest.forecast.current.temperature_2m, 25); assert.equal(latest.air.aqi, 30); assert.equal(timers.tasks.size, 1); client.dispose();
+  const client = createWeatherController({ ...timers, onChange: (state) => { latest = state; }, fetchImpl: (url, options) => new Promise((resolve) => pending.push({ url, options, resolve })) });
+  client.configure(settings()); const nextRead = client.refresh({ ensure: false });
+  pending[1].resolve(response(weatherSnapshot({ revision: 2, location: { label: 'Tokyo', latitude: 35, longitude: 139 } })));
+  await nextRead; pending[0].resolve(response(weatherSnapshot())); await tick();
+  assert.equal(latest.location.label, 'Tokyo'); assert.equal(latest.revision, 2);
+  client.configure(settings({ timezone: 'UTC' }));
+  const utc = client.refresh({ ensure: false });
+  pending[3].resolve(response(weatherSnapshot({ revision: 2, timezone: 'UTC' }))); await utc;
+  pending[2].resolve(response(weatherSnapshot({ revision: 1, timezone: 'UTC' }))); await tick();
+  assert.equal(latest.revision, 2); assert.equal(latest.timezone, 'UTC'); client.dispose();
+});
+
+test('canonical conversions preserve missing values, daily dates, and original data', () => {
+  const data = normalizeForecast(forecast()); const before = structuredClone(data);
+  data.current.wind_speed_10m = 18.52; data.current.precipitation = 25.4;
+  const converted = presentForecast(data, settings({ temperature: 'fahrenheit', wind: 'kn', precipitation: 'inch' }));
+  assert.equal(converted.current.temperature_2m, 53.6); assert.equal(converted.current.wind_speed_10m, 10); assert.equal(converted.current.precipitation, 1);
+  assert.equal(converted.daily[0].min, 46.4); assert.equal(converted.hourly[0].day, 0); assert.equal(converted.daily[0].date, before.daily[0].date);
+  assert.equal(data.current.temperature_2m, 12); assert.equal(data.units.temperature_2m, '°C');
+  assert.equal(presentForecast(before, settings()).current.wind_speed_10m, null);
+  const instant = Date.parse('2026-01-01T00:30:00Z');
+  assert.match(formatWeatherUpdated(instant, settings({ timezone: 'Asia/Tokyo', hour12: false }), 'en-GB'), /1 Jan 2026.*09:30/);
+  assert.match(formatWeatherUpdated(instant, settings({ timezone: 'America/Los_Angeles', hour12: false }), 'en-GB'), /31 Dec 2025.*16:30/);
+  assert.equal(formatWeatherUpdated(null, settings()), '');
+  assert.throws(() => validateWeatherSnapshot(weatherSnapshot({ forecastUpdated: 'now' })));
+  assert.throws(() => validateWeatherSnapshot(weatherSnapshot({ forecast: {} })));
 });
 
 test('photo owner skips failed server images and cancels timers after replacement', async () => {
