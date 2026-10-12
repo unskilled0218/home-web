@@ -1,0 +1,25 @@
+# goal
+
+## command
+
+- display linkwarden's bookmarks as tree
+  - desktop: right side of page, expanded tree
+  - mobile: compact by default, click to open folder. options to change between compact, expanded
+
+## goal
+
+Display the connected Linkwarden account's collections and bookmarks as a nested tree on the photo dashboard. Treat Linkwarden collections as folders, preserve their parent/child hierarchy, and show each collection's bookmark links beneath its folder. Include bookmarks belonging directly to parent folders as well as those in nested folders, rather than requiring the user to select one collection to replace the entire bookmark view. Use bookmark names and real HTTP(S) links so normal browser link actions work.
+
+On desktop, place the bookmark tree on the right side of the page with folders expanded and their bookmark links visible. Reserve appropriate layout space so the tree does not overlap the clock, weather, calendar, page tools, or Settings controls, including when desktop information position is set to the right. Keep the photo background and existing information views usable when the tree is long or Linkwarden is unavailable.
+
+On mobile, place bookmarks in normal page flow below the existing information views and default to compact mode. Compact mode starts folders collapsed; clicking or keyboard-activating a folder reveals its bookmarks and child folders, and activating it again collapses them. Expanded mode reveals nested folders and bookmark links without requiring each folder to be opened individually. Preserve the existing time → weather → calendar order and fit the tree to narrow screens without horizontal page scrolling. Use the current mobile breakpoint of viewport widths at or below 600px.
+
+Add a clearly labeled mobile bookmark display option in Settings with **Compact** and **Expanded** choices. Save it with the existing browser-local display preferences and restore it after reload, defaulting missing or invalid values to Compact. This option controls only mobile presentation; desktop remains expanded. Switching modes or crossing the viewport breakpoint must update the tree without changing Linkwarden configuration, discarding already loaded bookmark data, or starting duplicate loading/refresh owners.
+
+Reuse existing server-saved Linkwarden connections so configured installations show bookmarks without re-entering credentials. Provide Linkwarden connection/status controls in Settings using the existing URL, username, and access-token API, including disconnect and re-authentication states. Keep the access token server-owned and encrypted through the existing persistence mechanism; it must not become a browser display preference. Connection actions remain independent of **Save preferences**, and failed connection attempts preserve the current saved connection.
+
+Show useful unconfigured, loading, empty-folder, unavailable, and stale-data states. Retrieve collection and bookmark data with bounded request work, preserve usable loaded content when an individual folder fails, and prevent late responses from restoring data after a disconnect or configuration change. Recover expired opaque collection selections by loading a current tree rather than treating them as permanent folder failures. Render folder names and bookmark text safely, retain the server's HTTP(S)-only bookmark filtering, and make folder disclosure controls keyboard-accessible with clear expanded/collapsed state.
+
+The backend already provides connection status through `GET /api/linkwarden`, a nested collection tree through `GET /api/linkwarden/collections`, and collection-specific bookmarks through `GET /api/bookmarks?collection=<collectionToken>`. `src/linkwarden.js` builds sorted collection trees and retrieves paginated bookmark data with per-collection caching and stale fallback; `src/app.js` issues short-lived opaque collection tokens bound to the saved connection. The active dashboard in `public/index.html` and `public/dashboard.js` currently has no bookmark interface, while `public/dashboard-helpers.js` and `public/dashboard.css` define its saved display preferences and responsive presentation. These are the main integration points for the tree and mobile mode setting.
+
+Completion means an already connected account displays its nested folders and correctly associated bookmark links, desktop shows an expanded right-side tree without overlap, and mobile initially shows a compact tree with working folder disclosure. Verify the Compact/Expanded option after saving and reloading, live viewport changes, parent and child folder contents, empty and partially failed trees, expired selections, reconnect/disconnect races, safe links, and keyboard operation. Browser checks should cover desktop positioning and populated mobile layouts at 320px and 390px while preserving existing weather, calendar, photo, and Settings behavior. Update `docs/linkwarden.md` and the relevant dashboard instructions to describe the restored interface and mobile choices.
