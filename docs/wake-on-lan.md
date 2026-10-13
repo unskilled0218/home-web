@@ -1,6 +1,12 @@
-# Wake-on-LAN API
+# Wake-on-LAN
 
-Wake-on-LAN remains a backend capability without controls on the photo dashboard. Existing devices and wake audit records remain saved. API clients can list devices with `GET /api/devices`, add them with `POST /api/devices`, and update or delete them through `/api/devices/<id>`. A device uses `name`, `macAddress`, `broadcastAddress`, and optional `ipAddress` and `group`. Set `broadcastAddress` to the target PC's directed subnet broadcast address, for example `192.168.1.255` for a PC at `192.168.1.42` on a `255.255.255.0` network. Use `POST /api/devices/<id>/wake` to request a wake packet. A successful response means the host sent the UDP magic packet; it does not prove that the target computer booted.
+**Settings → Wake-on-LAN** lists and manages devices saved on this server for all browsers. Enter a name (at most 80 characters), MAC address, and directed subnet broadcast address, plus an optional IPv4 address and group (at most 80 characters). Use **Add device** to save a new record or **Edit** and **Save device** to update an existing one. **Cancel edit** discards the editor draft. Empty optional fields clear saved IP/group values. The server canonicalizes MAC addresses and rejects duplicate MAC addresses and invalid IPv4 addresses. Failed saves retain the draft.
+
+Use the target PC's directed subnet broadcast address, for example `192.168.1.255` for a PC at `192.168.1.42` on a `255.255.255.0` network. These actions are independent of **Save preferences**, preserve existing devices and wake history during reads/edits, and survive reloads and server restarts. **Delete** requires confirmation and deletes both the device and its associated wake audit records, matching the existing API behavior.
+
+Saved devices refresh when Settings opens and poll every five seconds while the dialog and page are visible, plus request latency. Polls preserve dirty editor fields and focus. Remote edits show a warning; cancel and select Edit again to reload, or explicitly save the draft. Remote deletion preserves your draft rather than creating a replacement record. Writes use existing last-successful-write semantics without revision conflict protection. A failed refresh retains the last confirmed list; a save timeout has an uncertain outcome, so check saved devices before retrying.
+
+The tab does not send wake packets or add dashboard wake buttons. API clients can still list devices with `GET /api/devices`, add them with `POST /api/devices`, and update or delete them through `/api/devices/<id>`. A device uses `name`, `macAddress`, `broadcastAddress`, and optional `ipAddress` and `group`. Use `POST /api/devices/<id>/wake` to request a wake packet. A successful response means the host sent the UDP magic packet; it does not prove that the target computer booted.
 
 See the [Operational checklist](operations.md) for network setup, packet delivery, and troubleshooting.
 

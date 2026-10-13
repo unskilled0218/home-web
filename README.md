@@ -15,7 +15,7 @@ Open [http://127.0.0.1:3000](http://127.0.0.1:3000). A clock and dark background
 
 ## Settings
 
-Use the **General**, **Time**, **Weather**, **Calendar**, **Bookmarks**, and **Images** tabs to customize the dashboard. Settings are saved on the server and synchronize across browsers every five seconds while visible. **Clear results** clears weather search results while keeping the selected location. See [dashboard preferences](docs/dashboard.md) and [Linkwarden setup](docs/linkwarden.md).
+Use the **General**, **Time**, **Weather**, **Calendar**, **Bookmarks**, **Home Assistant**, **Wake-on-LAN**, and **Images** tabs to customize the dashboard. Settings are saved on the server and synchronize across browsers every five seconds while visible. **Clear results** clears weather search results while keeping the selected location. See [dashboard preferences](docs/dashboard.md) and [Linkwarden setup](docs/linkwarden.md).
 
 ## Documentation
 
@@ -29,4 +29,4 @@ Run documented commands from the repository root.
 - [Operations and backups](docs/operations.md)
 - [Tests](docs/testing.md) and [publishing releases](docs/releases.md)
 
-Home Assistant and Wake-on-LAN remain backend APIs without dashboard controls. See [Home Assistant](docs/home-assistant.md) and [Wake-on-LAN](docs/wake-on-lan.md).
+Settings supports [Home Assistant connections](docs/home-assistant.md) and [Wake-on-LAN device management](docs/wake-on-lan.md). Entity controls and wake buttons remain API-only.

@@ -8,6 +8,7 @@ import { createBookmarkController } from './dashboard-bookmarks.js';
 import { createBookmarkTree } from './dashboard-bookmark-tree.js';
 import { safeBookmarkUrl } from './bookmark-data.js';
 import { createSettingsSync } from './dashboard-settings-sync.js';
+import { createIntegrationSettings } from './dashboard-integration-settings.js';
 
 const $ = (id) => document.getElementById(id);
 const currentWeatherSubValues = document.createElement('div');
@@ -24,6 +25,7 @@ let mobileLayout;
 const preferences = $('preferences');
 const dialog = $('settings-dialog');
 const settingsTabs = createSettingsTabs(dialog);
+const integrationSettings = createIntegrationSettings({ document });
 const bookmarkTree = createBookmarkTree({ root: $('bookmark-tree'), status: $('bookmarks-status'), onToggle: (id, open) => bookmarks.setFolderOpen(id, open), onRetry: (id) => bookmarks.retryFolder(id) });
 const bookmarks = createBookmarkController({ onChange(state) {
   bookmarkTree.render(state);
@@ -247,10 +249,11 @@ $('open-settings').addEventListener('click', () => {
   settingsTabs.select('settings-tab-general');
   void settingsSync.refresh();
   dialog.showModal();
+  integrationSettings.open();
   $('settings-tab-general').focus();
 });
 $('close-settings').addEventListener('click', () => dialog.close());
-dialog.addEventListener('close', () => $('open-settings').focus());
+dialog.addEventListener('close', () => { integrationSettings.close(); $('open-settings').focus(); });
 function cancelSearch() { searchGeneration++; searchController?.abort(); }
 $('location-search').addEventListener('submit', async (event) => {
   event.preventDefault(); cancelSearch(); const request = searchGeneration;
@@ -328,12 +331,13 @@ $('fullscreen').addEventListener('click', async () => {
   catch { $('page-status').textContent = 'Fullscreen could not be enabled in this browser.'; }
 });
 document.addEventListener('fullscreenchange', fullscreenState);
-document.addEventListener('visibilitychange', () => { startClock(); photos.setVisible(!document.hidden); weather.setVisible(!document.hidden); calendar.setVisible(!document.hidden); bookmarks.setVisible(!document.hidden); settingsSync.setVisible(!document.hidden); if (document.hidden) stopAnimations(); });
+document.addEventListener('visibilitychange', () => { startClock(); photos.setVisible(!document.hidden); weather.setVisible(!document.hidden); calendar.setVisible(!document.hidden); bookmarks.setVisible(!document.hidden); settingsSync.setVisible(!document.hidden); integrationSettings.setVisible(!document.hidden); if (document.hidden) stopAnimations(); });
 reducedMotion.addEventListener('change', () => { stopAnimations(); photos.configure(settings); });
 mobileViewport.addEventListener('change', applyPresentation);
-window.addEventListener('pagehide', (event) => { clearInterval(clockTimer); cancelSearch(); weather.dispose(); photos.dispose(); if (event.persisted) { bookmarks.setVisible(false); settingsSync.setVisible(false); } else { calendar.dispose(); bookmarks.dispose(); settingsSync.dispose(); } });
-window.addEventListener('pageshow', (event) => { if (event.persisted) { void photos.load(); applyPresentation(); weather.configure(settings); void weather.refresh(); void calendar.refresh(); bookmarks.setVisible(!document.hidden); settingsSync.setVisible(!document.hidden); } });
+window.addEventListener('pagehide', (event) => { clearInterval(clockTimer); cancelSearch(); weather.dispose(); photos.dispose(); if (event.persisted) { bookmarks.setVisible(false); settingsSync.setVisible(false); integrationSettings.suspend(); } else { calendar.dispose(); bookmarks.dispose(); settingsSync.dispose(); integrationSettings.dispose(); } });
+window.addEventListener('pageshow', (event) => { if (event.persisted) { void photos.load(); applyPresentation(); weather.configure(settings); void weather.refresh(); void calendar.refresh(); bookmarks.setVisible(!document.hidden); settingsSync.setVisible(!document.hidden); integrationSettings.setVisible(!document.hidden); } });
 photos.setVisible(!document.hidden); weather.setVisible(!document.hidden); calendar.setVisible(!document.hidden);
 bookmarks.setVisible(!document.hidden);
+integrationSettings.setVisible(!document.hidden);
 settings = { ...settingsSync.getState().snapshot.preferences, location: null };
 fillForm(); document.body.style.backgroundColor = settings.color; applyPresentation(); settingsSync.setVisible(!document.hidden); void settingsSync.start();

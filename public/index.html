@@ -37,6 +37,8 @@
           <button id="settings-tab-weather" type="button" role="tab" aria-controls="settings-panel-weather" aria-selected="false" tabindex="-1">Weather</button>
           <button id="settings-tab-calendar" type="button" role="tab" aria-controls="settings-panel-calendar" aria-selected="false" tabindex="-1">Calendar</button>
           <button id="settings-tab-bookmarks" type="button" role="tab" aria-controls="settings-panel-bookmarks" aria-selected="false" tabindex="-1">Bookmarks</button>
+          <button id="settings-tab-home-assistant" type="button" role="tab" aria-controls="settings-panel-home-assistant" aria-selected="false" tabindex="-1">Home Assistant</button>
+          <button id="settings-tab-wol" type="button" role="tab" aria-controls="settings-panel-wol" aria-selected="false" tabindex="-1">Wake-on-LAN</button>
           <button id="settings-tab-images" type="button" role="tab" aria-controls="settings-panel-images" aria-selected="false" tabindex="-1">Images</button>
         </div>
         <div class="settings-panels">
@@ -106,6 +108,33 @@
               <form id="linkwarden-connection"><label>Linkwarden URL<input id="linkwarden-url" type="url" maxlength="2048" required></label><label>Linkwarden username<input id="linkwarden-username" maxlength="120" required autocomplete="username"></label><label>Linkwarden access token<input id="linkwarden-token" type="password" maxlength="2000" autocomplete="off"></label><div class="calendar-settings-actions"><button id="connect-linkwarden" type="submit">Connect Linkwarden</button><button id="disconnect-linkwarden" type="button">Disconnect Linkwarden</button></div></form>
               <p id="linkwarden-settings-status" role="status"></p>
             </section>
+          </section>
+          <section id="settings-panel-home-assistant" role="tabpanel" aria-labelledby="settings-tab-home-assistant" tabindex="0" hidden>
+            <h3>Home Assistant</h3><p class="settings-description">The connection is shared across browsers. Use a dedicated non-admin Home Assistant user on a trusted LAN. This tab configures the connection, not device controls.</p>
+            <p id="home-assistant-status" role="status">Open Settings to load the saved connection.</p>
+            <form id="home-assistant-connection">
+              <label>Home Assistant URL<input id="home-assistant-url" type="url" maxlength="2048" placeholder="http://homeassistant.local:8123" required autocomplete="url"></label>
+              <label>Home Assistant access token<input id="home-assistant-token" type="password" maxlength="4096" autocomplete="off"></label>
+              <p class="settings-description">The token is encrypted on this server and never shown again. Leave it blank to keep a readable saved token for the unchanged URL. A new URL or re-authentication requires a new token. Enter an instance origin without a path, query, fragment, or credentials.</p>
+              <div class="integration-actions"><button id="connect-home-assistant" type="submit">Connect Home Assistant</button><button id="disconnect-home-assistant" type="button">Disconnect Home Assistant</button></div>
+            </form>
+            <p id="home-assistant-settings-status" role="status"></p>
+            <p class="settings-description">For a private certificate, configure the public CA bundle on the server and restart it. Certificate verification cannot be bypassed here. See <a href="https://www.home-assistant.io/docs/authentication/" target="_blank" rel="noopener noreferrer">Home Assistant authentication</a> for long-lived tokens.</p>
+          </section>
+          <section id="settings-panel-wol" role="tabpanel" aria-labelledby="settings-tab-wol" tabindex="0" hidden>
+            <h3>Wake-on-LAN</h3><p class="settings-description">Manage devices saved on this server for all browsers. This tab does not send wake packets.</p>
+            <p id="wol-status" role="status">Open Settings to load saved devices.</p><ul id="wol-devices" aria-label="Saved Wake-on-LAN devices"></ul>
+            <form id="wol-device-form">
+              <h4 id="wol-editor-title">Add device</h4>
+              <label>Device name<input id="wol-name" name="name" maxlength="80" required></label>
+              <label>MAC address<input id="wol-mac" name="macAddress" maxlength="17" placeholder="AA:BB:CC:DD:EE:FF" required></label>
+              <label>Broadcast address<input id="wol-broadcast" name="broadcastAddress" maxlength="15" placeholder="192.168.1.255" required></label>
+              <label>IP address (optional)<input id="wol-ip" name="ipAddress" maxlength="15"></label>
+              <label>Group (optional)<input id="wol-group" name="group" maxlength="80"></label>
+              <p class="settings-description">Use the target PC's directed subnet broadcast, such as 192.168.1.255 for 192.168.1.42 on a 255.255.255.0 network. IP and broadcast addresses use IPv4.</p>
+              <div class="integration-actions"><button id="save-wol-device" type="submit">Add device</button><button id="cancel-wol-edit" type="button" hidden>Cancel edit</button></div>
+            </form>
+            <p id="wol-editor-status" role="status"></p><p id="wol-settings-status" role="status"></p>
           </section>
           <section id="settings-panel-images" role="tabpanel" aria-labelledby="settings-tab-images" tabindex="0" hidden>
             <h3>Images</h3><p class="settings-description">Give your photos the right pace and backdrop.</p>

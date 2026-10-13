@@ -40,7 +40,7 @@ test('serves the photo dashboard at home and index without the retired widget in
     const html = await result.text();
     assert.match(html, /src="\/dashboard.js"/);
     assert.match(html, /href="\/dashboard.css"/);
-    assert.doesNotMatch(html, /src="\/app.js"|href="\/"|href="\/dashboard"|id="home-|legacy-integration-controls|widget-(?:move|resize)|id="(?:device|linkwarden|home-assistant)-dialog"/);
+    assert.doesNotMatch(html, /src="\/app.js"|href="\/"|href="\/dashboard"|id="home-(?!assistant-)|legacy-integration-controls|widget-(?:move|resize)|id="(?:device|linkwarden|home-assistant)-dialog"/);
     for (const id of ['photos', 'information', 'clock', 'weather', 'calendar', 'open-settings', 'fullscreen', 'settings-dialog']) assert.equal((html.match(new RegExp(`id="${id}"`, 'g')) ?? []).length, 1, `expected one #${id}`);
     const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map((match) => match[1]);
     assert.equal(new Set(ids).size, ids.length, 'element IDs are unique');
@@ -67,7 +67,7 @@ test('redirects only legacy dashboard documents to the canonical home URL', asyn
 
 test('serves retained dashboard assets with their MIME and cache headers', async (context) => {
   const base = await staticServer(context);
-  for (const name of ['dashboard.js', 'dashboard-helpers.js', 'dashboard-weather.js', 'weather-data.js', 'dashboard-photos.js', 'dashboard-calendar.js', 'dashboard-settings.js', 'bookmark-data.js', 'dashboard-bookmarks.js', 'dashboard-bookmark-tree.js', 'dashboard.css', 'home-layout.js']) {
+  for (const name of ['dashboard.js', 'dashboard-helpers.js', 'dashboard-weather.js', 'weather-data.js', 'dashboard-photos.js', 'dashboard-calendar.js', 'dashboard-settings.js', 'dashboard-configuration.js', 'dashboard-home-assistant.js', 'dashboard-wol.js', 'dashboard-integration-settings.js', 'bookmark-data.js', 'dashboard-bookmarks.js', 'dashboard-bookmark-tree.js', 'dashboard.css', 'home-layout.js']) {
     const result = await fetch(`${base}/${name}`); assert.equal(result.status, 200); assert.match(result.headers.get('content-type'), name.endsWith('.css') ? /text\/css/ : /text\/javascript/); assert.equal(result.headers.get('cache-control'), name.endsWith('.js') ? 'no-store' : 'no-cache'); assert.equal(result.headers.get('x-content-type-options'), 'nosniff');
   }
 });
@@ -99,15 +99,15 @@ test('home preserves forecast, calendar, and photo settings markup', async (cont
   assert.match(dashboardHtml, /Baikal server URL/); assert.match(dashboardHtml, /name="serverUrl"[^>]*placeholder="https:\/\/baikal\.example\.test"/); assert.doesNotMatch(dashboardHtml, /dav\.php\/calendars/);
 });
 
-test('Settings links six accessible tabs to panels with General initially selected', async (context) => {
+test('Settings links eight accessible tabs to panels with General initially selected', async (context) => {
   const base = await staticServer(context);
   const html = await (await fetch(base)).text();
   assert.match(html, /role="tablist"[^>]*aria-label="Settings categories"[^>]*aria-orientation="vertical"/);
   const tabs = [...html.matchAll(/<button\b[^>]*role="tab"[^>]*>([^<]+)<\/button>/g)];
-  assert.deepEqual(tabs.map((tab) => tab[1]), ['General', 'Time', 'Weather', 'Calendar', 'Bookmarks', 'Images']);
-  assert.equal([...html.matchAll(/role="tabpanel"/g)].length, 6);
+  assert.deepEqual(tabs.map((tab) => tab[1]), ['General', 'Time', 'Weather', 'Calendar', 'Bookmarks', 'Home Assistant', 'Wake-on-LAN', 'Images']);
+  assert.equal([...html.matchAll(/role="tabpanel"/g)].length, 8);
   for (const tab of tabs) {
-    const name = tab[1].toLowerCase();
+    const name = tab[1] === 'Wake-on-LAN' ? 'wol' : tab[1].toLowerCase().replaceAll(' ', '-');
     const selected = name === 'general';
     assert.match(tab[0], new RegExp(`id="settings-tab-${name}"`));
     assert.match(tab[0], new RegExp(`aria-controls="settings-panel-${name}"`));

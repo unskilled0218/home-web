@@ -115,6 +115,12 @@ input[type=color] { min-height: 2.5rem; }
 #settings-dialog #settings-status { flex: 1; min-width: 0; margin: 0; }
 #settings-dialog .settings-save { flex-shrink: 0; background: #95bbff; border-color: #95bbff; color: #101c30; }
 #settings-dialog .settings-save:hover { background: #b7d1ff; border-color: #b7d1ff; }
+#settings-dialog .integration-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+#settings-dialog .integration-actions button { min-width: 0; overflow-wrap: anywhere; }
+#settings-dialog #wol-devices { list-style: none; padding: 0; }
+#settings-dialog #wol-devices li { padding: .75rem 0; border-bottom: 1px solid #29374c; }
+#settings-dialog #wol-devices p { overflow-wrap: anywhere; font-size: .85rem; }
+#settings-dialog #home-assistant-connection, #settings-dialog #wol-device-form { display: grid; min-width: 0; gap: .8rem; }
 @media (max-width: 600px) {
   #settings-dialog { width: calc(100vw - 1rem); height: min(42rem, calc(100dvh - 1rem)); max-height: calc(100dvh - 1rem); border-radius: .8rem; }
   #settings-dialog .settings-header { padding: .85rem; gap: .5rem; }

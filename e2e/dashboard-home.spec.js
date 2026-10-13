@@ -179,7 +179,7 @@ for (const width of [1200, 320, 390]) test(`Settings remains usable at ${width}p
   expect(bounds.x + bounds.width).toBeLessThanOrEqual(width);
   for (const height of [800, 360]) {
     await page.setViewportSize({ width, height });
-    for (const name of ['General', 'Time', 'Weather', 'Calendar', 'Bookmarks', 'Images']) {
+    for (const name of ['General', 'Time', 'Weather', 'Calendar', 'Bookmarks', 'Home Assistant', 'Wake-on-LAN', 'Images']) {
       const tab = page.getByRole('tab', { name, exact: true });
       await tab.click();
       const panel = page.getByRole('tabpanel', { name, exact: true });
