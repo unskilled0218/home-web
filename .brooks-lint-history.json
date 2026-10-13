@@ -163,5 +163,16 @@
       "suggestion": 1
     },
     "scope": "Plan review: tasks/40-home-assistant-wol-settings/2-plan.md"
+  },
+  {
+    "date": "2026-10-13",
+    "mode": "PR Review",
+    "score": 95,
+    "findings": {
+      "critical": 0,
+      "warning": 1,
+      "suggestion": 0
+    },
+    "scope": "Branch review: 40-home-assistant-wol-settings vs main (302c093...fa0444c)"
   }
 ]
