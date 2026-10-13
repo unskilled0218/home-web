@@ -185,5 +185,16 @@
       "suggestion": 1
     },
     "scope": "Plan review: tasks/41-home-assistant-wol-dashboard/2-plan.md"
+  },
+  {
+    "date": "2026-10-13",
+    "mode": "PR Review",
+    "score": 95,
+    "findings": {
+      "critical": 0,
+      "warning": 1,
+      "suggestion": 0
+    },
+    "scope": "Branch review: 41-home-assistant-wol-dashboard vs main (d584f24...b274e52)"
   }
 ]
