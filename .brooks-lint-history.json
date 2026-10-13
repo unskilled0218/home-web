@@ -152,5 +152,16 @@
       "suggestion": 1
     },
     "scope": "Branch review: 39-global-dashboard-settings vs main (bcbc2ab...2222f07)"
+  },
+  {
+    "date": "2026-10-13",
+    "mode": "PR Review",
+    "score": 89,
+    "findings": {
+      "critical": 0,
+      "warning": 2,
+      "suggestion": 1
+    },
+    "scope": "Plan review: tasks/40-home-assistant-wol-settings/2-plan.md"
   }
 ]
