@@ -10,6 +10,14 @@ import { rootCertificates } from 'node:tls';
 
 const root = path.resolve(import.meta.dirname, '..');
 
+// Exercise production shutdown without requiring permission to signal a child process.
+const serverSource = `
+const shutdown = () => { if (!process.emit('SIGTERM')) process.exit(0); };
+process.on('message', (message) => { if (message === 'shutdown') shutdown(); });
+process.on('disconnect', shutdown);
+await import('./src/server.js');
+`;
+
 function withoutEnvironment(...names) {
   const environment = { ...process.env };
   for (const name of names) delete environment[name];
@@ -40,9 +48,9 @@ test('loads configuration and extra CA before production startup', async (contex
   const databasePath = path.join(directory, 'dashboard.db');
   const file = path.join(directory, '.env');
   writeFileSync(file, `HOST=127.0.0.1\nPORT=${port}\nDATABASE_PATH=${databasePath}\nLINKWARDEN_CONFIG_ENCRYPTION_KEY=${Buffer.alloc(32, 4).toString('base64')}\nNODE_EXTRA_CA_CERTS=${caFile}\nNFS_SOURCE=invalid\nNFS_MOUNT_PATH=${path.join(directory, 'photos')}\n`);
-  const child = spawn(process.execPath, [`--env-file-if-exists=${file}`, 'src/server.js'], { cwd: root, env: withoutEnvironment('HOST', 'PORT', 'DATABASE_PATH', 'LINKWARDEN_CONFIG_ENCRYPTION_KEY', 'NODE_EXTRA_CA_CERTS', 'NFS_SOURCE', 'NFS_MOUNT_PATH'), stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, [`--env-file-if-exists=${file}`, '--input-type=module', '--eval', serverSource], { cwd: root, env: withoutEnvironment('HOST', 'PORT', 'DATABASE_PATH', 'LINKWARDEN_CONFIG_ENCRYPTION_KEY', 'NODE_EXTRA_CA_CERTS', 'NFS_SOURCE', 'NFS_MOUNT_PATH'), stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
   context.after(async () => {
-    if (child.exitCode == null) { child.kill('SIGTERM'); await once(child, 'exit'); }
+    if (child.exitCode === null && child.signalCode === null) { const exited = once(child, 'exit'); child.send('shutdown'); await exited; }
     rmSync(directory, { recursive: true, force: true });
   });
   let stderr = '';

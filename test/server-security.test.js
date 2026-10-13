@@ -8,6 +8,14 @@ import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { once } from 'node:events';
 
+// Exercise production shutdown without requiring permission to signal a child process.
+const serverSource = `
+const shutdown = () => { if (!process.emit('SIGTERM')) process.exit(0); };
+process.on('message', (message) => { if (message === 'shutdown') shutdown(); });
+process.on('disconnect', shutdown);
+await import('./src/server.js');
+`;
+
 async function availablePort() {
   const server = net.createServer();
   server.listen(0, '127.0.0.1');
@@ -67,7 +75,7 @@ test('blocks rebinding hosts and never reuses a Linkwarden token for a changed i
   const primaryUrl = await listen(primary);
   const secondaryUrl = await listen(secondary);
   const dashboardPort = await availablePort();
-  const child = spawn(process.execPath, ['src/server.js'], {
+  const child = spawn(process.execPath, ['--input-type=module', '--eval', serverSource], {
     cwd: path.resolve(import.meta.dirname, '..'),
     env: {
       ...process.env,
@@ -77,12 +85,12 @@ test('blocks rebinding hosts and never reuses a Linkwarden token for a changed i
       DASHBOARD_ALLOWED_HOSTS: 'dashboard.test',
       LINKWARDEN_CONFIG_ENCRYPTION_KEY: Buffer.alloc(32, 5).toString('base64')
     },
-    stdio: ['ignore', 'pipe', 'pipe']
+    stdio: ['ignore', 'pipe', 'pipe', 'ipc']
   });
   let stderr = '';
   child.stderr.on('data', (chunk) => { stderr += chunk; });
   const close = async () => {
-    if (child.exitCode == null) { child.kill('SIGTERM'); await once(child, 'exit'); }
+    if (child.exitCode === null && child.signalCode === null) { const exited = once(child, 'exit'); child.send('shutdown'); await exited; }
     await Promise.all([new Promise((resolve) => primary.close(resolve)), new Promise((resolve) => secondary.close(resolve))]);
     rmSync(directory, { recursive: true, force: true });
   };

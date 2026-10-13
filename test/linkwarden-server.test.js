@@ -8,6 +8,14 @@ import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { once } from 'node:events';
 
+// Exercise production shutdown without requiring permission to signal a child process.
+const serverSource = `
+const shutdown = () => { if (!process.emit('SIGTERM')) process.exit(0); };
+process.on('message', (message) => { if (message === 'shutdown') shutdown(); });
+process.on('disconnect', shutdown);
+await import('./src/server.js');
+`;
+
 async function availablePort() {
   const server = net.createServer();
   server.listen(0, '127.0.0.1');
@@ -50,7 +58,7 @@ test('connects atomically and navigates collections through opaque tokens', asyn
     let stopped = false;
     const validEncryptionKey = Buffer.alloc(32, 9).toString('base64');
     const startDashboard = async (encryptionKey = validEncryptionKey) => {
-      child = spawn(process.execPath, ['src/server.js'], {
+      child = spawn(process.execPath, ['--input-type=module', '--eval', serverSource], {
         cwd: path.resolve(import.meta.dirname, '..'),
         env: {
           ...process.env,
@@ -60,7 +68,7 @@ test('connects atomically and navigates collections through opaque tokens', asyn
           LINKWARDEN_CONFIG_ENCRYPTION_KEY: encryptionKey,
           LINKWARDEN_CA_FILE: certificatePath
         },
-        stdio: ['ignore', 'pipe', 'pipe']
+        stdio: ['ignore', 'pipe', 'pipe', 'ipc']
       });
       await new Promise((resolve, reject) => {
         const timer = setTimeout(() => reject(new Error('Dashboard startup timed out.')), 5_000);
@@ -69,7 +77,7 @@ test('connects atomically and navigates collections through opaque tokens', asyn
       });
     };
     const stopDashboard = async () => {
-      if (child?.exitCode == null) { child.kill('SIGTERM'); await once(child, 'exit'); }
+      if (child && child.exitCode === null && child.signalCode === null) { const exited = once(child, 'exit'); child.send('shutdown'); await exited; }
     };
     const shutdown = async () => {
       if (stopped) return;
