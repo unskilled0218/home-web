@@ -1,10 +1,12 @@
 import { expect, test as base } from '@playwright/test';
 import { normalizeForecast } from '../public/weather-data.js';
 import { rawForecast } from '../test/fixtures/weather.js';
+import { normalizeDashboardPreferences, validateDashboardPreferences } from '../public/dashboard-helpers.js';
 
-const settingsKey = 'dashboard.preferences.v1';
+const settingsKey = 'dashboard.shared-settings.v1';
 const instant = new Date('2026-10-11T12:00:00Z');
 const photoUrl = '/api/dashboard/photos/abcdefghijklmnop';
+const weatherMetadata = new WeakMap();
 
 const test = base.extend({
   page: async ({ page }, use) => {
@@ -15,6 +17,7 @@ const test = base.extend({
     await page.route('**/api/dashboard/photos', (route) => route.fulfill({ json: { available: true, photos: [] } }));
     await page.route('**/api/linkwarden', (route) => route.fulfill({ json: { linkwarden: { configured: false, configurationId: null, encryptionReady: true } } }));
     await mockWeather(page, { configured: false });
+    await mockSharedSettings(page);
     const providerRequests = [];
     await page.route(/https:\/\/(?:api|air-quality-api)\.open-meteo\.com\//, (route) => { providerRequests.push(route.request().url()); return route.abort(); });
     await use(page);
@@ -24,14 +27,27 @@ const test = base.extend({
 });
 
 async function seedPreferences(page, preferences) {
-  await page.addInitScript(({ key, value }) => {
-    if (localStorage.getItem(key) === null) localStorage.setItem(key, JSON.stringify(value));
-  }, { key: settingsKey, value: preferences });
+  await page.addInitScript((value) => { window.sharedSeedPreferences = value; }, preferences);
+}
+
+async function mockSharedSettings(page) {
+  let preferences; let revision = 1;
+  const snapshot = () => { const weather = weatherMetadata.get(page)?.(); return { initialized: true, revision, preferences, integrations: { weather: weather ? { available: true, revision: weather.revision, location: weather.location } : { available: false }, calendar: { available: false }, linkwarden: { available: false } } }; };
+  await page.route('**/api/dashboard/settings', async (route) => {
+    preferences ??= normalizeDashboardPreferences(await page.evaluate(() => window.sharedSeedPreferences ?? {}));
+    if (route.request().method() === 'PUT') {
+      const body = route.request().postDataJSON();
+      if (body.revision !== revision) return route.fulfill({ status: 409, json: { error: 'Shared preferences changed elsewhere.', snapshot: snapshot() } });
+      preferences = validateDashboardPreferences(body.preferences); revision++;
+    }
+    return route.fulfill({ json: snapshot() });
+  });
 }
 
 async function mockWeather(page, { configured = true } = {}) {
   const requests = { snapshot: 0, refresh: 0, save: 0 };
   let state = { configured, revision: configured ? 1 : 0, location: configured ? { label: 'London', latitude: 51, longitude: 0 } : null, timezone: 'UTC', forecastRegistered: configured, forecast: configured ? normalizeForecast(rawForecast()) : null, air: configured ? { aqi: 20 } : null, forecastUpdated: configured ? instant.getTime() : null, airUpdated: configured ? instant.getTime() : null, forecastError: false, airError: false, refreshing: false };
+  weatherMetadata.set(page, () => state);
   await page.route('**/api/weather?*', (route) => {
     requests.snapshot++;
     return route.fulfill({ json: { ...state, timezone: new URL(route.request().url()).searchParams.get('timezone') } });
@@ -97,7 +113,7 @@ async function mobileGeometry(page) {
 
 async function savePreferences(page) {
   await page.getByRole('button', { name: 'Save preferences', exact: true }).click();
-  await expect(page.locator('#settings-status')).toHaveText('Preferences saved in this browser.');
+  await expect(page.locator('#settings-status')).toHaveText('Preferences saved for all browsers.');
 }
 
 test('home initializes the photo dashboard without widget requests and handles unconfigured services', async ({ page }) => {
@@ -135,8 +151,8 @@ test('existing preferences load at home and edits survive reload and legacy redi
   await page.getByRole('tab', { name: 'Time', exact: true }).click();
   await page.getByLabel('Show clock', { exact: true }).check();
   await page.getByRole('button', { name: 'Save preferences', exact: true }).click();
-  await expect(page.locator('#settings-status')).toHaveText('Preferences saved in this browser.');
-  const saved = await page.evaluate((key) => JSON.parse(localStorage.getItem(key)), settingsKey);
+  await expect(page.locator('#settings-status')).toHaveText('Preferences saved for all browsers.');
+  const saved = await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).preferences, settingsKey);
   expect(saved.position).toBe('left');
   expect(saved.timeVisible).toBe(true);
   expect(saved.color).toBe('#123456');
@@ -148,7 +164,7 @@ test('existing preferences load at home and edits survive reload and legacy redi
     await expect(page).toHaveURL(/\/$/);
     await expect(page.locator('#information')).not.toHaveClass('right');
     await expect(page.locator('#clock')).toBeVisible();
-    expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key)), settingsKey)).toEqual(saved);
+    expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).preferences, settingsKey)).toEqual(saved);
   }
 });
 
@@ -179,7 +195,7 @@ for (const width of [1200, 320, 390]) test(`Settings remains usable at ${width}p
   await page.getByLabel('Timezone', { exact: true }).fill('UTC');
   await page.locator('[name="seconds"]').uncheck();
   await page.getByRole('button', { name: 'Save preferences', exact: true }).click();
-  await expect(page.locator('#settings-status')).toHaveText('Preferences saved in this browser.');
+  await expect(page.locator('#settings-status')).toHaveText('Preferences saved for all browsers.');
   await page.locator('#close-settings').click();
   await expect(dialog).toBeHidden();
   await expect(page.locator('#home-grid, .widget-move, .widget-resize')).toHaveCount(0);
@@ -241,7 +257,7 @@ test('legacy mobile defaults start at the top even with unconfigured or hidden c
   await expect(page.locator('#weather-status')).toHaveText('Choose a location in Settings to show weather.');
   for (const id of ['clock', 'weather', 'calendar']) await expect(page.locator(`#${id}`)).toBeVisible();
   await mobileGeometry(page);
-  expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key)), settingsKey)).toEqual(legacy);
+  expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).preferences, settingsKey)).toMatchObject(legacy);
   await page.locator('#open-settings').click();
   for (const [tab, label] of [['Time', 'Show clock on mobile'], ['Weather', 'Show weather on mobile'], ['Calendar', 'Show calendar on mobile']]) {
     await page.getByRole('tab', { name: tab, exact: true }).click(); await page.getByLabel(label, { exact: true }).uncheck();
@@ -286,18 +302,18 @@ test('mobile preferences save across tabs and reload without changing desktop va
   await page.getByLabel('Show calendar on mobile', { exact: true }).uncheck(); await page.getByLabel('Calendar scale on mobile', { exact: true }).fill('1.7');
   await page.getByRole('tab', { name: 'Time', exact: true }).click(); await expect(page.getByLabel('Clock scale on mobile', { exact: true })).toHaveValue('1.2');
   await savePreferences(page);
-  const saved = await page.evaluate((key) => JSON.parse(localStorage.getItem(key)), settingsKey);
+  const saved = await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).preferences, settingsKey);
   expect(saved).toMatchObject({ ...desktop, mobileTimeVisible: false, mobileTimeScale: 1.2, mobileWeatherVisible: true, mobileWeatherScale: 0.8, mobileCalendarVisible: false, mobileCalendarScale: 1.7 });
   await page.reload(); await expect(page.locator('#clock')).toBeHidden(); await expect(page.locator('#calendar')).toBeHidden(); await expect(page.locator('#weather')).toHaveCSS('font-size', '12.8px');
   await page.setViewportSize({ width: 900, height: 800 });
   await expect(page.locator('#information')).toHaveClass('right'); expect(await sectionOrder(page)).toEqual(['calendar', 'clock', 'weather']);
-  expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key)), settingsKey)).toEqual(saved);
+  expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).preferences, settingsKey)).toEqual(saved);
   await page.setViewportSize({ width: 320, height: 800 }); await page.locator('#open-settings').click();
   await page.getByRole('tab', { name: 'Time', exact: true }).click(); await page.getByLabel('Show clock', { exact: true }).check(); await page.getByLabel('Clock scale', { exact: true }).fill('1.5');
   await savePreferences(page); await page.locator('#close-settings').click();
   await expect(page.locator('#clock')).toBeHidden();
   await page.setViewportSize({ width: 900, height: 800 }); await expect(page.locator('#clock')).toBeVisible();
-  const edited = await page.evaluate((key) => JSON.parse(localStorage.getItem(key)), settingsKey);
+  const edited = await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).preferences, settingsKey);
   expect(edited).toMatchObject({ timeVisible: true, timeScale: 1.5, mobileTimeVisible: false, mobileTimeScale: 1.2 });
 });
 
@@ -308,7 +324,7 @@ test('fractional stored mobile scales remain valid when saving an unrelated pref
   const valid = await page.locator('[name^="mobile"][type="number"]').evaluateAll((inputs) => inputs.map((input) => ({ value: input.valueAsNumber, valid: input.validity.valid, form: input.form.id })));
   expect(valid).toEqual([{ value: 1.3, valid: true, form: 'preferences' }, { value: 0.6, valid: true, form: 'preferences' }, { value: 1.1, valid: true, form: 'preferences' }]);
   await page.getByRole('combobox', { name: 'Position', exact: true }).selectOption('right'); await savePreferences(page);
-  expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key)), settingsKey)).toMatchObject({ position: 'right', mobileTimeScale: 1.3, mobileWeatherScale: 0.6, mobileCalendarScale: 1.1 });
+  expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).preferences, settingsKey)).toMatchObject({ position: 'right', mobileTimeScale: 1.3, mobileWeatherScale: 0.6, mobileCalendarScale: 1.1 });
 });
 
 test('invalid hidden mobile scales reveal their panel and preserve other drafts', async ({ page }) => {
@@ -318,9 +334,9 @@ test('invalid hidden mobile scales reveal their panel and preserve other drafts'
   await page.getByRole('button', { name: 'Save preferences', exact: true }).click();
   await expect(page.getByRole('tab', { name: 'Time', exact: true })).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByLabel('Clock scale on mobile', { exact: true })).toBeFocused();
-  expect(await page.evaluate((key) => localStorage.getItem(key), settingsKey)).toBeNull();
+  expect(await page.evaluate(() => localStorage.getItem('dashboard.preferences.v1'))).toBeNull();
   await page.getByLabel('Clock scale on mobile', { exact: true }).fill('1.3'); await savePreferences(page);
-  expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key)), settingsKey)).toMatchObject({ mobileTimeScale: 1.3, mobileWeatherScale: 1.4 });
+  expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).preferences, settingsKey)).toMatchObject({ mobileTimeScale: 1.3, mobileWeatherScale: 1.4 });
 });
 
 test('changing one mobile scale leaves the other view sizes and desktop scales intact', async ({ page }) => {
@@ -333,7 +349,7 @@ test('changing one mobile scale leaves the other view sizes and desktop scales i
     sizes[id] = 16 * scale;
     for (const [view, expected] of Object.entries(sizes)) expect(await page.locator(`#${view}`).evaluate((node) => parseFloat(getComputedStyle(node).fontSize)), `${view} responds only to its own mobile scale`).toBeCloseTo(expected, 2);
   }
-  expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key)), settingsKey)).toMatchObject({ scale: 2, timeScale: 2, weatherScale: 1.8, calendarScale: 0.5 });
+  expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).preferences, settingsKey)).toMatchObject({ scale: 2, timeScale: 2, weatherScale: 1.8, calendarScale: 0.5 });
 });
 
 test('shared format and units apply in both layouts outside the profile display groups', async ({ page }) => {
@@ -371,7 +387,7 @@ test('breakpoint and orientation changes switch profiles without saving or losin
     expect(await page.locator('#information').evaluate((node) => node.classList.contains('right'))).toBe(!mobile);
     expect(await page.locator('#clock').evaluate((node) => parseFloat(getComputedStyle(node).fontSize))).toBeCloseTo(mobile ? 9.6 : 17.92, 2);
     await expect(page.getByRole('tab', { name: 'Time', exact: true })).toHaveAttribute('aria-selected', 'true'); await expect(page.getByLabel('Clock scale on mobile', { exact: true })).toHaveValue('1.7');
-    expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key)), settingsKey)).toEqual(saved);
+    expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).preferences, settingsKey)).toMatchObject(saved);
     expect(await page.evaluate(() => window.originalSections.every((node) => document.getElementById(node.id) === node))).toBe(true);
     await expect(page.locator('#information > section')).toHaveCount(3);
   }
@@ -467,7 +483,7 @@ test('mobile bookmark mode persists and repeated presentation changes keep fresh
   for (const width of [601, 390, 900, 320]) { await page.setViewportSize({ width, height: 800 }); await expect(page.getByRole('link', { name: 'Deep bookmark', exact: true })).toBeVisible(); }
   expect(mock.requests.folders.length).toBe(reads);
   await page.reload(); await expect(page.getByRole('link', { name: 'Deep bookmark', exact: true })).toBeVisible();
-  expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).mobileBookmarksMode, settingsKey)).toBe('expanded');
+  expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).preferences.mobileBookmarksMode, settingsKey)).toBe('expanded');
 });
 
 test('a failed bookmark folder preserves its siblings and retry does not reload the whole tree', async ({ page }) => {
@@ -484,7 +500,7 @@ test('Linkwarden connection controls stay independent from display drafts and ne
   await expect(page.getByLabel('Linkwarden access token', { exact: true })).toHaveValue(''); await expect(page.getByLabel('Linkwarden URL', { exact: true })).toHaveValue('https://linkwarden.test');
   await page.getByLabel('Linkwarden access token', { exact: true }).fill('private-test-token'); await page.getByRole('button', { name: 'Connect Linkwarden', exact: true }).click();
   await expect(page.locator('#linkwarden-settings-status')).toHaveText('Linkwarden connected.'); await expect(page.getByLabel('Linkwarden access token', { exact: true })).toHaveValue('');
-  expect(mock.requests.mutations[0]).toEqual({ url: 'https://linkwarden.test', username: 'sam', accessToken: 'private-test-token' }); expect(await page.evaluate((key) => localStorage.getItem(key), settingsKey)).toBeNull();
+  expect(mock.requests.mutations[0]).toEqual({ url: 'https://linkwarden.test', username: 'sam', accessToken: 'private-test-token' }); expect(await page.evaluate((key) => localStorage.getItem(key), settingsKey)).not.toContain('private-test-token');
   await page.getByRole('button', { name: 'Connect Linkwarden', exact: true }).click(); await expect.poll(() => mock.requests.mutations.length).toBe(2); expect(mock.requests.mutations[1].accessToken).toBe('');
   page.once('dialog', (dialog) => dialog.accept()); await page.getByRole('button', { name: 'Disconnect Linkwarden', exact: true }).click(); await expect(page.locator('#linkwarden-settings-status')).toHaveText('Linkwarden disconnected.');
   await expect(page.locator('#bookmark-tree a')).toHaveCount(0); await expect(page.getByRole('button', { name: 'Disconnect Linkwarden', exact: true })).toBeDisabled();
@@ -622,8 +638,8 @@ test('tab switches retain drafts and saving includes hidden panels without submi
   await expect(page.getByLabel('Overall scale', { exact: true })).toHaveValue('1.2');
   expect(await page.evaluate((key) => localStorage.getItem(key), settingsKey)).toBe(original);
   await page.getByRole('button', { name: 'Save preferences', exact: true }).click();
-  await expect(page.locator('#settings-status')).toHaveText('Preferences saved in this browser.');
-  const saved = await page.evaluate((key) => JSON.parse(localStorage.getItem(key)), settingsKey);
+  await expect(page.locator('#settings-status')).toHaveText('Preferences saved for all browsers.');
+  const saved = await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).preferences, settingsKey);
   expect(saved).toMatchObject({ position: 'right', scale: 1.2, seconds: false, interval: 90 });
   expect(serviceMutations).toEqual([]);
   await page.reload();
@@ -656,8 +672,8 @@ test('saving reveals each hidden invalid preference without losing other drafts'
   expect(await page.evaluate((key) => localStorage.getItem(key), settingsKey)).toBe(original);
   await page.getByLabel('Timezone', { exact: true }).fill('UTC');
   await save.click();
-  await expect(page.locator('#settings-status')).toHaveText('Preferences saved in this browser.');
-  expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key)), settingsKey)).toMatchObject({ scale: 1.3, timezone: 'UTC', interval: 120 });
+  await expect(page.locator('#settings-status')).toHaveText('Preferences saved for all browsers.');
+  expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).preferences, settingsKey)).toMatchObject({ scale: 1.3, timezone: 'UTC', interval: 120 });
 });
 
 test('native form ownership isolates display preferences from search and calendar fields', async ({ page }) => {
@@ -679,7 +695,7 @@ test('native form ownership isolates display preferences from search and calenda
   expect(ownership).toMatchObject({ search: 'location-search', calendar: 'calendar-connection', password: 'calendar-connection', save: 'preferences', nested: 0 });
   await page.locator('#open-settings').click();
   await page.getByRole('button', { name: 'Save preferences', exact: true }).click();
-  await expect(page.locator('#settings-status')).toHaveText('Preferences saved in this browser.');
+  await expect(page.locator('#settings-status')).toHaveText('Preferences saved for all browsers.');
 });
 
 test('Clear results preserves the selected weather location, displayed weather, query, and drafts', async ({ page }) => {
@@ -711,7 +727,7 @@ test('Clear results preserves the selected weather location, displayed weather, 
   await expect(page.locator('#current-weather-subvalues')).toContainText('US AQI: 20');
   const stored = await page.evaluate((key) => localStorage.getItem(key), settingsKey);
   expect(weatherMock.getState().location).toMatchObject({ latitude: 51, longitude: 0 });
-  expect(stored).toBeNull();
+  expect(stored).not.toBeNull();
   const writes = await page.evaluate(() => window.preferenceWrites);
   const requests = { ...weatherRequests };
   const weather = await page.locator('#weather').textContent();
@@ -792,8 +808,9 @@ for (const outcome of ['success', 'failure']) test(`Clear results ignores a late
   });
   await page.goto('/');
   try {
+    await expect(page.locator('#weather-status')).toHaveText('Choose a location in Settings to show weather.');
     const stored = await page.evaluate((key) => localStorage.getItem(key), settingsKey);
-    expect(stored).toBeNull();
+    expect(stored).not.toBeNull();
     await page.locator('#open-settings').click();
     await page.getByRole('tab', { name: 'Weather', exact: true }).click();
     await page.getByLabel('City or place', { exact: true }).fill('London');
@@ -877,7 +894,7 @@ test('Settings reloads another browser location and polling preserves open prefe
   await page.goto('/');
   await page.locator('#open-settings').click();
   await page.getByLabel('Overall scale', { exact: true }).fill('1.4');
-  await expect.poll(() => mock.requests.snapshot).toBe(2);
+  await expect.poll(() => mock.requests.snapshot).toBe(1);
   mock.setState({ revision: 2, location: { label: 'Paris', latitude: 48.85, longitude: 2.35 }, forecast: normalizeForecast(rawForecast(21)) });
   await page.clock.runFor(60000);
   await expect(page.getByLabel('Overall scale', { exact: true })).toHaveValue('1.4');
@@ -888,7 +905,7 @@ test('Settings reloads another browser location and polling preserves open prefe
   await page.locator('#open-settings').click();
   await page.getByRole('tab', { name: 'Weather', exact: true }).click();
   await expect(page.locator('#current-location')).toHaveText('Current location: Tokyo');
-  expect(await page.evaluate((key) => localStorage.getItem(key), settingsKey)).toBeNull();
+  expect(await page.evaluate(() => localStorage.getItem('dashboard.preferences.v1'))).toBeNull();
 });
 
 for (const status of [503, 409]) test(`location save ${status} retains authoritative weather and reports the error`, async ({ page }) => {
@@ -908,7 +925,7 @@ for (const status of [503, 409]) test(`location save ${status} retains authorita
   await expect(page.locator('#location-settings-status')).toContainText(status === 409 ? 'changed on another device' : 'could not be saved');
   await expect(page.locator('#current-location')).toHaveText(`Current location: ${status === 409 ? 'Tokyo' : 'London'}`);
   await expect(page.locator('#current-weather-values .temperature')).toHaveText('12 °C');
-  expect(await page.evaluate((key) => localStorage.getItem(key), settingsKey)).toBeNull();
+  expect(await page.evaluate(() => localStorage.getItem('dashboard.preferences.v1'))).toBeNull();
 });
 
 test('different browsers present canonical weather in their own units and timezones', async ({ page, browser }) => {
@@ -921,6 +938,7 @@ test('different browsers present canonical weather in their own units and timezo
     const other = await otherContext.newPage();
     await seedPreferences(other, { timezone: 'Asia/Tokyo', temperature: 'fahrenheit', wind: 'kn', precipitation: 'inch', hour12: false });
     await mockWeather(other);
+    await mockSharedSettings(other);
     await other.route('**/api/calendar', (route) => route.fulfill({ json: { configured: false, encryptionReady: true } }));
     await other.route('**/api/dashboard/photos', (route) => route.fulfill({ json: { available: true, photos: [] } }));
     await other.goto('/');

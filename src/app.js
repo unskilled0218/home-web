@@ -16,6 +16,7 @@ import { isCalDavClientError, normalizeCalDavCredentials } from './caldav.js';
 import { createUnavailablePhotoLibrary } from './photo-library.js';
 import { MAX_HOME_SETTINGS_BYTES, normalizeHomeSettings } from './home-settings.js';
 import { validateWeatherLocation, weatherTimezone } from '../public/weather-data.js';
+import { validateDashboardPreferences } from '../public/dashboard-helpers.js';
 
 export const MAX_JSON_BODY_BYTES = 16_384;
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -233,13 +234,21 @@ export function createDashboardServer({ runtimeConfig, store, linkwarden, homeAs
     return settings;
   }
 
+  function calendarConfigurationId(saved = store.getCalDav()) {
+    return saved ? createHash('sha256').update(JSON.stringify(['calendar-configuration-v1', saved.serverUrl, saved.username, saved.encryptedPassword])).digest('base64url') : null;
+  }
   function calDavStatus() {
     const saved = store.getCalDav();
     let encryptionReady = false;
     let credentialsReadable = false;
     try { encryptionKey(integrationEncryptionKey); encryptionReady = true; if (saved) { decryptApiKey(saved.encryptedPassword, integrationEncryptionKey); credentialsReadable = true; } } catch { /* Re-authentication is required when saved credentials cannot be decrypted. */ }
     const configured = Boolean(saved && credentialsReadable);
-    return { configured, passwordPresent: Boolean(saved), encryptionReady, needsReauthentication: Boolean(saved) && !configured, ...(saved && { serverUrl: saved.serverUrl, username: saved.username, updatedAt: saved.updatedAt }) };
+    return { configured, configurationId: calendarConfigurationId(saved), passwordPresent: Boolean(saved), encryptionReady, needsReauthentication: Boolean(saved) && !configured, ...(saved && { serverUrl: saved.serverUrl, username: saved.username, updatedAt: saved.updatedAt }) };
+  }
+
+  function dashboardSnapshot(preferences = store.getDashboardPreferences()) {
+    const observe = (load) => { try { return { ...load(), available: true }; } catch { return { available: false, error: 'Integration configuration is currently unavailable.' }; } };
+    return { ...preferences, integrations: { weather: observe(() => store.getWeatherLocation()), calendar: observe(calDavStatus), linkwarden: observe(linkwardenStatus) } };
   }
 
   function savedCalDavSettings() {
@@ -299,6 +308,24 @@ export function createDashboardServer({ runtimeConfig, store, linkwarden, homeAs
     if (!isTrustedAddress(request.socket.remoteAddress)) return json(response, 403, { error: 'This service only accepts local-network requests.' });
     if (!apiRequestAllowed(request, runtimeConfig.allowedHosts)) return json(response, 403, { error: 'Request host or origin is not allowed.' });
     if (request.method === 'GET' && pathname === '/api/health') return json(response, 200, { status: 'ok' });
+    if (['/api/dashboard/settings', '/api/dashboard/settings/initialize'].includes(pathname)) {
+      const initialize = pathname.endsWith('/initialize');
+      if (!(initialize ? request.method === 'POST' : ['GET', 'PUT'].includes(request.method))) return json(response, 405, { error: 'Method not allowed.' });
+      if (request.method === 'GET') {
+        try { return json(response, 200, dashboardSnapshot()); } catch { return json(response, 503, { error: 'Shared preferences could not be loaded.' }); }
+      }
+      let input;
+      try {
+        input = await readJson(request, MAX_HOME_SETTINGS_BYTES);
+        if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some((key) => ![...(initialize ? [] : ['revision']), 'preferences'].includes(key))) throw new Error('Invalid shared settings request.');
+        validateDashboardPreferences(input.preferences);
+        if (!initialize && (!Number.isSafeInteger(input.revision) || input.revision < 0)) throw new Error('Invalid shared settings revision.');
+      } catch (error) { return json(response, 400, { error: error.message }); }
+      try {
+        const saved = initialize ? store.initializeDashboardPreferences(input.preferences) : store.saveDashboardPreferences(input.preferences, input.revision);
+        return saved ? json(response, 200, dashboardSnapshot(saved)) : json(response, 409, { error: 'Shared preferences changed in another browser. Reload shared preferences before reapplying changes.', snapshot: dashboardSnapshot() });
+      } catch { return json(response, 503, { error: 'Shared preferences could not be saved.' }); }
+    }
     if (['/api/weather', '/api/weather/location', '/api/weather/refresh'].includes(pathname)) {
       const method = pathname === '/api/weather' ? 'GET' : pathname.endsWith('/location') ? 'PUT' : 'POST';
       if (request.method !== method) return json(response, 405, { error: 'Method not allowed.' });
@@ -354,15 +381,17 @@ export function createDashboardServer({ runtimeConfig, store, linkwarden, homeAs
     if (request.method === 'GET' && pathname === '/api/calendar') return json(response, 200, calDavStatus());
     if (request.method === 'GET' && pathname === '/api/calendar/events') {
       const status = calDavStatus();
-      if (!status.configured) return json(response, 200, { configured: false, events: [], ...(status.needsReauthentication && { needsReauthentication: true }) });
+      if (!status.configured) return json(response, 200, { configured: false, configurationId: status.configurationId, events: [], ...(status.needsReauthentication && { needsReauthentication: true }) });
       try {
         const url = new URL(request.url, 'http://localhost');
         const result = await calDav.listEvents(savedCalDavSettings(), { force: url.searchParams.get('refresh') === '1' });
-        return json(response, 200, { configured: true, events: publicCalendarEvents(result.events), stale: result.stale === true });
+        if (status.configurationId !== calendarConfigurationId()) return json(response, 409, { code: 'CALENDAR_CONFIGURATION_CHANGED', error: 'Calendar configuration changed. Reload its status.' });
+        return json(response, 200, { configured: true, configurationId: status.configurationId, events: publicCalendarEvents(result.events), stale: result.stale === true });
       } catch (error) {
-        if (isCalDavClientError(error) && error.kind === 'authentication') return json(response, 401, { configured: true, needsReauthentication: true, error: 'Calendar needs re-authentication.' });
-        if (isCalDavClientError(error) && error.kind === 'authorization') return json(response, 403, { configured: true, accessDenied: true, error: error.message });
-        return json(response, 503, { configured: true, error: CALENDAR_UNAVAILABLE });
+        if (status.configurationId !== calendarConfigurationId()) return json(response, 409, { code: 'CALENDAR_CONFIGURATION_CHANGED', error: 'Calendar configuration changed. Reload its status.' });
+        if (isCalDavClientError(error) && error.kind === 'authentication') return json(response, 401, { configured: true, configurationId: status.configurationId, needsReauthentication: true, error: 'Calendar needs re-authentication.' });
+        if (isCalDavClientError(error) && error.kind === 'authorization') return json(response, 403, { configured: true, configurationId: status.configurationId, accessDenied: true, error: error.message });
+        return json(response, 503, { configured: true, configurationId: status.configurationId, error: CALENDAR_UNAVAILABLE });
       }
     }
     if (request.method === 'GET' && pathname === '/api/home-assistant/devices') {

@@ -81,7 +81,7 @@
               <label>Wind<select name="wind" form="preferences"><option value="kmh">km/h</option><option value="mph">mph</option><option value="ms">m/s</option><option value="kn">knots</option></select></label>
               <label>Precipitation<select name="precipitation" form="preferences"><option value="mm">mm</option><option value="inch">inches</option></select></label>
             </fieldset>
-            <section class="settings-section" aria-labelledby="location-title"><h4 id="location-title">Weather location</h4><p id="current-location">Loading saved weather location…</p><p>The location is saved on this server for every browser. Searches go directly to Open-Meteo; the server retrieves and caches weather hourly. Display preferences stay in this browser.</p><form id="location-search"><label>City or place<input id="location-query" type="search" minlength="2" maxlength="120" required></label><button type="submit">Search</button><button id="clear-location" type="button">Clear results</button></form><p id="location-settings-status" role="status"></p><p id="search-status" role="status"></p><ul id="location-results"></ul></section>
+            <section class="settings-section" aria-labelledby="location-title"><h4 id="location-title">Weather location</h4><p id="current-location">Loading saved weather location…</p><p>Location and display preferences are shared across browsers through this server. Searches go directly to Open-Meteo; the server retrieves and caches weather hourly.</p><form id="location-search"><label>City or place<input id="location-query" type="search" minlength="2" maxlength="120" required></label><button type="submit">Search</button><button id="clear-location" type="button">Clear results</button></form><p id="location-settings-status" role="status"></p><p id="search-status" role="status"></p><ul id="location-results"></ul></section>
           </section>
           <section id="settings-panel-calendar" role="tabpanel" aria-labelledby="settings-tab-calendar" tabindex="0" hidden>
             <h3>Calendar</h3><p class="settings-description">Keep upcoming events close with your Baikal calendar.</p>
@@ -125,7 +125,7 @@
           </section>
         </div>
       </div>
-      <footer class="settings-footer"><p id="settings-status" role="status">Preferences are saved in this browser.</p><button class="settings-save" type="submit" form="preferences">Save preferences</button></footer>
+      <footer class="settings-footer"><p id="settings-status" role="status">Loading shared preferences…</p><button id="reload-shared-preferences" type="button">Reload shared preferences</button><button id="save-preferences" class="settings-save" type="submit" form="preferences" disabled>Save preferences</button></footer>
     </dialog>
     <script type="module" src="/dashboard.js"></script>
   </body>

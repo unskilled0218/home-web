@@ -15,7 +15,7 @@ Open [http://127.0.0.1:3000](http://127.0.0.1:3000). A clock and dark background
 
 ## Settings
 
-Use the **General**, **Time**, **Weather**, **Calendar**, **Bookmarks**, and **Images** tabs to customize the dashboard. Display preferences are saved in your browser. **Clear results** clears weather search results while keeping the selected location. See [Linkwarden setup](docs/linkwarden.md) for the bookmark tree and fullscreen option.
+Use the **General**, **Time**, **Weather**, **Calendar**, **Bookmarks**, and **Images** tabs to customize the dashboard. Settings are saved on the server and synchronize across browsers every five seconds while visible. **Clear results** clears weather search results while keeping the selected location. See [dashboard preferences](docs/dashboard.md) and [Linkwarden setup](docs/linkwarden.md).
 
 ## Documentation
 

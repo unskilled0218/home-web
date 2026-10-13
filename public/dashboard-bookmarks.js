@@ -24,6 +24,7 @@ export function createBookmarkController({ onChange, fetchImpl = fetch, now = Da
   let tree = []; let discovered = false; let error = ''; let blocked = false; let treeStale = false;
   let profile = 'desktop-expanded'; let hidden = false; let visible = true; let disposed = false;
   let generation = 0; let authority = 0; let timer; let discovery; let recovery; let recoveryUsed = false; let sourceRecoveryUsed = false; let mutation;
+  let configurationEpoch = 0;
   const folders = new Map(); const overrides = new Map(); const requests = new Set(); const queue = []; const active = new Map();
   const current = (job) => !disposed && job.generation === generation && folders.get(job.id) === job.folder;
   const open = (folder) => overrides.get(profile)?.get(folder.node.selectionId) ?? defaultFolderOpen(profile, folder.depth);
@@ -66,7 +67,10 @@ export function createBookmarkController({ onChange, fetchImpl = fetch, now = Da
     } finally { cancel(deadline); requests.delete(entry); }
   }
   function adopt(next) {
+    const effective = { ...next, ...(blocked && next.configurationId === status.configurationId && { needsReauthentication: status.needsReauthentication, accessDenied: status.accessDenied }) };
+    if (next.configurationId === status.configurationId && (!discovered || ['configured', 'encryptionReady', 'needsReauthentication', 'accessTokenPresent', 'baseUrl', 'username'].some((key) => effective[key] !== status[key]))) configurationEpoch++;
     if (next.configurationId !== status.configurationId) {
+      configurationEpoch++;
       invalidateReads({ keepDiscovery: true }); folders.clear(); tree = []; overrides.clear(); blocked = false; treeStale = false;
     }
     status = { ...next, ...(blocked && { needsReauthentication: status.needsReauthentication, accessDenied: status.accessDenied }) };
@@ -91,6 +95,7 @@ export function createBookmarkController({ onChange, fetchImpl = fetch, now = Da
     error = ''; treeStale = false;
   }
   function retire(failure) {
+    configurationEpoch++;
     const authentication = failure.code === 'LINKWARDEN_AUTHENTICATION_REQUIRED' || failure.status === 401;
     invalidateReads(); tree = []; folders.clear(); blocked = true;
     status = { ...status, needsReauthentication: authentication, accessDenied: !authentication };
@@ -200,7 +205,7 @@ export function createBookmarkController({ onChange, fetchImpl = fetch, now = Da
   }
   async function mutate(method, credentials) {
     if (mutation || disposed) throw new Error('A Linkwarden connection change is already pending.');
-    invalidateReads(); const owner = {}; mutation = owner; emit();
+    configurationEpoch++; invalidateReads(); const owner = {}; mutation = owner; emit();
     try {
       const data = await api('/api/linkwarden', { method, body: credentials, mutation: true });
       if (mutation !== owner || disposed) return;
@@ -209,7 +214,7 @@ export function createBookmarkController({ onChange, fetchImpl = fetch, now = Da
       else { adopt(normalizeStatus(data.linkwarden)); installTree(data); }
       error = ''; emit();
     } finally {
-      if (mutation === owner) { mutation = undefined; emit(); queueRequired(); arm(); }
+      if (mutation === owner) { configurationEpoch++; mutation = undefined; emit(); queueRequired(); arm(); }
     }
   }
   return {
@@ -224,6 +229,17 @@ export function createBookmarkController({ onChange, fetchImpl = fetch, now = Da
     disconnect: () => mutate('DELETE'),
     setVisible(value) { if (visible === value) return; visible = value; if (!visible) invalidateReads(); else void refresh(); },
     getState: snapshot,
+    captureConfigurationObserver() {
+      const epoch = configurationEpoch; const pending = Boolean(mutation);
+      return (metadata) => {
+        if (disposed || pending || mutation || epoch !== configurationEpoch || !metadata.available) return;
+        const next = normalizeStatus(metadata);
+        const keys = ['configured', 'configurationId', 'encryptionReady', 'accessTokenPresent', 'baseUrl', 'username'];
+        if (discovered && keys.every((key) => next[key] === status[key])) return;
+        configurationEpoch++; invalidateReads(); adopt(next);
+        if (next.configured && !blocked) void refresh(); else { emit(); arm(); }
+      };
+    },
     dispose() { disposed = true; invalidateReads(); for (const request of requests) request.controller.abort(); tree = []; folders.clear(); overrides.clear(); }
   };
 }

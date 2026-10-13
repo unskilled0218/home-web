@@ -127,6 +127,9 @@ input[type=color] { min-height: 2.5rem; }
   #settings-dialog .settings-footer { flex-wrap: wrap; padding: .75rem .85rem; gap: .6rem; }
   #settings-dialog #settings-status { flex-basis: 100%; }
   #settings-dialog .settings-save { width: 100%; }
+  #settings-dialog .settings-footer { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  #settings-dialog #settings-status { grid-column: 1 / -1; }
+  #settings-dialog #reload-shared-preferences { font-size: .75rem; }
 }
 @media (max-width: 600px) {
   .bookmarks-shown #dashboard-content { display: contents; }

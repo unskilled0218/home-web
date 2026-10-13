@@ -1,0 +1,86 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { createSettingsSync, SHARED_SETTINGS_KEY } from '../public/dashboard-settings-sync.js';
+import { normalizeDashboardPreferences } from '../public/dashboard-helpers.js';
+
+const snapshot = (overrides = {}) => ({ initialized: true, revision: 1, preferences: normalizeDashboardPreferences(), integrations: { weather: { available: true, revision: 0, location: null }, calendar: { available: true, configured: false, configurationId: null }, linkwarden: { available: true, configured: false, configurationId: null } }, ...overrides });
+const settle = async () => { for (let i = 0; i < 8; i++) await new Promise(setImmediate); };
+function setup(t, { handler, values = new Map(), brokenStorage = false } = {}) {
+  const calls = []; const applied = []; const observed = []; const tasks = new Map(); const epochs = { weather: 0, calendar: 0, linkwarden: 0 }; let key = 0;
+  const storage = { getItem: (name) => values.get(name) ?? null, setItem(name, value) { if (brokenStorage) throw new Error('storage'); values.set(name, value); }, removeItem: (name) => values.delete(name) };
+  const client = createSettingsSync({ storage, schedule(fn, delay) { tasks.set(++key, { fn, delay }); return key; }, cancel(id) { tasks.delete(id); }, captureObservers() { return Object.fromEntries(Object.entries(epochs).map(([name, epoch]) => [name, (metadata) => { if (epochs[name] === epoch) observed.push({ name, metadata }); }])); }, onSnapshot(value, observers) { applied.push(value); for (const [name, apply] of Object.entries(observers)) apply(value.integrations[name]); }, fetchImpl: async (url, options) => { calls.push({ url, options }); return handler ? handler(url, options) : Response.json(snapshot()); } });
+  t.after(() => client.dispose());
+  return { client, values, calls, applied, observed, epochs, tasks, run(delay) { const [id, task] = [...tasks].find(([, value]) => value.delay === delay) ?? []; assert.ok(task, `timer ${delay} exists`); tasks.delete(id); task.fn(); } };
+}
+
+test('one settings owner coalesces reads, polls at five seconds, pauses, and resumes', async (t) => {
+  let release; const env = setup(t, { handler: () => new Promise((resolve) => { release = () => resolve(Response.json(snapshot())); }) });
+  const first = env.client.start(); const second = env.client.refresh(); assert.equal(first, second); assert.equal(env.calls.length, 1);
+  release(); await first; assert.equal(env.tasks.size, 1); assert.equal(env.client.getState().confirmed, true);
+  env.client.setVisible(false); assert.equal(env.tasks.size, 0);
+  env.client.setVisible(true); release(); await settle(); assert.equal(env.tasks.size, 1); assert.equal(env.calls.length, 2);
+  env.run(5000); release(); await settle(); assert.equal(env.calls.length, 3); assert.equal(env.tasks.size, 1);
+});
+
+test('legacy migration uses the server winner and cache cannot initialize or override the server', async (t) => {
+  const values = new Map([['dashboard.preferences.v1', JSON.stringify({ color: '#123456', timeScale: 1.25 })]]);
+  const winner = snapshot({ preferences: normalizeDashboardPreferences({ color: '#abcdef' }) });
+  const env = setup(t, { values, handler: (url) => Response.json(url.endsWith('/initialize') ? { ...winner, created: false } : snapshot({ initialized: false, revision: 0 })) });
+  await env.client.start(); assert.equal(env.calls.length, 2); assert.equal(env.applied[0].preferences.color, '#abcdef'); assert.equal(values.has('dashboard.preferences.v1'), false);
+  const payload = JSON.parse(env.calls[1].options.body); assert.equal(payload.preferences.timeScale, 1.3); assert.equal(Object.hasOwn(payload.preferences, 'location'), false);
+  const cached = JSON.parse(values.get(SHARED_SETTINGS_KEY)); assert.equal(cached.preferences.color, '#abcdef');
+  const fresh = setup(t, { values, handler: () => Response.json(snapshot({ preferences: normalizeDashboardPreferences({ color: '#987654' }) })) });
+  assert.equal(fresh.client.getState().cache, true); await fresh.client.start(); assert.equal(fresh.calls.length, 1); assert.equal(fresh.client.getState().snapshot.preferences.color, '#987654');
+});
+
+test('fresh uninitialized preview leaves storage unchanged and reset authority clears an older cache', async (t) => {
+  const values = new Map([[SHARED_SETTINGS_KEY, JSON.stringify({ schema: 1, initialized: true, revision: 40, preferences: normalizeDashboardPreferences({ color: '#123456' }) })]]);
+  const env = setup(t, { values, handler: () => Response.json(snapshot({ initialized: false, revision: 0 })) });
+  await env.client.start(); assert.equal(env.calls.length, 1); assert.equal(values.has(SHARED_SETTINGS_KEY), false); assert.equal(env.client.getState().snapshot.revision, 0);
+});
+
+test('successful preference confirmation does not depend on cache writes or stale service observers', async (t) => {
+  let finish; const env = setup(t, { brokenStorage: true, handler: (_url, options) => options.method === 'PUT' ? new Promise((resolve) => { finish = () => resolve(Response.json(snapshot({ revision: 2, preferences: normalizeDashboardPreferences({ color: '#123456' }) }))); }) : Response.json(snapshot()) });
+  await env.client.start(); env.observed.length = 0;
+  const save = env.client.save(normalizeDashboardPreferences({ color: '#123456' }), 1); env.epochs.calendar++;
+  finish(); await save; assert.equal(env.client.getState().snapshot.revision, 2); assert.equal(env.client.getState().error, ''); assert.equal(env.observed.some((event) => event.name === 'calendar'), false);
+});
+
+test('offline write failure cannot publish local-only success and conflicts can update confirmation without rebasing drafts', async (t) => {
+  let mode = 'offline'; const env = setup(t, { handler: (_url, options) => {
+    if (options.method !== 'PUT') return Response.json(snapshot());
+    if (mode === 'offline') throw new Error('offline');
+    return Response.json({ error: 'Conflict', snapshot: snapshot({ revision: 3, preferences: normalizeDashboardPreferences({ seconds: false }) }) }, { status: 409 });
+  } });
+  await env.client.start(); await assert.rejects(env.client.save(normalizeDashboardPreferences({ color: '#123456' }), 1), /offline/); assert.equal(env.client.getState().snapshot.revision, 1);
+  mode = 'conflict'; await assert.rejects(env.client.save(normalizeDashboardPreferences({ color: '#123456' }), 1), { status: 409 });
+  assert.equal(env.client.getState().snapshot.revision, 3); assert.equal(env.client.getState().snapshot.preferences.color, '#000000'); assert.equal(env.tasks.size, 1);
+});
+
+test('old reads cannot replace a committed save, including visibility changes during a write', async (t) => {
+  let old; let write; const env = setup(t, { handler: (_url, options) => options.method === 'PUT' ? new Promise((resolve) => { write = () => resolve(Response.json(snapshot({ revision: 2 }))); }) : new Promise((resolve) => { old = () => resolve(Response.json(snapshot())); }) });
+  const read = env.client.start(); await settle(); const saved = env.client.save(normalizeDashboardPreferences(), 1); env.client.setVisible(false); write(); await saved;
+  old(); await read; await settle(); assert.equal(env.client.getState().snapshot.revision, 2); assert.equal(env.tasks.size, 0);
+});
+
+test('per-service metadata deferral leaves preference polling live and discards observations captured during actions', async (t) => {
+  let response; let pending = false;
+  const env = setup(t, { handler: () => pending ? new Promise((resolve) => { response = () => resolve(Response.json(snapshot({ revision: 2 }))); }) : Response.json(snapshot()) });
+  await env.client.start(); env.observed.length = 0;
+  const finishCalendar = env.client.beginIntegrationAction('calendar'); const finishBook = env.client.beginIntegrationAction('linkwarden');
+  pending = true; env.run(5000); await settle(); finishCalendar(); response(); await settle();
+  assert.equal(env.applied.at(-1).revision, 2); assert.equal(env.observed.some((event) => event.name === 'calendar'), false); assert.equal(env.observed.some((event) => event.name === 'weather'), true);
+  pending = false; response?.(); await settle(); finishBook(); await settle(); assert.equal(env.tasks.size, 1);
+});
+
+test('snapshot guards also protect initialization and conflict metadata', async (t) => {
+  let release;
+  const migration = setup(t, { values: new Map([['dashboard.preferences.v1', JSON.stringify({ color: '#123456' })]]), handler: (url) => url.endsWith('/initialize') ? new Promise((resolve) => { release = () => resolve(Response.json(snapshot())); }) : Response.json(snapshot({ initialized: false, revision: 0 })) });
+  const loading = migration.client.start(); await settle(); migration.epochs.linkwarden++; release(); await loading;
+  assert.equal(migration.client.getState().confirmed, true); assert.equal(migration.observed.some((event) => event.name === 'linkwarden'), false);
+});
+
+test('request deadlines release ownership and malformed snapshots retain the last confirmed configuration', async (t) => {
+  const timeout = setup(t, { handler: () => new Promise(() => {}) }); const read = timeout.client.start(); timeout.run(10000); await read; assert.equal(timeout.tasks.size, 1); assert.match(timeout.client.getState().error, /timed out/);
+  let bad = false; const env = setup(t, { handler: () => Response.json(bad ? { preferences: {} } : snapshot()) }); await env.client.start(); bad = true; await env.client.refresh(); assert.equal(env.client.getState().snapshot.revision, 1); assert.ok(env.client.getState().error);
+});

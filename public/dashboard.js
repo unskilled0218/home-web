@@ -1,4 +1,4 @@
-import { MOBILE_MEDIA_QUERY, SETTINGS_KEY, clockText, loadSettings, normalizeSettings, resolveDisplayPreferences, sampleHours, temperatureRange, weatherDescription, weatherIconFile } from './dashboard-helpers.js';
+import { MOBILE_MEDIA_QUERY, PREFERENCE_KEYS, clockText, normalizeDashboardPreferences, resolveDisplayPreferences, sampleHours, temperatureRange, weatherDescription, weatherIconFile } from './dashboard-helpers.js';
 import { createWeatherController, searchLocations } from './dashboard-weather.js';
 import { createPhotoController } from './dashboard-photos.js';
 import { createCalendarController, formatCalendarEvent } from './dashboard-calendar.js';
@@ -7,6 +7,7 @@ import { formatWeatherUpdated } from './weather-data.js';
 import { createBookmarkController } from './dashboard-bookmarks.js';
 import { createBookmarkTree } from './dashboard-bookmark-tree.js';
 import { safeBookmarkUrl } from './bookmark-data.js';
+import { createSettingsSync } from './dashboard-settings-sync.js';
 
 const $ = (id) => document.getElementById(id);
 const currentWeatherSubValues = document.createElement('div');
@@ -14,7 +15,8 @@ currentWeatherSubValues.id = 'current-weather-subvalues';
 
 let storage;
 try { storage = window.localStorage; } catch { /* Defaults work when browser storage is blocked. */ }
-let settings = { ...loadSettings(storage), location: null };
+let settings = { ...normalizeDashboardPreferences(), location: null };
+let servicesStarted = false; let draftRevision = null; let draftDirty = false; let preferenceMessage = '';
 let clockTimer; let searchController; let searchGeneration = 0; let weatherState = {}; let calendarState = {}; let animations = [];
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 const mobileViewport = matchMedia(MOBILE_MEDIA_QUERY);
@@ -31,11 +33,6 @@ const bookmarks = createBookmarkController({ onChange(state) {
   $('linkwarden-token').required = state.needsReauthentication || !state.accessTokenPresent;
   $('disconnect-linkwarden').disabled = state.mutationPending || (!state.configured && !state.accessTokenPresent);
 } });
-
-function save() {
-  try { storage.setItem(SETTINGS_KEY, JSON.stringify(settings)); $('settings-status').textContent = 'Preferences saved in this browser.'; }
-  catch { $('settings-status').textContent = 'Browser storage is unavailable. Preferences apply for this session only.'; }
-}
 
 function fillForm() {
   for (const control of preferences.elements) {
@@ -95,7 +92,7 @@ function renderWeather(state = weatherState) {
   $('current-weather-values').append(currentWeatherSubValues);
 }
 
-const weather = createWeatherController({ onChange: renderWeather });
+const weather = createWeatherController({ onChange: renderWeather, autoStart: false });
 function renderCalendar(state = calendarState) {
   calendarState = state;
   const list = $('calendar-events');
@@ -121,7 +118,7 @@ function renderCalendar(state = calendarState) {
     list.append(item);
   }
 }
-const calendar = createCalendarController({ onChange: renderCalendar });
+const calendar = createCalendarController({ onChange: renderCalendar, autoStart: false });
 function stopAnimations() { animations.forEach((animation) => animation.cancel()); animations = []; }
 function clearPhotos() { stopAnimations(); $('photos').replaceChildren(); $('photo-caption').textContent = ''; }
 const photos = createPhotoController({
@@ -172,27 +169,61 @@ function applyBookmarkPresentation() {
   bookmarks.setPresentation({ mobile: mobileViewport.matches, mode: settings.mobileBookmarksMode, hidden });
 }
 
-function apply() {
-  document.body.style.backgroundColor = settings.color;
-  applyPresentation();
-  photos.configure(settings); weather.configure(settings);
-  calendar.configure({ calendarVisible: settings.calendarVisible || settings.mobileCalendarVisible });
-  renderWeather(); renderCalendar();
-}
+const settingsSync = createSettingsSync({ storage,
+  captureObservers: () => ({ weather: weather.captureConfigurationObserver(), calendar: calendar.captureConfigurationObserver(), linkwarden: bookmarks.captureConfigurationObserver() }),
+  onSnapshot(snapshot, observers) {
+    const previous = settings;
+    settings = { ...snapshot.preferences, location: settings.location };
+    const changed = (keys) => keys.some((key) => settings[key] !== previous[key]);
+    const first = !servicesStarted;
+    if (first || changed(['position', 'scale', 'timeVisible', 'timeScale', 'weatherVisible', 'weatherScale', 'calendarVisible', 'calendarScale', 'mobileTimeVisible', 'mobileTimeScale', 'mobileWeatherVisible', 'mobileWeatherScale', 'mobileCalendarVisible', 'mobileCalendarScale'])) applyPresentation();
+    else if (changed(['timezone', 'dateStyle', 'hour12', 'seconds'])) startClock();
+    if (first || changed(['mobileBookmarksMode', 'hideBookmarksFullscreen'])) applyBookmarkPresentation();
+    document.body.style.backgroundColor = settings.color;
+    if (first || changed(['order', 'interval', 'duration', 'animation', 'opacity', 'background', 'color', 'blur', 'imageInfo'])) photos.configure(settings);
+    if (first || changed(['timezone', 'temperature', 'wind', 'precipitation'])) weather.configure(settings);
+    if (first) {
+      servicesStarted = true; void photos.load();
+      if (!snapshot.integrations.weather.available) void weather.refresh();
+      if (!snapshot.integrations.calendar.available) void calendar.start();
+      if (!snapshot.integrations.linkwarden.available) void bookmarks.start();
+    }
+    observers.weather?.(snapshot.integrations.weather);
+    const enabled = settings.calendarVisible || settings.mobileCalendarVisible;
+    if (!observers.calendar?.(snapshot.integrations.calendar, enabled) && changed(['calendarVisible', 'mobileCalendarVisible'])) calendar.configure({ calendarVisible: enabled });
+    observers.linkwarden?.(snapshot.integrations.linkwarden);
+    if (changed(['hour12'])) renderWeather();
+    if (changed(['timezone', 'hour12'])) renderCalendar();
+    if (PREFERENCE_KEYS.some((key) => settings[key] !== previous[key])) preferenceMessage = '';
+    if (!dialog.open || (draftRevision === null && !draftDirty)) { fillForm(); draftRevision = snapshot.revision; }
+  },
+  onState(state) {
+    const saving = state.pending;
+    for (const control of preferences.elements) if (PREFERENCE_KEYS.includes(control.name)) control.disabled = saving;
+    $('save-preferences').disabled = saving || !state.confirmed || (dialog.open && draftRevision === null);
+    $('reload-shared-preferences').disabled = saving || !state.confirmed;
+    $('settings-status').textContent = saving ? 'Saving shared preferences…' : state.error ? state.error : preferenceMessage || (state.confirmed ? 'Preferences are shared across all browsers.' : state.cache ? 'Using cached shared preferences while loading the server.' : 'Loading shared preferences…');
+  }
+});
 
-preferences.addEventListener('submit', (event) => {
+dialog.addEventListener('input', (event) => { if (event.target.form === preferences) draftDirty = true; });
+preferences.addEventListener('submit', async (event) => {
   event.preventDefault();
   const invalid = [...preferences.elements].find((control) => control.willValidate && !control.validity.valid);
   if (invalid) { settingsTabs.reveal(invalid); invalid.reportValidity(); return; }
-  const next = { ...settings };
+  const next = {};
   for (const control of preferences.elements) {
-    if (!(control.name in settings)) continue;
+    if (!PREFERENCE_KEYS.includes(control.name)) continue;
     next[control.name] = control.type === 'checkbox' ? control.checked : control.type === 'number' ? control.valueAsNumber : control.value;
   }
-  const previous = settings;
-  settings = normalizeSettings(next); save(); fillForm();
-  const sharedChanged = Object.keys(settings).some((name) => !['mobileBookmarksMode', 'hideBookmarksFullscreen'].includes(name) && JSON.stringify(settings[name]) !== JSON.stringify(previous[name]));
-  if (sharedChanged) apply(); else applyBookmarkPresentation();
+  try {
+    const saved = await settingsSync.save(normalizeDashboardPreferences(next), draftRevision);
+    draftRevision = saved.revision; draftDirty = false; fillForm(); preferenceMessage = 'Preferences saved for all browsers.';
+    $('settings-status').textContent = preferenceMessage;
+  } catch (error) { $('settings-status').textContent = error.message || 'Shared preferences could not be saved.'; }
+});
+$('reload-shared-preferences').addEventListener('click', () => {
+  fillForm(); draftRevision = settingsSync.getState().snapshot.revision; draftDirty = false; preferenceMessage = 'Shared preferences reloaded. Reapply your changes before saving.'; $('settings-status').textContent = preferenceMessage;
 });
 function fillCalendarForm() {
   const state = calendar.getState();
@@ -211,9 +242,10 @@ function setCalendarMutationPending(pending) {
   $('disconnect-calendar').disabled = pending || (!calendar.getState().configured && !calendar.getState().needsReauthentication);
 }
 $('open-settings').addEventListener('click', () => {
+  draftDirty = false; draftRevision = settingsSync.getState().confirmed ? settingsSync.getState().snapshot.revision : null;
   fillForm(); fillCalendarForm(); fillLinkwardenForm(); $('calendar-settings-status').textContent = '';
   settingsTabs.select('settings-tab-general');
-  void weather.refresh();
+  void settingsSync.refresh();
   dialog.showModal();
   $('settings-tab-general').focus();
 });
@@ -232,6 +264,7 @@ $('location-search').addEventListener('submit', async (event) => {
       const item = document.createElement('li'); const button = element('button', location.label); button.type = 'button';
       button.disabled = Boolean(weatherState.mutationPending) || !weatherState.discovered;
       button.addEventListener('click', async () => {
+        const release = settingsSync.beginIntegrationAction('weather');
         const resultGeneration = searchGeneration;
         $('location-settings-status').textContent = 'Saving weather location…';
         try {
@@ -239,6 +272,7 @@ $('location-search').addEventListener('submit', async (event) => {
           $('location-settings-status').textContent = `Saved ${saved.label} on this server.`;
           if (resultGeneration === searchGeneration) $('search-status').textContent = `Selected ${saved.label}.`;
         } catch (error) { $('location-settings-status').textContent = error.message || 'Weather location could not be saved.'; }
+        finally { release(); }
       });
       item.append(button); $('location-results').append(item);
     }
@@ -248,37 +282,43 @@ $('clear-location').addEventListener('click', () => { cancelSearch(); $('locatio
 
 $('calendar-connection').addEventListener('submit', async (event) => {
   event.preventDefault();
+  const release = settingsSync.beginIntegrationAction('calendar');
   setCalendarMutationPending(true); $('calendar-settings-status').textContent = 'Connecting to Baikal…';
   try {
     await calendar.connect({ serverUrl: $('calendar-url').value, username: $('calendar-username').value, password: $('calendar-password').value });
     const state = calendar.getState();
     if (state.configured && !state.error) { $('calendar-settings-status').textContent = 'Calendar connected.'; fillCalendarForm(); dialog.close(); }
     else $('calendar-settings-status').textContent = state.error || 'Calendar could not be connected.';
-  } finally { setCalendarMutationPending(false); }
+  } finally { setCalendarMutationPending(false); release(); }
 });
 $('disconnect-calendar').addEventListener('click', async () => {
   if (!confirm('Disconnect the Baikal calendar and delete its saved credentials?')) return;
+  const release = settingsSync.beginIntegrationAction('calendar');
   setCalendarMutationPending(true); $('calendar-settings-status').textContent = 'Disconnecting calendar…';
   try {
     await calendar.disconnect();
     const state = calendar.getState();
     $('calendar-settings-status').textContent = state.configured ? (state.error || 'Calendar could not be disconnected.') : 'Calendar disconnected.';
     fillCalendarForm();
-  } finally { setCalendarMutationPending(false); }
+  } finally { setCalendarMutationPending(false); release(); }
 });
 
 $('linkwarden-connection').addEventListener('submit', async (event) => {
   event.preventDefault(); $('linkwarden-settings-status').textContent = 'Connecting to Linkwarden…';
+  const release = settingsSync.beginIntegrationAction('linkwarden');
   try {
     await bookmarks.connect({ url: $('linkwarden-url').value, username: $('linkwarden-username').value, accessToken: $('linkwarden-token').value });
     $('linkwarden-token').value = ''; $('linkwarden-settings-status').textContent = 'Linkwarden connected.';
   } catch (error) { $('linkwarden-settings-status').textContent = error.message || 'Linkwarden could not be connected.'; }
+  finally { release(); }
 });
 $('disconnect-linkwarden').addEventListener('click', async () => {
   if (!confirm('Disconnect Linkwarden and delete its saved access token?')) return;
+  const release = settingsSync.beginIntegrationAction('linkwarden');
   $('linkwarden-settings-status').textContent = 'Disconnecting Linkwarden…';
   try { await bookmarks.disconnect(); fillLinkwardenForm(); $('linkwarden-settings-status').textContent = 'Linkwarden disconnected.'; }
   catch (error) { $('linkwarden-settings-status').textContent = error.message || 'Linkwarden could not be disconnected.'; }
+  finally { release(); }
 });
 
 function fullscreenState() { $('fullscreen').textContent = document.fullscreenElement ? 'Exit fullscreen' : 'Enter fullscreen'; applyBookmarkPresentation(); }
@@ -288,11 +328,12 @@ $('fullscreen').addEventListener('click', async () => {
   catch { $('page-status').textContent = 'Fullscreen could not be enabled in this browser.'; }
 });
 document.addEventListener('fullscreenchange', fullscreenState);
-document.addEventListener('visibilitychange', () => { startClock(); photos.setVisible(!document.hidden); weather.setVisible(!document.hidden); calendar.setVisible(!document.hidden); bookmarks.setVisible(!document.hidden); if (document.hidden) stopAnimations(); });
+document.addEventListener('visibilitychange', () => { startClock(); photos.setVisible(!document.hidden); weather.setVisible(!document.hidden); calendar.setVisible(!document.hidden); bookmarks.setVisible(!document.hidden); settingsSync.setVisible(!document.hidden); if (document.hidden) stopAnimations(); });
 reducedMotion.addEventListener('change', () => { stopAnimations(); photos.configure(settings); });
 mobileViewport.addEventListener('change', applyPresentation);
-window.addEventListener('pagehide', (event) => { clearInterval(clockTimer); cancelSearch(); weather.dispose(); photos.dispose(); if (event.persisted) bookmarks.setVisible(false); else { calendar.dispose(); bookmarks.dispose(); } });
-window.addEventListener('pageshow', (event) => { if (event.persisted) { void photos.load(); applyPresentation(); weather.configure(settings); void weather.refresh(); void calendar.refresh(); bookmarks.setVisible(!document.hidden); } });
+window.addEventListener('pagehide', (event) => { clearInterval(clockTimer); cancelSearch(); weather.dispose(); photos.dispose(); if (event.persisted) { bookmarks.setVisible(false); settingsSync.setVisible(false); } else { calendar.dispose(); bookmarks.dispose(); settingsSync.dispose(); } });
+window.addEventListener('pageshow', (event) => { if (event.persisted) { void photos.load(); applyPresentation(); weather.configure(settings); void weather.refresh(); void calendar.refresh(); bookmarks.setVisible(!document.hidden); settingsSync.setVisible(!document.hidden); } });
 photos.setVisible(!document.hidden); weather.setVisible(!document.hidden); calendar.setVisible(!document.hidden);
 bookmarks.setVisible(!document.hidden);
-fillForm(); apply(); void photos.load(); void bookmarks.start();
+settings = { ...settingsSync.getState().snapshot.preferences, location: null };
+fillForm(); document.body.style.backgroundColor = settings.color; applyPresentation(); settingsSync.setVisible(!document.hidden); void settingsSync.start();

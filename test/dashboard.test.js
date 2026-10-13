@@ -131,7 +131,7 @@ test('Settings associates all preferences with one form and keeps service forms 
   const controls = [...html.matchAll(/<(?:input|select)\b[^>]*form="preferences"[^>]*>/g)];
   const names = controls.map((control) => /name="([^"]+)"/.exec(control[0])?.[1]);
   assert.deepEqual(names.sort(), Object.keys(normalizeSettings()).filter((name) => name !== 'location').sort());
-  assert.match(html, /<button[^>]*type="submit"[^>]*form="preferences">Save preferences<\/button>/);
+  assert.match(html, /<button[^>]*type="submit"[^>]*form="preferences"[^>]*>Save preferences<\/button>/);
   for (const id of ['location-search', 'calendar-connection', 'linkwarden-connection']) {
     const form = html.match(new RegExp(`<form id="${id}">[\\s\\S]*?<\\/form>`))?.[0];
     assert.ok(form, `${id} exists`);

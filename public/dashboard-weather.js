@@ -27,9 +27,10 @@ export async function searchLocations(query, options) {
 }
 
 // One browser owner reads server snapshots; only the server contacts forecast providers.
-export function createWeatherController({ onChange, fetchImpl = fetch, now = Date.now, schedule = setTimeout, cancel = clearTimeout, timeoutMs = 10000 }) {
+export function createWeatherController({ onChange, fetchImpl = fetch, now = Date.now, schedule = setTimeout, cancel = clearTimeout, timeoutMs = 10000, autoStart = true }) {
   let settings; let zone; let generation = 0; let timer; let controller; let mutationController; let visible = true; let disposed = false; let mutationPending = false; let lastEnsure = -Infinity;
   let state = { location: null, revision: 0, forecast: null, air: null, discovered: false, refreshing: false };
+  let configurationEpoch = 0;
   const emit = () => onChange({ ...state, forecast: presentForecast(state.forecast, settings), loading: !state.discovered || state.refreshing, mutationPending });
   function stopRead() { generation++; cancel(timer); timer = undefined; controller?.abort(); }
   function arm() {
@@ -55,6 +56,7 @@ export function createWeatherController({ onChange, fetchImpl = fetch, now = Dat
     try {
       const snapshot = validateWeatherSnapshot(await api(`/api/weather?timezone=${encodeURIComponent(zone)}`, { signal: controller.signal }));
       if (request !== generation || snapshot.revision < state.revision || snapshot.timezone !== zone) return;
+      if (!state.discovered || snapshot.revision !== state.revision) configurationEpoch++;
       state = { ...snapshot, discovered: true, serviceError: false }; emit();
       if (ensure && now() - lastEnsure >= 60000) {
         lastEnsure = now();
@@ -75,24 +77,24 @@ export function createWeatherController({ onChange, fetchImpl = fetch, now = Dat
       if (zone === nextZone) { emit(); return; }
       zone = nextZone; stopRead(); lastEnsure = -Infinity;
       state = { ...state, forecast: null, forecastUpdated: null, forecastError: false, refreshing: false };
-      emit(); void refresh();
+      emit(); if (autoStart || state.discovered) void refresh();
     },
     refresh,
     async saveLocation(location) {
       if (mutationPending || !state.discovered || disposed) throw new Error('Wait for the saved weather location to load.');
-      stopRead(); mutationPending = true; mutationController = new AbortController(); emit();
+      configurationEpoch++; stopRead(); mutationPending = true; mutationController = new AbortController(); emit();
       try {
         const saved = validateWeatherSnapshot(await api('/api/weather/location', { method: 'PUT', body: { location, revision: state.revision }, signal: mutationController.signal }));
         if (disposed) return saved.location;
         const sameCoordinates = state.location?.latitude === saved.location.latitude && state.location?.longitude === saved.location.longitude;
         state = { ...state, location: saved.location, revision: saved.revision, configured: true, serviceError: false, ...(!sameCoordinates && { forecast: null, air: null, forecastUpdated: null, airUpdated: null, forecastError: false, airError: false }) };
-        mutationPending = false; lastEnsure = -Infinity; emit(); await refresh();
+        lastEnsure = -Infinity; emit();
         return saved.location;
       } catch (error) {
         mutationPending = false;
-        if (!disposed) { emit(); if (error.status === 409) await refresh(); }
+        if (!disposed) emit();
         throw error;
-      } finally { mutationPending = false; arm(); }
+      } finally { configurationEpoch++; mutationPending = false; if (!disposed) { emit(); void refresh(); } }
     },
     setVisible(next) {
       if (visible === next) return;
@@ -100,6 +102,18 @@ export function createWeatherController({ onChange, fetchImpl = fetch, now = Dat
       if (visible) { disposed = false; void refresh(); } else stopRead();
     },
     dispose() { disposed = true; stopRead(); mutationController?.abort(); },
-    getState: () => ({ ...state })
+    getState: () => ({ ...state }),
+    captureConfigurationObserver() {
+      const epoch = configurationEpoch; const pending = mutationPending;
+      return (metadata) => {
+        if (disposed || pending || mutationPending || epoch !== configurationEpoch || !metadata.available) return;
+        const unchangedLocation = ['latitude', 'longitude', 'label'].every((key) => metadata.location?.[key] === state.location?.[key]);
+        if (state.discovered && metadata.revision === state.revision && unchangedLocation) return;
+        const same = state.location?.latitude === metadata.location?.latitude && state.location?.longitude === metadata.location?.longitude;
+        configurationEpoch++; stopRead();
+        state = { ...state, discovered: true, configured: Boolean(metadata.location), location: metadata.location, revision: metadata.revision, ...(!same && { forecast: null, air: null, forecastUpdated: null, airUpdated: null }) };
+        emit(); void refresh();
+      };
+    }
   };
 }

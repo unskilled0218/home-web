@@ -38,6 +38,38 @@ export function loadSettings(storage) {
   try { return normalizeSettings(JSON.parse(storage.getItem(SETTINGS_KEY))); } catch { return normalizeSettings(); }
 }
 
+export const PREFERENCE_KEYS = Object.keys(normalizeSettings({}, 'UTC')).filter((key) => key !== 'location');
+export function normalizeDashboardPreferences(input = {}) {
+  const result = normalizeSettings(input, 'UTC'); delete result.location;
+  for (const key of PREFERENCE_KEYS) if (typeof result[key] === 'number') result[key] = ['interval', 'blur'].includes(key) ? Math.round(result[key]) : Math.round(result[key] * 10) / 10;
+  result.duration = Math.min(result.duration, 10, result.interval - 1);
+  return result;
+}
+export function validateDashboardPreferences(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length !== PREFERENCE_KEYS.length || Object.keys(value).some((key) => !PREFERENCE_KEYS.includes(key))) throw new Error('Invalid dashboard preference fields.');
+  const canonical = normalizeDashboardPreferences(value);
+  for (const key of PREFERENCE_KEYS) if (value[key] !== canonical[key]) throw new Error(`Invalid dashboard preference: ${key}.`);
+  return canonical;
+}
+export function legacyDashboardPreferences(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const defaults = normalizeDashboardPreferences();
+  if (!PREFERENCE_KEYS.some((key) => Object.hasOwn(value, key) && typeof value[key] === typeof defaults[key] && (typeof value[key] !== 'number' || Number.isFinite(value[key])))) return null;
+  return normalizeDashboardPreferences(value);
+}
+export function validateDashboardSnapshot(value) {
+  if (!value || typeof value.initialized !== 'boolean' || !Number.isSafeInteger(value.revision) || value.revision < 0 || value.initialized !== (value.revision > 0)) throw new Error('Invalid shared settings revision.');
+  const preferences = validateDashboardPreferences(value.preferences);
+  if (!value.integrations || !['weather', 'calendar', 'linkwarden'].every((key) => typeof value.integrations[key]?.available === 'boolean')) throw new Error('Invalid shared integration metadata.');
+  for (const key of ['calendar', 'linkwarden']) {
+    const metadata = value.integrations[key];
+    if (metadata.available && (typeof metadata.configured !== 'boolean' || (metadata.configurationId !== null && (typeof metadata.configurationId !== 'string' || !/^[A-Za-z0-9_-]{16,128}$/.test(metadata.configurationId))))) throw new Error('Invalid shared configuration identity.');
+  }
+  const weather = value.integrations.weather;
+  if (weather.available && (!Number.isSafeInteger(weather.revision) || weather.revision < 0 || (weather.location !== null && !normalizeLocation(weather.location)))) throw new Error('Invalid shared weather location.');
+  return { ...value, preferences };
+}
+
 // Projection changes presentation without replacing either saved profile.
 export function resolveDisplayPreferences(settings, mobile) {
   return {

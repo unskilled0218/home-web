@@ -90,6 +90,7 @@ function statusFields(value) {
   const status = value && typeof value === 'object' ? value : {};
   return {
     configured: status.configured === true,
+    configurationId: typeof status.configurationId === 'string' ? status.configurationId : null,
     encryptionReady: status.encryptionReady !== false,
     needsReauthentication: status.needsReauthentication === true || status.reauthenticationRequired === true,
     serverUrl: safeText(status.serverUrl, 2048),
@@ -113,6 +114,7 @@ async function responseJson(response) {
   if (!response.ok) {
     const error = new Error(safeText(body?.error ?? body?.message, 240) || 'Calendar request failed.');
     error.status = response.status;
+    error.code = body?.code;
     throw error;
   }
   return body && typeof body === 'object' && !Array.isArray(body) ? body : {};
@@ -123,7 +125,9 @@ export function createCalendarController({
   fetchImpl = fetch,
   schedule = setTimeout,
   cancel = clearTimeout,
-  refreshMs = REFRESH_MS
+  refreshMs = REFRESH_MS,
+  timeoutMs = 25000,
+  autoStart = true
 }) {
   if (typeof onChange !== 'function') throw new TypeError('onChange is required');
   let state = { ...statusFields({}), events: [], stale: false, loading: true, unavailable: false, error: '' };
@@ -137,6 +141,7 @@ export function createCalendarController({
   let controller;
   let pending;
   let pendingKind;
+  let configurationEpoch = 0;
 
   const active = () => visible && enabled;
   function emit(patch = {}) {
@@ -169,12 +174,17 @@ export function createCalendarController({
   }
   const current = (request) => !disposed && request === generation;
   async function getJson(url, signal, options = {}) {
-    return responseJson(await fetchImpl(url, {
-      ...options,
-      signal,
-      credentials: 'same-origin',
-      headers: { Accept: 'application/json', ...options.headers }
-    }));
+    const request = new AbortController(); const abort = () => request.abort(); signal?.addEventListener('abort', abort, { once: true }); if (signal?.aborted) abort();
+    const deadline = schedule(() => request.abort(), timeoutMs); let response;
+    try {
+      const interrupted = new Promise((_resolve, reject) => request.signal.addEventListener('abort', () => reject(Object.assign(new Error('Calendar request outcome could not be confirmed. Checking shared status.'), { code: 'CALENDAR_REQUEST_TIMEOUT' })), { once: true }));
+      return await Promise.race([(async () => {
+        response = await fetchImpl(url, { ...options, signal: request.signal, credentials: 'same-origin', headers: { Accept: 'application/json', ...options.headers } });
+        if (request.signal.aborted) { await response.body?.cancel().catch(() => {}); throw new Error('Calendar request canceled.'); }
+        if (response.status === 204) return {};
+        return await responseJson(response);
+      })(), interrupted]);
+    } finally { cancel(deadline); signal?.removeEventListener('abort', abort); if (request.signal.aborted && response?.body && !response.body.locked) await response.body.cancel().catch(() => {}); }
   }
   function finish(request) {
     if (!current(request)) return;
@@ -184,12 +194,14 @@ export function createCalendarController({
     scheduleRefresh();
   }
   function applyEvents(data) {
+    if (data.configurationId !== undefined && data.configurationId !== state.configurationId) throw Object.assign(new Error('Calendar source changed.'), { status: 409 });
     const result = eventFields(data);
     hasSnapshot = true;
     emit({ configured: result.configured, events: result.events, stale: result.stale, loading: false, unavailable: false, needsReauthentication: false, accessDenied: false, error: '' });
   }
   function applyRequestFailure(error) {
     if (error.status === 401 || error.status === 403) {
+      configurationEpoch++;
       hasSnapshot = false;
       emit({ events: [], stale: false, loading: false, unavailable: false, needsReauthentication: error.status === 401, accessDenied: error.status === 403, error: safeText(error.message) || (error.status === 401 ? 'Calendar needs re-authentication.' : 'Calendar access was denied.') });
     } else emit({ loading: false, stale: hasSnapshot, unavailable: !hasSnapshot, error: safeText(error.message) || 'Calendar unavailable.' });
@@ -206,6 +218,7 @@ export function createCalendarController({
         const status = statusFields(await getJson('/api/calendar', signal));
         if (!current(request)) return;
         statusLoaded = true;
+        if (['configurationId', 'configured', 'encryptionReady', 'needsReauthentication', 'serverUrl', 'username'].some((key) => status[key] !== state[key])) configurationEpoch++;
         emit({ ...status, loading: status.configured && active(), unavailable: false, error: '' });
         if (status.configured && active()) {
           pendingKind = 'events';
@@ -234,6 +247,7 @@ export function createCalendarController({
         applyEvents(await getJson('/api/calendar/events', signal));
       } catch (error) {
         if (!current(request) || signal.aborted) return;
+        if (error.status === 409) { configurationEpoch++; invalidate(); statusLoaded = false; hasSnapshot = false; emit({ events: [], loading: false }); void start(); return; }
         applyRequestFailure(error);
       } finally {
         finish(request);
@@ -245,6 +259,7 @@ export function createCalendarController({
   function connect(credentials) {
     if (disposed) return;
     if (pending && pendingKind === 'connect') return pending;
+    configurationEpoch++;
     const { request, signal } = begin('connect');
     emit({ loading: true, error: '' });
     pending = (async () => {
@@ -268,6 +283,7 @@ export function createCalendarController({
         if (!current(request) || signal.aborted) return;
         emit({ loading: false, error: safeText(error.message) || 'Could not connect calendar.' });
       } finally {
+        configurationEpoch++;
         finish(request);
       }
     })();
@@ -277,12 +293,12 @@ export function createCalendarController({
   function disconnect() {
     if (disposed) return;
     if (pending && pendingKind === 'disconnect') return pending;
+    configurationEpoch++;
     const { request, signal } = begin('disconnect');
     emit({ loading: true, error: '' });
     pending = (async () => {
       try {
-        const response = await fetchImpl('/api/calendar', { method: 'DELETE', signal, credentials: 'same-origin', headers: { Accept: 'application/json' } });
-        if (!response.ok) await responseJson(response);
+        await getJson('/api/calendar', signal, { method: 'DELETE' });
         if (!current(request)) return;
         statusLoaded = true;
         hasSnapshot = false;
@@ -291,6 +307,7 @@ export function createCalendarController({
         if (!current(request) || signal.aborted) return;
         emit({ loading: false, error: safeText(error.message) || 'Could not disconnect calendar.' });
       } finally {
+        configurationEpoch++;
         finish(request);
       }
     })();
@@ -309,6 +326,7 @@ export function createCalendarController({
       const nextEnabled = typeof next === 'boolean' ? next : next.calendarVisible ?? next.enabled ?? true;
       const wasActive = active();
       enabled = nextEnabled === true;
+      if (['connect', 'disconnect'].includes(pendingKind)) { clearTimer(); return; }
       if (!active()) pauseEvents();
       else if (!wasActive) void (statusLoaded ? refresh() : start());
       else scheduleRefresh();
@@ -323,8 +341,26 @@ export function createCalendarController({
     connect,
     disconnect,
     dispose() { if (disposed) return; disposed = true; invalidate(); },
-    getState() { return { ...state, events: state.events.map((event) => ({ ...event })) }; }
+    getState() { return { ...state, events: state.events.map((event) => ({ ...event })) }; },
+    captureConfigurationObserver() {
+      const epoch = configurationEpoch; const mutating = ['connect', 'disconnect'].includes(pendingKind);
+      return (metadata, nextEnabled = enabled) => {
+        if (disposed || mutating || ['connect', 'disconnect'].includes(pendingKind) || epoch !== configurationEpoch || !metadata.available) return false;
+        const next = statusFields(metadata);
+        const changed = !statusLoaded || ['configurationId', 'configured', 'encryptionReady', 'serverUrl', 'username'].some((key) => next[key] !== state[key]);
+        const eligibilityChanged = enabled !== nextEnabled; enabled = nextEnabled;
+        if (!changed) { if (eligibilityChanged) { if (active()) void refresh(); else pauseEvents(); } return true; }
+        const sameSource = statusLoaded && next.configurationId === state.configurationId;
+        const needsReauthentication = sameSource && state.needsReauthentication;
+        const accessDenied = sameSource && state.accessDenied;
+        configurationEpoch++; invalidate(); statusLoaded = true;
+        if (!sameSource || !next.configured) hasSnapshot = false;
+        emit({ ...next, events: hasSnapshot ? state.events : [], loading: false, stale: hasSnapshot && state.stale, unavailable: false, error: sameSource ? state.error : '', needsReauthentication: next.needsReauthentication || Boolean(needsReauthentication), accessDenied: Boolean(accessDenied) });
+        if (active()) void refresh();
+        return true;
+      };
+    }
   };
-  void start();
+  if (autoStart) void start();
   return api;
 }

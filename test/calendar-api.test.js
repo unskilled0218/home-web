@@ -53,11 +53,12 @@ test('stores CalDAV credentials securely and exposes only safe calendar data', a
     return { status: response.status, body: response.status === 204 ? {} : await response.json() };
   };
 
-  assert.deepEqual((await api('/api/calendar/events')).body, { configured: false, events: [] });
+  assert.deepEqual((await api('/api/calendar/events')).body, { configured: false, configurationId: null, events: [] });
   const credentials = { serverUrl: 'https://baikal.example.test', username: 'user', password: 'private-password' };
   const connected = await api('/api/calendar', { method: 'PUT', body: credentials });
   assert.equal(connected.status, 200);
   assert.equal(connected.body.configured, true);
+  assert.match(connected.body.configurationId, /^[A-Za-z0-9_-]{43}$/);
   assert.equal(connected.body.serverUrl, `${credentials.serverUrl}/`);
   assert.deepEqual(connected.body.events, [{ title: 'Planning', start: '2026-01-02T15:00:00.000Z', end: '2026-01-02T16:00:00.000Z', allDay: false, location: 'Office' }]);
   assert.equal(JSON.stringify(connected.body).includes('private-password'), false);
@@ -75,9 +76,11 @@ test('stores CalDAV credentials securely and exposes only safe calendar data', a
 
   const listed = await api('/api/calendar/events?refresh=1');
   assert.equal(listed.status, 200);
+  assert.equal(listed.body.configurationId, connected.body.configurationId);
   assert.equal(calls.at(-1).options.force, true);
   assert.equal(calls.at(-1).list.password, 'private-password');
-  assert.equal((await api('/api/calendar', { method: 'PUT', body: { ...credentials, password: '' } })).status, 200);
+  const reconnected = await api('/api/calendar', { method: 'PUT', body: { ...credentials, password: '' } });
+  assert.equal(reconnected.status, 200); assert.notEqual(reconnected.body.configurationId, connected.body.configurationId);
   const testCount = calls.filter(({ test: value }) => value).length;
   assert.equal((await api('/api/calendar', { method: 'PUT', body: { ...credentials, username: 'other', password: '' } })).status, 400);
   assert.equal((await api('/api/calendar', { method: 'PUT', body: { ...credentials, serverUrl: 'https://other.example.test', password: '' } })).status, 400);
@@ -98,7 +101,9 @@ test('stores CalDAV credentials securely and exposes only safe calendar data', a
   assert.equal((await api('/api/calendar', { method: 'DELETE' })).status, 204);
   assert.equal(store.getCalDav(), undefined);
   store.saveCalDav({ serverUrl: 'https://baikal.example.test/', username: 'user', encryptedPassword: encryptApiKey('unreadable', Buffer.alloc(32, 7).toString('base64')) });
-  assert.deepEqual((await api('/api/calendar/events')).body, { configured: false, events: [], needsReauthentication: true });
+  const unreadable = (await api('/api/calendar/events')).body;
+  assert.match(unreadable.configurationId, /^[A-Za-z0-9_-]{43}$/);
+  assert.deepEqual({ ...unreadable, configurationId: undefined }, { configured: false, configurationId: undefined, events: [], needsReauthentication: true });
   assert.equal((await api('/api/calendar')).body.needsReauthentication, true);
 
   await api('/api/calendar', { method: 'DELETE' });
