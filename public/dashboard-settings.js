@@ -1,4 +1,4 @@
-export function createSettingsTabs(dialog) {
+export function createSettingsTabs(dialog, { onSelect = () => {} } = {}) {
   const tablist = dialog.querySelector('[role="tablist"]');
   const tabs = [...tablist.querySelectorAll('[role="tab"]')];
   const panels = tabs.map((tab) => dialog.querySelector(`#${tab.getAttribute('aria-controls')}`));
@@ -15,6 +15,7 @@ export function createSettingsTabs(dialog) {
     });
     scroller.scrollTop = 0;
     if (focus) tabs[index].focus();
+    onSelect(id);
   }
 
   tablist.addEventListener('click', (event) => {

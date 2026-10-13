@@ -26,7 +26,10 @@
         <div id="forecast-details"><ul id="hourly" aria-label="Hourly forecast"></ul><ul id="daily" aria-label="Daily forecast"></ul></div>
       </section>
       <p id="photo-caption"></p>
-    </main><aside id="bookmarks" aria-labelledby="bookmarks-title"><h2 id="bookmarks-title">Bookmarks</h2><p id="bookmarks-status" role="status">Checking Linkwarden connection…</p><p><a id="open-linkwarden" hidden>Open Linkwarden</a></p><ul id="bookmark-tree" aria-label="Bookmark folders"></ul></aside></div>
+    </main><div id="dashboard-devices">
+      <section id="dashboard-ha" aria-labelledby="dashboard-ha-title"><h2 id="dashboard-ha-title">Home Assistant</h2><p id="dashboard-ha-status" role="status"></p><time id="dashboard-ha-updated" hidden></time><ul id="dashboard-ha-devices" aria-label="Selected Home Assistant devices"></ul></section>
+      <section id="dashboard-wol" aria-labelledby="dashboard-wol-title"><h2 id="dashboard-wol-title">Wake-on-LAN</h2><p id="dashboard-wol-status" role="status" tabindex="-1"></p><p id="dashboard-wol-action-status" role="status" aria-live="polite"></p><ul id="dashboard-wol-devices" aria-label="Wake-on-LAN dashboard devices"></ul></section>
+    </div><aside id="bookmarks" aria-labelledby="bookmarks-title"><h2 id="bookmarks-title">Bookmarks</h2><p id="bookmarks-status" role="status">Checking Linkwarden connection…</p><p><a id="open-linkwarden" hidden>Open Linkwarden</a></p><ul id="bookmark-tree" aria-label="Bookmark folders"></ul></aside></div>
     <dialog id="settings-dialog" aria-labelledby="settings-title">
       <header class="settings-header"><div><p class="settings-eyebrow">Make it yours</p><h2 id="settings-title">Dashboard settings</h2></div><button id="close-settings" type="button">Close</button></header>
       <form id="preferences" novalidate hidden></form>
@@ -110,7 +113,7 @@
             </section>
           </section>
           <section id="settings-panel-home-assistant" role="tabpanel" aria-labelledby="settings-tab-home-assistant" tabindex="0" hidden>
-            <h3>Home Assistant</h3><p class="settings-description">The connection is shared across browsers. Use a dedicated non-admin Home Assistant user on a trusted LAN. This tab configures the connection, not device controls.</p>
+            <h3>Home Assistant</h3><p class="settings-description">The connection is shared across browsers. Use a dedicated non-admin Home Assistant user on a trusted LAN. Selected devices show read-only sensor snapshots on the dashboard.</p>
             <p id="home-assistant-status" role="status">Open Settings to load the saved connection.</p>
             <form id="home-assistant-connection">
               <label>Home Assistant URL<input id="home-assistant-url" type="url" maxlength="2048" placeholder="http://homeassistant.local:8123" required autocomplete="url"></label>
@@ -119,6 +122,7 @@
               <div class="integration-actions"><button id="connect-home-assistant" type="submit">Connect Home Assistant</button><button id="disconnect-home-assistant" type="button">Disconnect Home Assistant</button></div>
             </form>
             <p id="home-assistant-settings-status" role="status"></p>
+            <fieldset><legend>Dashboard devices</legend><p id="home-assistant-selection-status" role="status" tabindex="-1">Connect Home Assistant to choose devices.</p><ul id="home-assistant-device-picker" aria-label="Home Assistant device selections"></ul></fieldset>
             <p class="settings-description">For a private certificate, configure the public CA bundle on the server and restart it. Certificate verification cannot be bypassed here. See <a href="https://www.home-assistant.io/docs/authentication/" target="_blank" rel="noopener noreferrer">Home Assistant authentication</a> for long-lived tokens.</p>
           </section>
           <section id="settings-panel-wol" role="tabpanel" aria-labelledby="settings-tab-wol" tabindex="0" hidden>

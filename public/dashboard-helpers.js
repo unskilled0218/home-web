@@ -6,6 +6,14 @@ const boolean = (value, fallback) => typeof value === 'boolean' ? value : fallba
 const mobileScale = (value) => Math.round(number(value, 0.5, 2, 1) * 10) / 10;
 export const text = (value, limit = 120) => typeof value === 'string' ? value.trim().slice(0, limit) : '';
 export const finite = (value) => typeof value === 'number' && Number.isFinite(value);
+export const MAX_HOME_ASSISTANT_SELECTIONS = 256;
+export const DEVICE_SELECTION_ID = /^d_[A-Za-z0-9_-]{43}$/;
+export const preferencesEqual = (left, right) => JSON.stringify(left) === JSON.stringify(right);
+
+export function normalizeDeviceSelections(value = []) {
+  if (!Array.isArray(value) || value.length > MAX_HOME_ASSISTANT_SELECTIONS || value.some((id) => typeof id !== 'string' || !DEVICE_SELECTION_ID.test(id)) || new Set(value).size !== value.length) throw new Error('Invalid Home Assistant device selections. Select at most 256 unique devices.');
+  return [...value].sort();
+}
 
 export function temperatureRange(minimum, maximum, unit = '') {
   const compact = (value) => value === null || value === undefined ? 'Unavailable' : `${value}${unit}`;
@@ -28,6 +36,7 @@ export function normalizeSettings(input = {}, fallbackZone = Intl.DateTimeFormat
     timeVisible: boolean(value.timeVisible, true), timeScale: number(value.timeScale, 0.5, 2, 1), weatherVisible: boolean(value.weatherVisible, true), weatherScale: number(value.weatherScale, 0.5, 2, 1), calendarVisible: boolean(value.calendarVisible, true), calendarScale: number(value.calendarScale, 0.5, 2, 1),
     mobileTimeVisible: boolean(value.mobileTimeVisible, true), mobileTimeScale: mobileScale(value.mobileTimeScale), mobileWeatherVisible: boolean(value.mobileWeatherVisible, true), mobileWeatherScale: mobileScale(value.mobileWeatherScale), mobileCalendarVisible: boolean(value.mobileCalendarVisible, true), mobileCalendarScale: mobileScale(value.mobileCalendarScale),
     mobileBookmarksMode: choice(value.mobileBookmarksMode, ['compact', 'expanded'], 'compact'), hideBookmarksFullscreen: boolean(value.hideBookmarksFullscreen, false),
+    homeAssistantDeviceSelections: normalizeDeviceSelections(value.homeAssistantDeviceSelections),
     location: normalizeLocation(value.location), temperature: choice(value.temperature, ['celsius', 'fahrenheit'], 'celsius'), wind: choice(value.wind, ['kmh', 'mph', 'ms', 'kn'], 'kmh'), precipitation: choice(value.precipitation, ['mm', 'inch'], 'mm'),
     order: choice(value.order, ['name', 'date', 'random'], 'random'), interval, duration: number(value.duration, 0, Math.min(10, interval - 1), 3), animation: choice(value.animation, ['none', 'fade', 'slide'], 'fade'),
     opacity: number(value.opacity, 0, 1, 1), background: choice(value.background, ['color', 'blur'], 'color'), color: /^#[0-9a-f]{6}$/i.test(value.color) ? value.color : '#000000', blur: number(value.blur, 0, 100, 100), imageInfo: boolean(value.imageInfo, false)
@@ -48,14 +57,18 @@ export function normalizeDashboardPreferences(input = {}) {
 export function validateDashboardPreferences(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length !== PREFERENCE_KEYS.length || Object.keys(value).some((key) => !PREFERENCE_KEYS.includes(key))) throw new Error('Invalid dashboard preference fields.');
   const canonical = normalizeDashboardPreferences(value);
-  for (const key of PREFERENCE_KEYS) if (value[key] !== canonical[key]) throw new Error(`Invalid dashboard preference: ${key}.`);
+  for (const key of PREFERENCE_KEYS) if (key !== 'homeAssistantDeviceSelections' && value[key] !== canonical[key]) throw new Error(`Invalid dashboard preference: ${key}.`);
   return canonical;
+}
+export function decodeStoredDashboardPreferences(value) {
+  if (value && typeof value === 'object' && !Array.isArray(value) && !Object.hasOwn(value, 'homeAssistantDeviceSelections')) return validateDashboardPreferences({ ...value, homeAssistantDeviceSelections: [] });
+  return validateDashboardPreferences(value);
 }
 export function legacyDashboardPreferences(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const defaults = normalizeDashboardPreferences();
   if (!PREFERENCE_KEYS.some((key) => Object.hasOwn(value, key) && typeof value[key] === typeof defaults[key] && (typeof value[key] !== 'number' || Number.isFinite(value[key])))) return null;
-  return normalizeDashboardPreferences(value);
+  try { return normalizeDashboardPreferences(value); } catch { return null; }
 }
 export function validateDashboardSnapshot(value) {
   if (!value || typeof value.initialized !== 'boolean' || !Number.isSafeInteger(value.revision) || value.revision < 0 || value.initialized !== (value.revision > 0)) throw new Error('Invalid shared settings revision.');

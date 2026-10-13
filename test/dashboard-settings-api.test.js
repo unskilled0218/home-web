@@ -8,7 +8,7 @@ import http from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
 import { createStore } from '../src/db.js';
 import { createDashboardServer } from '../src/app.js';
-import { normalizeDashboardPreferences, validateDashboardPreferences, legacyDashboardPreferences, PREFERENCE_KEYS } from '../public/dashboard-helpers.js';
+import { decodeStoredDashboardPreferences, normalizeDashboardPreferences, validateDashboardPreferences, legacyDashboardPreferences, PREFERENCE_KEYS } from '../public/dashboard-helpers.js';
 import { encryptApiKey } from '../src/linkwarden-crypto.js';
 
 async function setup(t) {
@@ -83,4 +83,34 @@ test('calendar event identity prevents publishing old events after a disconnect'
   server.listen(0, '127.0.0.1'); await once(server, 'listening'); t.after(async () => { await new Promise((resolve) => server.close(resolve)); store.close(); });
   const base = `http://127.0.0.1:${server.address().port}`; const pending = fetch(`${base}/api/calendar/events`); while (!release) await new Promise(setImmediate);
   await fetch(`${base}/api/calendar`, { method: 'DELETE' }); release(); const result = await pending; assert.equal(result.status, 409); assert.equal((await result.json()).code, 'CALENDAR_CONFIGURATION_CHANGED');
+});
+
+test('stored previous preferences gain only empty selections without read writes or lost revisions', async (t) => {
+  const env = await setup(t); const preferences = normalizeDashboardPreferences({ timezone: 'Asia/Tokyo', color: '#123456' });
+  const previous = { ...preferences }; delete previous.homeAssistantDeviceSelections;
+  const db = new DatabaseSync(env.filename); t.after(() => db.close());
+  db.prepare('INSERT INTO dashboard_preferences (id, configuration, revision) VALUES (1, ?, 7)').run(JSON.stringify(previous));
+  assert.deepEqual(decodeStoredDashboardPreferences(previous), preferences);
+  const snapshot = await (await env.api()).json(); assert.equal(snapshot.revision, 7); assert.deepEqual(snapshot.preferences, preferences);
+  assert.equal(db.prepare('SELECT configuration FROM dashboard_preferences').get().configuration, JSON.stringify(previous));
+  const selected = ['d_' + 'b'.repeat(43), 'd_' + 'a'.repeat(43)];
+  const saved = await (await env.api('/api/dashboard/settings', 'PUT', { revision: 7, preferences: { ...preferences, homeAssistantDeviceSelections: selected } })).json();
+  assert.equal(saved.revision, 8); assert.deepEqual(saved.preferences.homeAssistantDeviceSelections, selected.toSorted());
+  const same = await (await env.api('/api/dashboard/settings', 'PUT', { revision: 8, preferences: { ...saved.preferences, homeAssistantDeviceSelections: selected } })).json(); assert.equal(same.revision, 8);
+  const reopened = createStore(env.filename); assert.deepEqual(reopened.getDashboardPreferences().preferences, saved.preferences); reopened.close();
+  assert.equal((await env.api('/api/dashboard/settings', 'PUT', { revision: 8, preferences: previous })).status, 400);
+  for (const broken of [{ ...previous, scale: '1' }, { ...previous, extra: 1 }, { color: '#123456' }]) {
+    assert.throws(() => decodeStoredDashboardPreferences(broken));
+    db.prepare('UPDATE dashboard_preferences SET configuration = ?').run(JSON.stringify(broken));
+    assert.equal((await env.api()).status, 503);
+  }
+});
+
+test('selection validation rejects duplicates, invalid IDs and oversized arrays within bounded preference payloads', () => {
+  const preferences = normalizeDashboardPreferences(); const id = 'd_' + 'a'.repeat(43);
+  for (const value of [null, {}, [id, id], ['raw-device-id'], ['r_' + 'a'.repeat(43)], Array.from({ length: 257 }, (_, index) => 'd_' + String(index).padStart(43, 'a'))]) assert.throws(() => validateDashboardPreferences({ ...preferences, homeAssistantDeviceSelections: value }));
+  const selections = Array.from({ length: 256 }, (_, index) => 'd_' + String(index).padStart(43, 'a'));
+  const valid = validateDashboardPreferences({ ...preferences, homeAssistantDeviceSelections: selections });
+  assert.equal(valid.homeAssistantDeviceSelections.length, 256);
+  assert.ok(Buffer.byteLength(JSON.stringify({ preferences: valid, revision: 1, integrations: {} })) < 65536);
 });

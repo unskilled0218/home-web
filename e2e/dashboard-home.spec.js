@@ -394,7 +394,8 @@ test('breakpoint and orientation changes switch profiles without saving or losin
   await page.locator('#close-settings').click(); await mobileGeometry(page);
   await page.setViewportSize({ width: 900, height: 1000 });
   const desktop = await page.locator('#information').boundingBox();
-  expect(desktop.y, 'short desktop dashboard stays bottom-aligned').toBeGreaterThan(500);
+  const devices = await page.locator('#dashboard-devices').boundingBox();
+  expect(devices.y, 'intermediate layout stacks device sections after information').toBeGreaterThanOrEqual(desktop.y + desktop.height);
   expect(await page.locator('#information').evaluate((node) => [node.firstElementChild.tagName, node.lastElementChild.id])).toEqual(['H1', 'photo-caption']);
 });
 
@@ -454,7 +455,9 @@ for (const position of ['left', 'right']) test(`desktop bookmark tree stays expa
   for (const width of [1200, 601]) {
     await page.setViewportSize({ width, height: 900 });
     const information = await page.locator('#information').boundingBox(); const bookmarks = await page.locator('#bookmarks').boundingBox(); const tools = await page.locator('.page-tools').boundingBox();
-    expect(information.x + information.width).toBeLessThanOrEqual(bookmarks.x); expect(bookmarks.y).toBeGreaterThanOrEqual(tools.y + tools.height); expect(bookmarks.x + bookmarks.width).toBeLessThanOrEqual(width);
+    if (width > 1000) expect(information.x + information.width).toBeLessThanOrEqual(bookmarks.x);
+    else expect(bookmarks.y).toBeGreaterThanOrEqual(information.y + information.height);
+    expect(bookmarks.y).toBeGreaterThanOrEqual(tools.y + tools.height); expect(bookmarks.x + bookmarks.width).toBeLessThanOrEqual(width);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(width);
   }
   expect(mock.requests.tree).toBe(1); expect(mock.requests.folders.sort()).toEqual([0, 1, 2]);
@@ -514,7 +517,8 @@ for (const width of [390, 1200]) test(`fullscreen bookmark hiding releases space
   await page.locator('#open-settings').click(); await page.getByRole('tab', { name: 'Bookmarks', exact: true }).click(); await page.getByLabel('Hide bookmarks in fullscreen', { exact: true }).check(); await savePreferences(page); await page.locator('#close-settings').click();
   const requests = mock.requests.folders.length; await page.locator('#fullscreen').click(); await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(true); await expect(page.locator('#bookmarks')).toBeHidden();
   await expect(page.locator('body')).not.toHaveClass(/bookmarks-shown/);
-  expect(await page.locator('#dashboard-content').evaluate((node) => getComputedStyle(node).display)).toBe('contents');
+  expect(await page.locator('#dashboard-content').evaluate((node) => getComputedStyle(node).display)).toBe(width > 1000 ? 'grid' : 'block');
+  await expect(page.locator('#dashboard-ha')).toBeVisible(); await expect(page.locator('#dashboard-wol')).toBeVisible();
   // Headless Chromium's synthetic Escape does not invoke its browser-level fullscreen exit.
   await page.evaluate(() => document.exitFullscreen());
   await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(false);

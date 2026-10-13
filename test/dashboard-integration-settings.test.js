@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createIntegrationPoller } from '../public/dashboard-integration-settings.js';
+import { createIntegrationPoller } from '../public/dashboard-devices.js';
 
-test('one dialog timer refreshes controllers independently without waiting for a slow API', async () => {
+test('one visible-page timer refreshes controllers independently without waiting for a slow API', async () => {
   const timers = new Map(); let next = 0; const pauses = []; let slow = 0; let healthy = 0; let disposed = 0;
   const controllers = [
     { refresh() { slow++; return new Promise(() => {}); }, setPaused(value) { pauses.push(value); }, dispose() { disposed++; } },

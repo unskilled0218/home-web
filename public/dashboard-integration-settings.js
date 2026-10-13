@@ -1,29 +1,11 @@
-import { createHomeAssistantController, homeAssistantOrigin } from './dashboard-home-assistant.js';
-import { createWolController } from './dashboard-wol.js';
-import { SETTINGS_POLL_MS } from './dashboard-settings-sync.js';
+import { homeAssistantOrigin } from './dashboard-home-assistant.js';
 
-export function createIntegrationPoller(controllers, { schedule = setTimeout, cancel = clearTimeout } = {}) {
-  let active = false; let timer; let disposed = false;
-  function tick() {
-    if (!active || disposed) return;
-    for (const controller of controllers) void controller.refresh().catch(() => {});
-    timer = schedule(tick, SETTINGS_POLL_MS);
-  }
-  return {
-    setActive(next) {
-      if (disposed || next === active) return;
-      active = next; cancel(timer); timer = undefined;
-      for (const controller of controllers) controller.setPaused(!next);
-      if (next) tick();
-    },
-    dispose() { disposed = true; active = false; cancel(timer); for (const controller of controllers) controller.dispose(); }
-  };
-}
-
-export function createIntegrationSettings({ document, confirm = (message) => window.confirm(message) }) {
+export function createIntegrationSettings({ document, homeAssistant, wol, confirm = (message) => window.confirm(message) }) {
   const $ = (id) => document.getElementById(id);
   const haForm = $('home-assistant-connection'); const wolForm = $('wol-device-form');
-  let session = 0; let opened = false; let visible = true; let disposed = false;
+  const events = new AbortController();
+  const listen = (node, event, listener) => node.addEventListener(event, listener, { signal: events.signal });
+  let session = 0; let opened = false; let disposed = false;
   let haDirty = false; let editor = 0; let editingId = null; let wolDirty = false; let baseline = '';
   const rows = new Map();
   const fields = { name: 'wol-name', macAddress: 'wol-mac', broadcastAddress: 'wol-broadcast', ipAddress: 'wol-ip', group: 'wol-group' };
@@ -65,8 +47,8 @@ export function createIntegrationSettings({ document, confirm = (message) => win
     const node = document.createElement('li'); const title = document.createElement('strong'); const details = document.createElement('p'); const actions = document.createElement('div'); actions.className = 'integration-actions';
     const edit = document.createElement('button'); edit.type = 'button'; edit.textContent = 'Edit';
     const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = 'Delete';
-    edit.addEventListener('click', () => { const saved = wol.getState().devices.find((item) => item.id === device.id); if (saved && !wol.getState().mutationPending) { changeEditor(saved); $('wol-name').focus(); } });
-    remove.addEventListener('click', () => {
+    listen(edit, 'click', () => { const saved = wol.getState().devices.find((item) => item.id === device.id); if (saved && !wol.getState().mutationPending) { changeEditor(saved); $('wol-name').focus(); } });
+    listen(remove, 'click', () => {
       const saved = wol.getState().devices.find((item) => item.id === device.id);
       if (!saved || wol.getState().mutationPending || !confirm(`Delete ${saved.name}? Its saved wake audit records will also be deleted.`)) return;
       void action(wol, () => wol.remove(saved.id), 'Device deleted.', 'wol-settings-status', () => { if (editingId === saved.id) changeEditor(null); $('wol-name').focus(); });
@@ -95,31 +77,28 @@ export function createIntegrationSettings({ document, confirm = (message) => win
       if (saved && !wolDirty && !state.mutationPending) { setFields(saved); $('wol-editor-status').textContent = ''; }
     }
   }
-  const homeAssistant = createHomeAssistantController({ onChange: renderHomeAssistant });
-  const wol = createWolController({ onChange: renderWol });
-  const poller = createIntegrationPoller([homeAssistant, wol]);
-  const updateActive = () => poller.setActive(opened && visible && !disposed);
-  haForm.addEventListener('input', () => { haDirty = true; tokenGuidance(); });
-  haForm.addEventListener('submit', (event) => {
+  const unsubscribeHa = homeAssistant.subscribe(renderHomeAssistant);
+  const unsubscribeWol = wol.subscribe(renderWol);
+  listen(haForm, 'input', () => { haDirty = true; tokenGuidance(); });
+  listen(haForm, 'submit', (event) => {
     event.preventDefault(); tokenGuidance(); if (!haForm.reportValidity() || homeAssistant.getState().mutationPending) return;
     void action(homeAssistant, () => homeAssistant.connect({ url: $('home-assistant-url').value, accessToken: $('home-assistant-token').value }), 'Home Assistant connected.', 'home-assistant-settings-status', () => { $('home-assistant-token').value = ''; haDirty = false; renderHomeAssistant(homeAssistant.getState()); });
   });
-  $('disconnect-home-assistant').addEventListener('click', () => {
+  listen($('disconnect-home-assistant'), 'click', () => {
     if (homeAssistant.getState().mutationPending || !confirm('Disconnect Home Assistant and delete its saved access token?')) return;
     void action(homeAssistant, () => homeAssistant.disconnect(), 'Home Assistant disconnected.', 'home-assistant-settings-status', () => { $('home-assistant-token').value = ''; haDirty = false; renderHomeAssistant(homeAssistant.getState()); });
   });
-  wolForm.addEventListener('input', () => { wolDirty = true; });
-  wolForm.addEventListener('submit', (event) => {
+  listen(wolForm, 'input', () => { wolDirty = true; });
+  listen(wolForm, 'submit', (event) => {
     event.preventDefault(); if (!wolForm.reportValidity() || wol.getState().mutationPending) return;
     const input = Object.fromEntries(Object.entries(fields).map(([key, id]) => [key, $(id).value]));
     void action(wol, () => wol.save(input, editingId), 'Device saved.', 'wol-settings-status', () => changeEditor(null));
   });
-  $('cancel-wol-edit').addEventListener('click', () => { if (!wol.getState().mutationPending) { changeEditor(null); $('wol-name').focus(); } });
+  listen($('cancel-wol-edit'), 'click', () => { if (!wol.getState().mutationPending) { changeEditor(null); $('wol-name').focus(); } });
   return {
-    open() { if (disposed) return; session++; opened = true; $('home-assistant-settings-status').textContent = ''; $('wol-settings-status').textContent = ''; renderHomeAssistant(homeAssistant.getState()); renderWol(wol.getState()); updateActive(); },
-    close() { session++; opened = false; $('home-assistant-token').value = ''; updateActive(); },
-    setVisible(next) { visible = next; updateActive(); },
-    suspend() { session++; visible = false; updateActive(); },
-    dispose() { disposed = true; session++; $('home-assistant-token').value = ''; poller.dispose(); }
+    open() { if (disposed) return; session++; opened = true; $('home-assistant-settings-status').textContent = ''; $('wol-settings-status').textContent = ''; renderHomeAssistant(homeAssistant.getState()); renderWol(wol.getState()); void homeAssistant.refresh(); void wol.refresh(); },
+    close() { session++; opened = false; $('home-assistant-token').value = ''; },
+    suspend() { session++; $('home-assistant-token').value = ''; },
+    dispose() { if (disposed) return; disposed = true; session++; $('home-assistant-token').value = ''; events.abort(); unsubscribeHa(); unsubscribeWol(); }
   };
 }

@@ -175,13 +175,17 @@ export function createDashboardServer({ runtimeConfig, store, linkwarden, homeAs
     return settings;
   }
 
+  function homeAssistantConfigurationId(saved = store.getHomeAssistant()) {
+    return saved ? createHash('sha256').update(JSON.stringify(['home-assistant-configuration-v1', saved.baseUrl, saved.encryptedAccessToken])).digest('base64url') : null;
+  }
+
   function homeAssistantStatus() {
     const saved = store.getHomeAssistant();
     let encryptionReady = false;
     let credentialsReadable = false;
     try { encryptionKey(integrationEncryptionKey); encryptionReady = true; if (saved) { decryptApiKey(saved.encryptedAccessToken, integrationEncryptionKey); credentialsReadable = true; } } catch { /* Re-authentication is required when saved credentials cannot be decrypted. */ }
     const configured = Boolean(saved && credentialsReadable);
-    return { configured, accessTokenPresent: Boolean(saved), encryptionReady, needsReauthentication: Boolean(saved) && !configured, ...(saved && { baseUrl: saved.baseUrl, updatedAt: saved.updatedAt }) };
+    return { configured, configurationId: homeAssistantConfigurationId(saved), accessTokenPresent: Boolean(saved), encryptionReady, needsReauthentication: Boolean(saved) && !configured, ...(saved && { baseUrl: saved.baseUrl, updatedAt: saved.updatedAt }) };
   }
 
   function savedHomeAssistantSettings() {
@@ -195,7 +199,7 @@ export function createDashboardServer({ runtimeConfig, store, linkwarden, homeAs
     return createHash('sha256').update(`${settings.baseUrl}\0${settings.accessToken}`).digest('base64url');
   }
 
-  function publicHomeAssistantDevices(settings, devices) {
+  function publicHomeAssistantDevices(settings, devices, includeControls = true) {
     const fingerprint = homeAssistantFingerprint(settings);
     const expiresAt = now() + HOME_ASSISTANT_CONTROL_TTL_MS;
     const selectionId = (kind, deviceId, entityId = '') => `${kind}_${createHash('sha256').update(JSON.stringify(['home-selection-v1', kind, settings.baseUrl, deviceId, entityId])).digest('base64url')}`;
@@ -215,11 +219,11 @@ export function createDashboardServer({ runtimeConfig, store, linkwarden, homeAs
         status,
         available: Boolean(available)
       })),
-      controls: controls.map(({ entityId, domain, name, state }) => {
+      controls: includeControls ? controls.map(({ entityId, domain, name, state }) => {
         const available = state === 'on' || state === 'off';
         const controlToken = homeAssistantControls.issue({ entityId, domain, available, fingerprint, expiresAt });
         return { controlToken, name, state, available };
-      })
+      }) : []
     }));
   }
 
@@ -396,13 +400,17 @@ export function createDashboardServer({ runtimeConfig, store, linkwarden, homeAs
     }
     if (request.method === 'GET' && pathname === '/api/home-assistant/devices') {
       const status = homeAssistantStatus();
-      if (!status.configured) return json(response, 200, { configured: false, devices: [], ...(status.needsReauthentication && { needsReauthentication: true }) });
+      const configurationId = status.configurationId;
+      const changed = () => configurationId !== homeAssistantConfigurationId();
+      const conflict = () => json(response, 409, { configurationId, code: 'HOME_ASSISTANT_CONFIGURATION_CHANGED', error: 'Home Assistant configuration changed. Reload its status.' });
+      if (!status.configured) return json(response, 200, { configured: false, configurationId, devices: [], ...(status.needsReauthentication && { needsReauthentication: true }) });
       try {
         const url = new URL(request.url, 'http://localhost');
         const settings = savedHomeAssistantSettings();
         const devices = await homeAssistant.listDevices(settings, { force: url.searchParams.get('refresh') === '1' });
-        return json(response, 200, { configured: true, devices: publicHomeAssistantDevices(settings, devices) });
-      } catch (error) { return json(response, 503, { configured: true, error: isHomeAssistantClientError(error) ? error.message : HOME_ASSISTANT_UNAVAILABLE }); }
+        if (changed()) return conflict();
+        return json(response, 200, { configured: true, configurationId, devices: publicHomeAssistantDevices(settings, devices, url.searchParams.get('controls') !== '0') });
+      } catch (error) { return changed() ? conflict() : json(response, 503, { configured: true, configurationId, error: isHomeAssistantClientError(error) ? error.message : HOME_ASSISTANT_UNAVAILABLE }); }
     }
     if (request.method === 'GET' && pathname === '/api/linkwarden/collections') {
       const configurationId = linkwardenConfigurationId();

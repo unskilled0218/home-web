@@ -1,4 +1,4 @@
-import { legacyDashboardPreferences, normalizeDashboardPreferences, SETTINGS_KEY, validateDashboardPreferences, validateDashboardSnapshot } from './dashboard-helpers.js';
+import { decodeStoredDashboardPreferences, legacyDashboardPreferences, normalizeDashboardPreferences, SETTINGS_KEY, validateDashboardPreferences, validateDashboardSnapshot } from './dashboard-helpers.js';
 
 export const SHARED_SETTINGS_KEY = 'dashboard.shared-settings.v1';
 export const SETTINGS_POLL_MS = 5000;
@@ -10,7 +10,7 @@ export function createSettingsSync({ onSnapshot, onState = () => {}, captureObse
   const deferrals = new Map(['weather', 'calendar', 'linkwarden'].map((name) => [name, { count: 0, epoch: 0 }]));
   try {
     const value = JSON.parse(storage?.getItem(SHARED_SETTINGS_KEY));
-    if (value?.schema === 1 && value.initialized === true && Number.isSafeInteger(value.revision) && value.revision > 0) { snapshot = { ...snapshot, initialized: true, revision: value.revision, preferences: validateDashboardPreferences(value.preferences) }; cache = true; }
+    if (value?.schema === 1 && value.initialized === true && Number.isSafeInteger(value.revision) && value.revision > 0) { snapshot = { ...snapshot, initialized: true, revision: value.revision, preferences: decodeStoredDashboardPreferences(value.preferences) }; cache = true; }
   } catch { /* A bad cache is not authority. */ }
   try { candidate = legacyDashboardPreferences(JSON.parse(storage?.getItem(SETTINGS_KEY))); } catch { /* Invalid legacy data cannot initialize global settings. */ }
   const state = () => ({ snapshot, confirmed, cache, error, pending: Boolean(write), loading: Boolean(read) });

@@ -1,4 +1,4 @@
-import { normalizeDashboardPreferences, validateDashboardPreferences } from '../public/dashboard-helpers.js';
+import { decodeStoredDashboardPreferences, normalizeDashboardPreferences, validateDashboardPreferences } from '../public/dashboard-helpers.js';
 
 export function createDashboardPreferenceStore(db) {
   db.exec('CREATE TABLE IF NOT EXISTS dashboard_preferences (id INTEGER PRIMARY KEY CHECK (id = 1), configuration TEXT NOT NULL, revision INTEGER NOT NULL, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)');
@@ -13,7 +13,7 @@ export function createDashboardPreferenceStore(db) {
     const row = read.get();
     if (!row) return { initialized: false, revision: 0, preferences: normalizeDashboardPreferences() };
     if (!Number.isSafeInteger(row.revision) || row.revision < 1) throw new Error('Invalid stored dashboard revision.');
-    return { initialized: true, revision: row.revision, preferences: validateDashboardPreferences(JSON.parse(row.configuration)) };
+    return { initialized: true, revision: row.revision, preferences: decodeStoredDashboardPreferences(JSON.parse(row.configuration)) };
   }
   return {
     getDashboardPreferences,

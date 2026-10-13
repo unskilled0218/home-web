@@ -29,4 +29,4 @@ Run documented commands from the repository root.
 - [Operations and backups](docs/operations.md)
 - [Tests](docs/testing.md) and [publishing releases](docs/releases.md)
 
-Settings supports [Home Assistant connections](docs/home-assistant.md) and [Wake-on-LAN device management](docs/wake-on-lan.md). Entity controls and wake buttons remain API-only.
+Select [Home Assistant devices](docs/home-assistant.md) to show read-only readings and use [Wake-on-LAN](docs/wake-on-lan.md) dashboard buttons to wake saved computers.

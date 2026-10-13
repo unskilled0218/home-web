@@ -1,10 +1,11 @@
-// Shared request ownership for the two dialog-only configuration screens.
+// Shared request ownership for integration configuration and device lists.
 export function createConfigurationController({ url, initial, decode, onChange = () => {}, fetchImpl = fetch, schedule = setTimeout, cancel = clearTimeout, timeoutMs = 12000 }) {
   let value = initial; let discovered = false; let error = ''; let generation = 0;
   let read; let mutation; let paused = true; let disposed = false;
   const requests = new Set();
+  const subscribers = new Set();
   const state = () => ({ ...value, discovered, error, loading: Boolean(read), mutationPending: Boolean(mutation) });
-  const emit = () => { if (!disposed) onChange(state()); };
+  const emit = () => { if (!disposed) { const snapshot = state(); onChange(snapshot); for (const listener of subscribers) listener(snapshot); } };
   function invalidateReads() {
     generation++;
     for (const request of requests) if (!request.mutation) request.controller.abort();
@@ -28,7 +29,7 @@ export function createConfigurationController({ url, initial, decode, onChange =
       controller.abort();
       if (response?.body && !response.body.locked) await response.body.cancel().catch(() => {});
       if (failure.status || controller.signal.aborted && failure.message.includes('outcome is uncertain')) throw failure;
-      throw new Error(isMutation ? 'Settings request failed. Check saved settings before retrying.' : 'Saved settings are unavailable. Retrying while Settings is open.');
+      throw new Error(isMutation ? 'Settings request failed. Check saved settings before retrying.' : 'Saved settings are unavailable. Retrying while the page is visible.');
     } finally { cancel(deadline); requests.delete(request); }
   }
   function refresh() {
@@ -47,6 +48,7 @@ export function createConfigurationController({ url, initial, decode, onChange =
   }
   return {
     getState: state, refresh,
+    subscribe(listener) { if (disposed) return () => {}; subscribers.add(listener); return () => subscribers.delete(listener); },
     setPaused(next) { if (paused === next || disposed) return; paused = next; if (next) { invalidateReads(); emit(); } else void refresh(); },
     async mutate(path, method, body, adopt) {
       if (mutation || disposed) throw new Error('A settings action is already pending.');
@@ -58,6 +60,6 @@ export function createConfigurationController({ url, initial, decode, onChange =
         if (mutation === owner) { mutation = undefined; emit(); if (!paused && !disposed) void refresh(); }
       }
     },
-    dispose() { disposed = true; paused = true; invalidateReads(); for (const request of requests) request.controller.abort(); }
+    dispose() { disposed = true; subscribers.clear(); paused = true; invalidateReads(); for (const request of requests) request.controller.abort(); }
   };
 }

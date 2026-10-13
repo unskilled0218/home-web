@@ -69,7 +69,7 @@ test('connects Home Assistant atomically and exposes only safe configuration', a
     return { status: response.status, body: response.status === 204 ? {} : await response.json() };
   };
 
-  assert.deepEqual((await api('/api/home-assistant/devices')).body, { configured: false, devices: [] });
+  assert.deepEqual((await api('/api/home-assistant/devices')).body, { configured: false, configurationId: null, devices: [] });
   const connected = await api('/api/home-assistant', { method: 'PUT', body: { url: 'https://home.example.test', accessToken: 'private-token' } });
   assert.equal(connected.status, 200);
   assert.equal(connected.body.homeAssistant.configured, true);
@@ -159,7 +159,8 @@ test('connects Home Assistant atomically and exposes only safe configuration', a
 
   store.saveHomeAssistant({ baseUrl: 'https://home.example.test', encryptedAccessToken: encryptApiKey('unreadable', Buffer.alloc(32, 9).toString('base64')) });
   const needsReauthentication = await api('/api/home-assistant/devices');
-  assert.deepEqual(needsReauthentication.body, { configured: false, devices: [], needsReauthentication: true });
+  assert.match(needsReauthentication.body.configurationId, /^[A-Za-z0-9_-]{43}$/);
+  assert.deepEqual({ ...needsReauthentication.body, configurationId: null }, { configured: false, configurationId: null, devices: [], needsReauthentication: true });
 
   await api('/api/home-assistant', { method: 'DELETE' });
   const payload = JSON.stringify({ url: 'https://home.example.test', accessToken: 'slow-token' });
@@ -190,4 +191,26 @@ test('selection identities survive renames, reordering and token rotation but ar
   devices[0].name = 'Renamed'; devices[0].area = 'Kitchen'; devices[0].measurements[0].name = 'Renamed reading'; devices[0].measurements.reverse(); devices.reverse();
   const second = await connect('https://home.test', 'two'); assert.equal(second[1].selectionId, first[0].selectionId); assert.equal(second[1].measurements[1].selectionId, first[0].measurements[0].selectionId);
   const third = await connect('https://other.test', 'two'); assert.notEqual(third[1].selectionId, first[0].selectionId); assert.notEqual(third[1].measurements[1].selectionId, first[0].measurements[0].selectionId);
+});
+
+test('display-only reads preserve active control tokens and stale configuration reads mint none', async (t) => {
+  const store = createStore(':memory:'); const secret = Buffer.alloc(32, 7).toString('base64');
+  const controls = createHomeAssistantControlStore({ capacity: 2, now: () => 1000 }); let block = false; let started; let release;
+  const devices = [{ deviceId: 'private-device', name: 'Lamp', area: null, disabled: false, measurements: [], controls: [{ entityId: 'light.lamp', domain: 'light', name: 'Lamp', state: 'off' }] }];
+  const homeAssistant = { clearCache() {}, controlEntity: async () => {}, async listDevices() { if (block) { started(); await new Promise((resolve) => { release = resolve; }); } return devices; } };
+  const server = createDashboardServer({ store, homeAssistant, homeAssistantControls: controls, now: () => 1000, runtimeConfig: { allowedHosts: ['127.0.0.1'], linkwardenEncryptionKey: secret } });
+  server.listen(0, '127.0.0.1'); await once(server, 'listening'); t.after(async () => { release?.(); await new Promise((resolve) => server.close(resolve)); store.close(); });
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const connect = async (token) => (await (await fetch(base + '/api/home-assistant', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: 'https://home.test', accessToken: token }) })).json());
+  const first = await connect('one'); const full = await (await fetch(base + '/api/home-assistant/devices')).json(); const token = full.devices[0].controls[0].controlToken;
+  assert.match(first.homeAssistant.configurationId, /^[A-Za-z0-9_-]{43}$/); assert.equal(controls.size, 2);
+  for (let i = 0; i < 25; i++) {
+    const snapshot = await (await fetch(base + '/api/home-assistant/devices?controls=0')).json();
+    assert.equal(snapshot.configurationId, first.homeAssistant.configurationId); assert.deepEqual(snapshot.devices[0].controls, []); assert.equal(snapshot.devices[0].selectionId, full.devices[0].selectionId); assert.equal(controls.size, 2);
+  }
+  assert.equal((await fetch(base + `/api/home-assistant/controls/${token}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'turn_on' }) })).status, 200);
+  const second = await connect('two'); assert.notEqual(first.homeAssistant.configurationId, second.homeAssistant.configurationId); assert.equal(first.devices[0].selectionId, second.devices[0].selectionId);
+  block = true; const gate = new Promise((resolve) => { started = resolve; }); const pending = fetch(base + '/api/home-assistant/devices'); await gate;
+  await fetch(base + '/api/home-assistant', { method: 'DELETE' }); release();
+  const stale = await pending; assert.equal(stale.status, 409); assert.equal((await stale.json()).code, 'HOME_ASSISTANT_CONFIGURATION_CHANGED'); assert.equal(controls.size, 0);
 });

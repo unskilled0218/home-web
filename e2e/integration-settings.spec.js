@@ -102,14 +102,14 @@ test('late old-session connection completion keeps drafts and unrelated preferen
   } finally { env.release(); await a.close(); await env.close(); }
 });
 
-test('one stalled status API does not stall device polling, and closing pauses reads', async ({ browser }) => {
+test('one stalled status API does not stall device polling, and closing Settings keeps dashboard reads active', async ({ browser }) => {
   const env = await environment(); const a = await client(browser, env); let release; let haReads = 0; let wolReads = 0;
   try {
     await a.page.route('**/api/home-assistant', async (route) => { haReads++; await new Promise((resolve) => { release = resolve; }); await route.continue().catch(() => {}); });
     a.page.on('request', (request) => { if (new URL(request.url()).pathname === '/api/devices') wolReads++; });
     await open(a.page, 'Wake-on-LAN'); await expect(a.page.locator('#wol-status')).toHaveText('No devices saved.');
     env.store.create(device); await poll(a.page); await expect(a.page.locator('#wol-devices')).toContainText('Office PC'); expect(haReads).toBe(1); expect(wolReads).toBeGreaterThanOrEqual(2);
-    await a.page.locator('#close-settings').click(); release?.(); await a.page.unroute('**/api/home-assistant'); const count = wolReads; await poll(a.page); expect(wolReads).toBe(count);
+    await a.page.locator('#close-settings').click(); release?.(); await a.page.unroute('**/api/home-assistant'); const count = wolReads; await poll(a.page); await expect.poll(() => wolReads).toBeGreaterThan(count);
     await open(a.page, 'Wake-on-LAN'); await expect(a.page.locator('#home-assistant-status')).toHaveText('Home Assistant is not connected.'); expect(wolReads).toBeGreaterThan(count);
   } finally { release?.(); await a.close(); await env.close(); }
 });

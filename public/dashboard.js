@@ -1,4 +1,4 @@
-import { MOBILE_MEDIA_QUERY, PREFERENCE_KEYS, clockText, normalizeDashboardPreferences, resolveDisplayPreferences, sampleHours, temperatureRange, weatherDescription, weatherIconFile } from './dashboard-helpers.js';
+import { MOBILE_MEDIA_QUERY, PREFERENCE_KEYS, clockText, normalizeDashboardPreferences, preferencesEqual, resolveDisplayPreferences, sampleHours, temperatureRange, weatherDescription, weatherIconFile } from './dashboard-helpers.js';
 import { createWeatherController, searchLocations } from './dashboard-weather.js';
 import { createPhotoController } from './dashboard-photos.js';
 import { createCalendarController, formatCalendarEvent } from './dashboard-calendar.js';
@@ -9,6 +9,9 @@ import { createBookmarkTree } from './dashboard-bookmark-tree.js';
 import { safeBookmarkUrl } from './bookmark-data.js';
 import { createSettingsSync } from './dashboard-settings-sync.js';
 import { createIntegrationSettings } from './dashboard-integration-settings.js';
+import { createDashboardDevices } from './dashboard-devices.js';
+import { createDeviceSelection } from './dashboard-device-selection.js';
+import { createDashboardDeviceView } from './dashboard-device-view.js';
 
 const $ = (id) => document.getElementById(id);
 const currentWeatherSubValues = document.createElement('div');
@@ -24,8 +27,11 @@ const mobileViewport = matchMedia(MOBILE_MEDIA_QUERY);
 let mobileLayout;
 const preferences = $('preferences');
 const dialog = $('settings-dialog');
-const settingsTabs = createSettingsTabs(dialog);
-const integrationSettings = createIntegrationSettings({ document });
+const settingsTabs = createSettingsTabs(dialog, { onSelect: (id) => deviceIntegrations.setPickerOpen(dialog.open && id === 'settings-tab-home-assistant') });
+const deviceView = createDashboardDeviceView({ document, wake: (id) => deviceIntegrations.wake(id) });
+const deviceSelection = createDeviceSelection({ document, root: $('home-assistant-device-picker'), status: $('home-assistant-selection-status'), onChange: () => { draftDirty = true; } });
+const deviceIntegrations = createDashboardDevices({ onChange: (state) => { deviceView.render(state); deviceSelection.update(state); } });
+const integrationSettings = createIntegrationSettings({ document, homeAssistant: deviceIntegrations.homeAssistant, wol: deviceIntegrations.wol });
 const bookmarkTree = createBookmarkTree({ root: $('bookmark-tree'), status: $('bookmarks-status'), onToggle: (id, open) => bookmarks.setFolderOpen(id, open), onRetry: (id) => bookmarks.retryFolder(id) });
 const bookmarks = createBookmarkController({ onChange(state) {
   bookmarkTree.render(state);
@@ -42,6 +48,7 @@ function fillForm() {
     if (control.type === 'checkbox') control.checked = settings[control.name];
     else control.value = settings[control.name];
   }
+  deviceSelection.setDraft(settings.homeAssistantDeviceSelections);
 }
 
 function updateClock() {
@@ -176,11 +183,12 @@ const settingsSync = createSettingsSync({ storage,
   onSnapshot(snapshot, observers) {
     const previous = settings;
     settings = { ...snapshot.preferences, location: settings.location };
-    const changed = (keys) => keys.some((key) => settings[key] !== previous[key]);
+    const changed = (keys) => keys.some((key) => !preferencesEqual(settings[key], previous[key]));
     const first = !servicesStarted;
     if (first || changed(['position', 'scale', 'timeVisible', 'timeScale', 'weatherVisible', 'weatherScale', 'calendarVisible', 'calendarScale', 'mobileTimeVisible', 'mobileTimeScale', 'mobileWeatherVisible', 'mobileWeatherScale', 'mobileCalendarVisible', 'mobileCalendarScale'])) applyPresentation();
     else if (changed(['timezone', 'dateStyle', 'hour12', 'seconds'])) startClock();
     if (first || changed(['mobileBookmarksMode', 'hideBookmarksFullscreen'])) applyBookmarkPresentation();
+    if (first || changed(['homeAssistantDeviceSelections'])) deviceIntegrations.configure(settings.homeAssistantDeviceSelections);
     document.body.style.backgroundColor = settings.color;
     if (first || changed(['order', 'interval', 'duration', 'animation', 'opacity', 'background', 'color', 'blur', 'imageInfo'])) photos.configure(settings);
     if (first || changed(['timezone', 'temperature', 'wind', 'precipitation'])) weather.configure(settings);
@@ -196,12 +204,13 @@ const settingsSync = createSettingsSync({ storage,
     observers.linkwarden?.(snapshot.integrations.linkwarden);
     if (changed(['hour12'])) renderWeather();
     if (changed(['timezone', 'hour12'])) renderCalendar();
-    if (PREFERENCE_KEYS.some((key) => settings[key] !== previous[key])) preferenceMessage = '';
-    if (!dialog.open || (draftRevision === null && !draftDirty)) { fillForm(); draftRevision = snapshot.revision; }
+    if (changed(PREFERENCE_KEYS)) preferenceMessage = '';
+    if (!dialog.open || !draftDirty) { fillForm(); draftRevision = snapshot.revision; }
   },
   onState(state) {
     const saving = state.pending;
     for (const control of preferences.elements) if (PREFERENCE_KEYS.includes(control.name)) control.disabled = saving;
+    deviceSelection.setSaving(saving);
     $('save-preferences').disabled = saving || !state.confirmed || (dialog.open && draftRevision === null);
     $('reload-shared-preferences').disabled = saving || !state.confirmed;
     $('settings-status').textContent = saving ? 'Saving shared preferences…' : state.error ? state.error : preferenceMessage || (state.confirmed ? 'Preferences are shared across all browsers.' : state.cache ? 'Using cached shared preferences while loading the server.' : 'Loading shared preferences…');
@@ -218,6 +227,8 @@ preferences.addEventListener('submit', async (event) => {
     if (!PREFERENCE_KEYS.includes(control.name)) continue;
     next[control.name] = control.type === 'checkbox' ? control.checked : control.type === 'number' ? control.valueAsNumber : control.value;
   }
+  next.homeAssistantDeviceSelections = deviceSelection.getDraft();
+  draftDirty = true;
   try {
     const saved = await settingsSync.save(normalizeDashboardPreferences(next), draftRevision);
     draftRevision = saved.revision; draftDirty = false; fillForm(); preferenceMessage = 'Preferences saved for all browsers.';
@@ -253,7 +264,7 @@ $('open-settings').addEventListener('click', () => {
   $('settings-tab-general').focus();
 });
 $('close-settings').addEventListener('click', () => dialog.close());
-dialog.addEventListener('close', () => { integrationSettings.close(); $('open-settings').focus(); });
+dialog.addEventListener('close', () => { integrationSettings.close(); deviceIntegrations.setPickerOpen(false); $('open-settings').focus(); });
 function cancelSearch() { searchGeneration++; searchController?.abort(); }
 $('location-search').addEventListener('submit', async (event) => {
   event.preventDefault(); cancelSearch(); const request = searchGeneration;
@@ -331,13 +342,13 @@ $('fullscreen').addEventListener('click', async () => {
   catch { $('page-status').textContent = 'Fullscreen could not be enabled in this browser.'; }
 });
 document.addEventListener('fullscreenchange', fullscreenState);
-document.addEventListener('visibilitychange', () => { startClock(); photos.setVisible(!document.hidden); weather.setVisible(!document.hidden); calendar.setVisible(!document.hidden); bookmarks.setVisible(!document.hidden); settingsSync.setVisible(!document.hidden); integrationSettings.setVisible(!document.hidden); if (document.hidden) stopAnimations(); });
+document.addEventListener('visibilitychange', () => { startClock(); photos.setVisible(!document.hidden); weather.setVisible(!document.hidden); calendar.setVisible(!document.hidden); bookmarks.setVisible(!document.hidden); settingsSync.setVisible(!document.hidden); deviceIntegrations.setVisible(!document.hidden); if (document.hidden) stopAnimations(); });
 reducedMotion.addEventListener('change', () => { stopAnimations(); photos.configure(settings); });
 mobileViewport.addEventListener('change', applyPresentation);
-window.addEventListener('pagehide', (event) => { clearInterval(clockTimer); cancelSearch(); weather.dispose(); photos.dispose(); if (event.persisted) { bookmarks.setVisible(false); settingsSync.setVisible(false); integrationSettings.suspend(); } else { calendar.dispose(); bookmarks.dispose(); settingsSync.dispose(); integrationSettings.dispose(); } });
-window.addEventListener('pageshow', (event) => { if (event.persisted) { void photos.load(); applyPresentation(); weather.configure(settings); void weather.refresh(); void calendar.refresh(); bookmarks.setVisible(!document.hidden); settingsSync.setVisible(!document.hidden); integrationSettings.setVisible(!document.hidden); } });
+window.addEventListener('pagehide', (event) => { clearInterval(clockTimer); cancelSearch(); weather.dispose(); photos.dispose(); if (event.persisted) { bookmarks.setVisible(false); settingsSync.setVisible(false); deviceIntegrations.setVisible(false); integrationSettings.suspend(); } else { calendar.dispose(); bookmarks.dispose(); settingsSync.dispose(); integrationSettings.dispose(); deviceIntegrations.dispose(); } });
+window.addEventListener('pageshow', (event) => { if (event.persisted) { void photos.load(); applyPresentation(); weather.configure(settings); void weather.refresh(); void calendar.refresh(); bookmarks.setVisible(!document.hidden); settingsSync.setVisible(!document.hidden); deviceIntegrations.setVisible(!document.hidden); } });
 photos.setVisible(!document.hidden); weather.setVisible(!document.hidden); calendar.setVisible(!document.hidden);
 bookmarks.setVisible(!document.hidden);
-integrationSettings.setVisible(!document.hidden);
+deviceIntegrations.setVisible(!document.hidden);
 settings = { ...settingsSync.getState().snapshot.preferences, location: null };
 fillForm(); document.body.style.backgroundColor = settings.color; applyPresentation(); settingsSync.setVisible(!document.hidden); void settingsSync.start();

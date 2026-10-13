@@ -52,9 +52,20 @@ summary { cursor: pointer; padding: .5rem 0; }
 .forecast-label, .forecast-temperature { font-weight: 700; }
 .forecast-condition { font-size: .85em; }
 #photo-caption { overflow-wrap: anywhere; }
-#dashboard-content { display: contents; }
-.bookmarks-shown #dashboard-content { display: grid; flex: 1; grid-template-columns: minmax(0, 1fr) clamp(10rem, 28vw, 22rem); gap: 1rem; margin: 0 1rem 1rem; align-items: end; }
-.bookmarks-shown #information { width: 100%; margin: 0; min-width: 0; }
+#dashboard-content { display: grid; flex: 1; grid-template-columns: minmax(0, 1fr) clamp(14rem, 24vw, 22rem); gap: 1rem; margin: 0 1rem 1rem; align-items: end; }
+.bookmarks-shown #dashboard-content { grid-template-columns: minmax(0, 1fr) clamp(14rem, 22vw, 20rem) clamp(10rem, 24vw, 22rem); }
+#dashboard-content #information { width: 100%; margin: 0; min-width: 0; }
+#dashboard-devices { position: relative; z-index: 1; align-self: start; height: max(20rem, calc(100dvh - 8rem)); display: grid; grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); gap: 1rem; min-width: 0; text-shadow: 0 2px 5px #000; }
+#dashboard-devices > section { display: grid; grid-template-rows: auto auto auto minmax(0, 1fr); min-height: 0; min-width: 0; overflow: hidden; padding: .5rem; }
+#dashboard-devices h2 { font-size: 1.1rem; }
+#dashboard-devices [role=status], #dashboard-ha-updated { font-size: .8rem; overflow-wrap: anywhere; }
+#dashboard-ha-updated { margin: .3rem 0; }
+#dashboard-devices > section > ul { grid-row: 4; overflow-y: auto; min-height: 0; min-width: 0; list-style: none; padding: 0; margin: .35rem 0; overflow-wrap: anywhere; }
+#dashboard-ha-devices > li { margin-bottom: .9rem; }
+#dashboard-ha-devices ul { list-style: none; padding: 0; font-size: .85rem; }
+#dashboard-wol-devices > li { display: flex; justify-content: space-between; align-items: center; gap: .6rem; padding: .35rem 0; }
+#dashboard-wol-devices span { min-width: 0; overflow-wrap: anywhere; }
+#dashboard-wol-devices button { flex: 0 0 auto; }
 .bookmarks-shown #information > section { min-width: 0; overflow-wrap: anywhere; }
 .bookmarks-shown #current-weather { flex-wrap: wrap; }
 .bookmarks-shown #current-weather-values { flex: 1 1 10em; overflow-wrap: anywhere; }
@@ -121,6 +132,17 @@ input[type=color] { min-height: 2.5rem; }
 #settings-dialog #wol-devices li { padding: .75rem 0; border-bottom: 1px solid #29374c; }
 #settings-dialog #wol-devices p { overflow-wrap: anywhere; font-size: .85rem; }
 #settings-dialog #home-assistant-connection, #settings-dialog #wol-device-form { display: grid; min-width: 0; gap: .8rem; }
+#home-assistant-device-picker { list-style: none; padding: 0; margin: 0; grid-column: 1 / -1; min-width: 0; }
+#home-assistant-device-picker label { margin: .5rem 0; overflow-wrap: anywhere; }
+#home-assistant-device-picker input { flex: 0 0 auto; }
+@media (max-width: 1000px) {
+  #dashboard-content, .bookmarks-shown #dashboard-content { display: block; }
+  #dashboard-content #information { padding-top: 0; }
+  #dashboard-devices { height: auto; display: block; margin: 1rem 0; }
+  #dashboard-devices > section { display: block; overflow: visible; padding: .5rem 0; }
+  #dashboard-devices > section > ul { overflow-y: visible; }
+  #bookmarks { width: 100%; max-height: none; padding: 0; }
+}
 @media (max-width: 600px) {
   #settings-dialog { width: calc(100vw - 1rem); height: min(42rem, calc(100dvh - 1rem)); max-height: calc(100dvh - 1rem); border-radius: .8rem; }
   #settings-dialog .settings-header { padding: .85rem; gap: .5rem; }
@@ -138,9 +160,9 @@ input[type=color] { min-height: 2.5rem; }
   #settings-dialog #reload-shared-preferences { font-size: .75rem; }
 }
 @media (max-width: 600px) {
-  .bookmarks-shown #dashboard-content { display: contents; }
-  .bookmarks-shown #information { width: calc(100% - 1rem); margin: .5rem .5rem 1rem; padding-top: 0; }
-  #bookmarks { width: calc(100% - 1rem); margin: 0 .5rem 1rem; padding: 0; max-height: none; overflow-y: visible; }
+  #dashboard-content, .bookmarks-shown #dashboard-content { display: block; margin: .5rem .5rem 1rem; }
+  #dashboard-content #information { width: 100%; margin: 0; padding-top: 0; }
+  #bookmarks { width: 100%; margin: 0 0 1rem; padding: 0; max-height: none; overflow-y: visible; }
   .bookmarks-shown .calendar-event, .bookmarks-shown .right .calendar-event { grid-template-columns: minmax(0, 1fr); }
   #information { width: calc(100% - 1rem); margin: .5rem .5rem 1rem; padding-top: 0; min-width: 0; }
   #information > section { display: flow-root; min-width: 0; margin-top: 0; overflow-wrap: anywhere; }

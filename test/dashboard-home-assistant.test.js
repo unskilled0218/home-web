@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHomeAssistantController, homeAssistantOrigin } from '../public/dashboard-home-assistant.js';
 
-const status = (configured = false, baseUrl = '') => ({ homeAssistant: { configured, baseUrl, accessTokenPresent: configured, encryptionReady: true, needsReauthentication: false } });
+const status = (configured = false, baseUrl = '') => ({ homeAssistant: { configured, configurationId: configured ? 'c'.repeat(43) : null, baseUrl, accessTokenPresent: configured, encryptionReady: true, needsReauthentication: false } });
 const deferred = () => { let resolve; const promise = new Promise((done) => { resolve = done; }); return { promise, resolve }; };
 
 test('Home Assistant origin eligibility matches the server URL contract', () => {
