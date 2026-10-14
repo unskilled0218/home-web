@@ -22,6 +22,25 @@ test('uses an explicitly pre-mounted readable directory without invoking mount',
   assert.equal(invoked, false);
 });
 
+test('existing-mode checks reject default hard mounts before file access and accept bounded read-only NFSv3 binds', async () => {
+  const cases = [
+    { name: 'default host mount', vfs: 'rw,relatime', superblock: 'rw,vers=3,hard,proto=tcp,timeo=600,retrans=2', available: false },
+    { name: 'read-only bind still has hard retry policy', vfs: 'ro,nosuid,nodev,noexec,relatime', superblock: 'rw,vers=3,hard,proto=tcp,timeo=600,retrans=2', available: false },
+    { name: 'safe read-only bind on bounded NFSv3', vfs: 'ro,nosuid,nodev,noexec,relatime', superblock: 'rw,vers=3,soft,proto=tcp,timeo=20,retrans=2', available: true }
+  ];
+  for (const fixture of cases) {
+    const mounts = parseMountInfo(`36 25 0:32 / /photos ${fixture.vfs} - nfs nas:/wallpaper ${fixture.superblock}`);
+    let accessed = 0;
+    const result = await prepareNfs({ mode: 'existing', mountPath: '/photos', options: [] }, {
+      mounts: async () => mounts,
+      statImpl: async () => { accessed++; return directory; },
+      run: async () => assert.fail(`${fixture.name}: existing mode must never invoke mount`)
+    });
+    assert.deepEqual(result, fixture.available ? { available: true, reason: 'existing', root: '/photos' } : { available: false, reason: 'failed', root: null }, fixture.name);
+    assert.equal(accessed, fixture.available ? 1 : 0, `${fixture.name}: unsafe topology must be rejected before directory access`);
+  }
+});
+
 test('reuses a matching NFS mount and rejects an occupied conflicting mount point', async () => {
   const config = { mode: 'mount', source: 'nas:/photos', mountPath: '/photos', options: [], error: null };
   const options = ['ro', 'nosuid', 'nodev', 'noexec', 'soft', 'timeo=20', 'retrans=2'];
