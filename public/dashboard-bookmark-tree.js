@@ -36,7 +36,7 @@ export function createBookmarkTree({ root, status, onToggle, onRetry }) {
           const url = safeBookmarkUrl(bookmark.url); if (!url) continue;
           let row = entry.linkNodes.get(bookmark.id);
           if (!row) { const item = element('li'); const link = element('a', 'bookmark-link'); item.append(link); row = { item, link }; entry.linkNodes.set(bookmark.id, row); }
-          row.link.href = url; row.link.textContent = bookmark.name; kept.add(bookmark.id);
+          row.link.href = url; row.link.textContent = bookmark.name; row.link.target = '_blank'; row.link.rel = 'noopener noreferrer'; kept.add(bookmark.id);
           const expectedLink = previousLink ? previousLink.nextElementSibling : entry.links.firstElementChild;
           if (expectedLink !== row.item) entry.links.insertBefore(row.item, expectedLink);
           previousLink = row.item;
@@ -50,6 +50,7 @@ export function createBookmarkTree({ root, status, onToggle, onRetry }) {
     render(state) {
       latest = state;
       status.textContent = state.needsReauthentication ? 'Linkwarden needs re-authentication. Open Settings → Bookmarks.' : state.accessDenied ? 'Linkwarden access was denied. Reconnect in Settings → Bookmarks.' : state.error ? `${state.error}${state.tree.length ? ' Showing the saved tree.' : ''}` : !state.discovered ? 'Checking Linkwarden connection…' : !state.configured ? state.encryptionReady ? 'Connect Linkwarden in Settings → Bookmarks.' : 'Configure the server encryption key to connect Linkwarden.' : state.loadingTree && !state.tree.length ? 'Loading bookmark folders…' : !state.tree.length ? 'No bookmark collections.' : state.treeStale ? 'The collection tree is stale.' : state.limit ? 'The dashboard bookmark limit was reached. Open Linkwarden for the full account.' : '';
+      if (state.selectionMessage && state.configured && !state.needsReauthentication && !state.accessDenied && !state.error) status.textContent = state.selectionMessage;
       const focused = document.activeElement; const retained = new Set(); renderList(root, state.tree, retained);
       for (const [id, entry] of nodes) if (!retained.has(id)) { entry.item.remove(); nodes.delete(id); }
       if (focused?.isConnected && document.activeElement !== focused) focused.focus({ preventScroll: true });

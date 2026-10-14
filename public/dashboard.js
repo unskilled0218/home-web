@@ -6,6 +6,7 @@ import { createSettingsTabs } from './dashboard-settings.js';
 import { formatWeatherUpdated } from './weather-data.js';
 import { createBookmarkController } from './dashboard-bookmarks.js';
 import { createBookmarkTree } from './dashboard-bookmark-tree.js';
+import { createBookmarkSelection } from './dashboard-bookmark-selection.js';
 import { safeBookmarkUrl } from './bookmark-data.js';
 import { createSettingsSync } from './dashboard-settings-sync.js';
 import { createIntegrationSettings } from './dashboard-integration-settings.js';
@@ -27,16 +28,17 @@ const mobileViewport = matchMedia(MOBILE_MEDIA_QUERY);
 let mobileLayout;
 const preferences = $('preferences');
 const dialog = $('settings-dialog');
-const settingsTabs = createSettingsTabs(dialog, { onSelect: (id) => deviceIntegrations.setPickerOpen(dialog.open && id === 'settings-tab-home-assistant') });
+const settingsTabs = createSettingsTabs(dialog, { onSelect: (id) => { deviceIntegrations.setPickerOpen(dialog.open && id === 'settings-tab-home-assistant'); bookmarks.setPickerOpen(dialog.open && id === 'settings-tab-bookmarks'); } });
 const deviceView = createDashboardDeviceView({ document, wake: (id) => deviceIntegrations.wake(id) });
 const deviceSelection = createDeviceSelection({ document, root: $('home-assistant-device-picker'), status: $('home-assistant-selection-status'), onChange: () => { draftDirty = true; } });
 const deviceIntegrations = createDashboardDevices({ onChange: (state) => { deviceView.render(state); deviceSelection.update(state); } });
 const integrationSettings = createIntegrationSettings({ document, homeAssistant: deviceIntegrations.homeAssistant, wol: deviceIntegrations.wol });
 const bookmarkTree = createBookmarkTree({ root: $('bookmark-tree'), status: $('bookmarks-status'), onToggle: (id, open) => bookmarks.setFolderOpen(id, open), onRetry: (id) => bookmarks.retryFolder(id) });
+const bookmarkSelection = createBookmarkSelection({ document, root: $('bookmark-link-picker'), foldersRoot: $('bookmark-picker-folders'), status: $('bookmark-selection-status'), selectNone: $('bookmark-select-none'), onChange: () => { draftDirty = true; }, onToggle: (id, open) => bookmarks.setPickerFolderOpen(id, open), onRetry: (id) => bookmarks.retryFolder(id) });
 const bookmarks = createBookmarkController({ onChange(state) {
-  bookmarkTree.render(state);
+  bookmarkTree.render(state.dashboard); bookmarkSelection.update(state);
   const link = $('open-linkwarden'); const url = safeBookmarkUrl(state.baseUrl);
-  link.hidden = !url; if (url) link.href = url; else link.removeAttribute('href');
+  link.hidden = !url; if (url) { link.href = url; link.target = '_blank'; link.rel = 'noopener noreferrer'; } else link.removeAttribute('href');
   $('connect-linkwarden').disabled = state.mutationPending || (state.discovered && !state.encryptionReady);
   $('linkwarden-token').required = state.needsReauthentication || !state.accessTokenPresent;
   $('disconnect-linkwarden').disabled = state.mutationPending || (!state.configured && !state.accessTokenPresent);
@@ -49,6 +51,7 @@ function fillForm() {
     else control.value = settings[control.name];
   }
   deviceSelection.setDraft(settings.homeAssistantDeviceSelections);
+  bookmarkSelection.setDraft(settings.bookmarkLinkSelections);
 }
 
 function updateClock() {
@@ -189,6 +192,7 @@ const settingsSync = createSettingsSync({ storage,
     else if (changed(['timezone', 'dateStyle', 'hour12', 'seconds'])) startClock();
     if (first || changed(['mobileBookmarksMode', 'hideBookmarksFullscreen'])) applyBookmarkPresentation();
     if (first || changed(['homeAssistantDeviceSelections'])) deviceIntegrations.configure(settings.homeAssistantDeviceSelections);
+    if (first || changed(['bookmarkLinkSelections'])) bookmarks.configure(settings.bookmarkLinkSelections);
     document.body.style.backgroundColor = settings.color;
     if (first || changed(['order', 'interval', 'duration', 'animation', 'opacity', 'background', 'color', 'blur', 'imageInfo'])) photos.configure(settings);
     if (first || changed(['timezone', 'temperature', 'wind', 'precipitation'])) weather.configure(settings);
@@ -211,6 +215,7 @@ const settingsSync = createSettingsSync({ storage,
     const saving = state.pending;
     for (const control of preferences.elements) if (PREFERENCE_KEYS.includes(control.name)) control.disabled = saving;
     deviceSelection.setSaving(saving);
+    bookmarkSelection.setSaving(saving);
     $('save-preferences').disabled = saving || !state.confirmed || (dialog.open && draftRevision === null);
     $('reload-shared-preferences').disabled = saving || !state.confirmed;
     $('settings-status').textContent = saving ? 'Saving shared preferences…' : state.error ? state.error : preferenceMessage || (state.confirmed ? 'Preferences are shared across all browsers.' : state.cache ? 'Using cached shared preferences while loading the server.' : 'Loading shared preferences…');
@@ -228,6 +233,7 @@ preferences.addEventListener('submit', async (event) => {
     next[control.name] = control.type === 'checkbox' ? control.checked : control.type === 'number' ? control.valueAsNumber : control.value;
   }
   next.homeAssistantDeviceSelections = deviceSelection.getDraft();
+  next.bookmarkLinkSelections = bookmarkSelection.getDraft();
   draftDirty = true;
   try {
     const saved = await settingsSync.save(normalizeDashboardPreferences(next), draftRevision);
@@ -264,7 +270,7 @@ $('open-settings').addEventListener('click', () => {
   $('settings-tab-general').focus();
 });
 $('close-settings').addEventListener('click', () => dialog.close());
-dialog.addEventListener('close', () => { integrationSettings.close(); deviceIntegrations.setPickerOpen(false); $('open-settings').focus(); });
+dialog.addEventListener('close', () => { integrationSettings.close(); deviceIntegrations.setPickerOpen(false); bookmarks.setPickerOpen(false); $('open-settings').focus(); });
 function cancelSearch() { searchGeneration++; searchController?.abort(); }
 $('location-search').addEventListener('submit', async (event) => {
   event.preventDefault(); cancelSearch(); const request = searchGeneration;

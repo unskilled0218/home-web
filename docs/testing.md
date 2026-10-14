@@ -20,4 +20,6 @@ For bounded local verification use `npm test -- --test-timeout=10000`; terminal 
 
 Install development dependencies with `npm ci`, then download both required browsers with `npx playwright install chromium firefox`. The default runner is Chromium, with Firefox launched only by the focused cross-engine case. Container system libraries must be installed by the operator when missing; do not silently skip engine verification. A safe packet-dispatch integration test still requires a disposable UDP receiver on the deployment network.
 
+Selected-bookmark tests cover shared choice persistence, never-configured versus empty preferences, exact bounded records, source/account identity, token renewal, selected-first cache reclamation, late-response protection, and genuinely over-budget content. Real-server browser cases cover a subset versus the lazy catalog, mouse/keyboard loopback popup navigation with no opener, restart and two-browser synchronization, dirty-draft conflicts, explicit moved-link hint repair/discard, access-denied label removal, the 256-link picker limit, and desktop/mobile/fullscreen presentation. Providers are stubbed and popup destinations remain loopback; no real Linkwarden account is contacted.
+
 [Back to README](../README.md)

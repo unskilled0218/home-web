@@ -1,3 +1,5 @@
+import { BOOKMARK_SELECTION_ID } from './bookmark-selection-data.js';
+
 export const MAX_COLLECTIONS = 256;
 export const MAX_COLLECTION_DEPTH = 16;
 export const MAX_FOLDER_BOOKMARKS = 2000;
@@ -42,8 +44,9 @@ export function normalizeBookmarkLinks(rows) {
   return rows.flatMap((row) => {
     const url = safeBookmarkUrl(row?.url);
     if (!url || !Number.isSafeInteger(row.id) || row.id < 1 || seen.has(row.id)) return [];
+    if (typeof row.selectionId !== 'string' || !BOOKMARK_SELECTION_ID.test(row.selectionId)) throw bookmarkError('Invalid bookmark identity.', 'INVALID_BOOKMARKS');
     seen.add(row.id);
-    return [{ id: row.id, name: (typeof row.name === 'string' && row.name.trim() ? row.name.trim() : url).slice(0, 300), url }];
+    return [{ id: row.id, selectionId: row.selectionId, name: (typeof row.name === 'string' && row.name.trim() ? row.name.trim() : url).slice(0, 300), url }];
   });
 }
 

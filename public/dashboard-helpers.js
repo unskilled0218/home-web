@@ -1,3 +1,5 @@
+import { normalizeBookmarkSelections } from './bookmark-selection-data.js';
+
 export const SETTINGS_KEY = 'dashboard.preferences.v1';
 export const MOBILE_MEDIA_QUERY = '(max-width: 600px)';
 const choice = (value, options, fallback) => options.includes(value) ? value : fallback;
@@ -37,6 +39,7 @@ export function normalizeSettings(input = {}, fallbackZone = Intl.DateTimeFormat
     mobileTimeVisible: boolean(value.mobileTimeVisible, true), mobileTimeScale: mobileScale(value.mobileTimeScale), mobileWeatherVisible: boolean(value.mobileWeatherVisible, true), mobileWeatherScale: mobileScale(value.mobileWeatherScale), mobileCalendarVisible: boolean(value.mobileCalendarVisible, true), mobileCalendarScale: mobileScale(value.mobileCalendarScale),
     mobileBookmarksMode: choice(value.mobileBookmarksMode, ['compact', 'expanded'], 'compact'), hideBookmarksFullscreen: boolean(value.hideBookmarksFullscreen, false),
     homeAssistantDeviceSelections: normalizeDeviceSelections(value.homeAssistantDeviceSelections),
+    bookmarkLinkSelections: normalizeBookmarkSelections(value.bookmarkLinkSelections),
     location: normalizeLocation(value.location), temperature: choice(value.temperature, ['celsius', 'fahrenheit'], 'celsius'), wind: choice(value.wind, ['kmh', 'mph', 'ms', 'kn'], 'kmh'), precipitation: choice(value.precipitation, ['mm', 'inch'], 'mm'),
     order: choice(value.order, ['name', 'date', 'random'], 'random'), interval, duration: number(value.duration, 0, Math.min(10, interval - 1), 3), animation: choice(value.animation, ['none', 'fade', 'slide'], 'fade'),
     opacity: number(value.opacity, 0, 1, 1), background: choice(value.background, ['color', 'blur'], 'color'), color: /^#[0-9a-f]{6}$/i.test(value.color) ? value.color : '#000000', blur: number(value.blur, 0, 100, 100), imageInfo: boolean(value.imageInfo, false)
@@ -57,11 +60,11 @@ export function normalizeDashboardPreferences(input = {}) {
 export function validateDashboardPreferences(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length !== PREFERENCE_KEYS.length || Object.keys(value).some((key) => !PREFERENCE_KEYS.includes(key))) throw new Error('Invalid dashboard preference fields.');
   const canonical = normalizeDashboardPreferences(value);
-  for (const key of PREFERENCE_KEYS) if (key !== 'homeAssistantDeviceSelections' && value[key] !== canonical[key]) throw new Error(`Invalid dashboard preference: ${key}.`);
+  for (const key of PREFERENCE_KEYS) if (!['homeAssistantDeviceSelections', 'bookmarkLinkSelections'].includes(key) && value[key] !== canonical[key]) throw new Error(`Invalid dashboard preference: ${key}.`);
   return canonical;
 }
 export function decodeStoredDashboardPreferences(value) {
-  if (value && typeof value === 'object' && !Array.isArray(value) && !Object.hasOwn(value, 'homeAssistantDeviceSelections')) return validateDashboardPreferences({ ...value, homeAssistantDeviceSelections: [] });
+  if (value && typeof value === 'object' && !Array.isArray(value)) return validateDashboardPreferences({ homeAssistantDeviceSelections: [], bookmarkLinkSelections: null, ...value });
   return validateDashboardPreferences(value);
 }
 export function legacyDashboardPreferences(value) {

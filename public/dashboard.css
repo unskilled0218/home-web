@@ -135,6 +135,14 @@ input[type=color] { min-height: 2.5rem; }
 #home-assistant-device-picker { list-style: none; padding: 0; margin: 0; grid-column: 1 / -1; min-width: 0; }
 #home-assistant-device-picker label { margin: .5rem 0; overflow-wrap: anywhere; }
 #home-assistant-device-picker input { flex: 0 0 auto; }
+#bookmark-link-picker, #bookmark-picker-folders { list-style: none; padding: 0; margin: .75rem 0; grid-column: 1 / -1; min-width: 0; }
+#bookmark-picker-folders ul { list-style: none; padding-inline-start: .75rem; }
+#bookmark-link-picker li, #bookmark-picker-folders li { min-width: 0; overflow-wrap: anywhere; }
+#bookmark-link-picker label { margin: .5rem 0; overflow-wrap: anywhere; }
+#bookmark-link-picker input { flex: 0 0 auto; }
+#bookmark-link-picker button { margin: .25rem 0; max-width: 100%; }
+#bookmark-picker-folders summary { cursor: pointer; padding: .35rem 0; }
+#bookmark-picker-folders p { font-size: .8rem; margin: .35rem 0; }
 @media (max-width: 1000px) {
   #dashboard-content, .bookmarks-shown #dashboard-content { display: block; }
   #dashboard-content #information { padding-top: 0; }

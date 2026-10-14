@@ -18,6 +18,7 @@ import { MAX_HOME_SETTINGS_BYTES, normalizeHomeSettings } from './home-settings.
 import { validateWeatherLocation, weatherTimezone } from '../public/weather-data.js';
 import { validateDashboardPreferences } from '../public/dashboard-helpers.js';
 import { CONNECTION_SHUTDOWN_GRACE_MS } from './lifecycle-constants.js';
+import { safeBookmarkUrl } from '../public/bookmark-data.js';
 
 export const MAX_JSON_BODY_BYTES = 16_384;
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -146,11 +147,24 @@ export function createDashboardServer({ runtimeConfig, store, linkwarden, homeAs
     const expiresAt = now() + 60 * 60_000;
     const tokenize = (collection) => ({
       name: collection.name,
-      selectionId: createHash('sha256').update(JSON.stringify(['linkwarden-collection-v1', settings.baseUrl, settings.username, collection.id])).digest('base64url'),
+      selectionId: collectionSelectionId(settings, collection.id),
       collectionToken: collectionSelections.issue({ id: collection.id, fingerprint, expiresAt }),
       children: collection.children.map(tokenize)
     });
     return collections.map(tokenize);
+  }
+
+  function collectionSelectionId(settings, id) {
+    return createHash('sha256').update(JSON.stringify(['linkwarden-collection-v1', settings.baseUrl, settings.username, id])).digest('base64url');
+  }
+
+  function publicBookmarks(settings, rows) {
+    return rows.flatMap((row) => {
+      const url = safeBookmarkUrl(row.url);
+      if (!url || !Number.isSafeInteger(row.id) || row.id < 1) return [];
+      const selectionId = `b_${createHash('sha256').update(JSON.stringify(['linkwarden-bookmark-v1', settings.baseUrl, settings.username, row.id])).digest('base64url')}`;
+      return [{ ...row, url, selectionId }];
+    });
   }
 
   function selectedCollection(token, settings) {
@@ -430,7 +444,7 @@ export function createDashboardServer({ runtimeConfig, store, linkwarden, homeAs
         const collection = selectedCollection(url.searchParams.get('collection') ?? '', settings);
         const result = await linkwarden.getBookmarks({ ...settings, collectionId: collection.id }, { force: url.searchParams.get('refresh') === '1' });
         if (configurationId !== linkwardenConfigurationId()) return json(response, 409, { code: 'LINKWARDEN_CONFIGURATION_CHANGED', error: 'Linkwarden source changed. Reload the connection.' });
-        return json(response, 200, { configured: true, configurationId, ...result });
+        return json(response, 200, { configured: true, configurationId, ...result, collectionSelectionId: collectionSelectionId(settings, collection.id), bookmarks: publicBookmarks(settings, result.bookmarks) });
       } catch (error) { return linkwardenReadError(response, error, configurationId, 'Bookmarks are currently unavailable.'); }
     }
 

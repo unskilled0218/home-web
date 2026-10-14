@@ -111,7 +111,10 @@ test('connects atomically and navigates collections through opaque tokens', asyn
     assert.equal(listed.body.configurationId, configurationId); assert.equal(listed.body.collections[0].children[0].selectionId, selectionId); assert.notEqual(collectionToken, oldCollectionToken);
     const bookmarks = await api(`/api/bookmarks?collection=${encodeURIComponent(collectionToken)}`);
     assert.equal(bookmarks.response.status, 200);
-    assert.deepEqual(bookmarks.body.bookmarks, [{ id: 9, name: 'Docs', url: 'https://example.test/docs' }]);
+    const bookmarkSelectionId = bookmarks.body.bookmarks[0].selectionId;
+    assert.match(bookmarkSelectionId, /^b_[A-Za-z0-9_-]{43}$/);
+    assert.equal(bookmarks.body.collectionSelectionId, selectionId);
+    assert.deepEqual(bookmarks.body.bookmarks, [{ id: 9, name: 'Docs', url: 'https://example.test/docs', selectionId: bookmarkSelectionId }]);
 
     await stopDashboard();
     await startDashboard('invalid-key');
@@ -134,6 +137,8 @@ test('connects atomically and navigates collections through opaque tokens', asyn
     const reconnected = await api('/api/linkwarden', { method: 'PUT', body: JSON.stringify({ url: baseUrl, username: 'musty', accessToken: '' }) });
     assert.equal(reconnected.response.status, 200);
     assert.notEqual(reconnected.body.configurationId, configurationId); assert.equal(reconnected.body.collections[0].children[0].selectionId, selectionId);
+    const renewedBookmarks = await api(`/api/bookmarks?collection=${encodeURIComponent(reconnected.body.collections[0].children[0].collectionToken)}`);
+    assert.equal(renewedBookmarks.body.bookmarks[0].selectionId, bookmarkSelectionId);
     const expiredSelection = await api(`/api/bookmarks?collection=${encodeURIComponent(oldCollectionToken)}`);
     assert.equal(expiredSelection.response.status, 400);
     assert.equal(expiredSelection.body.code, 'COLLECTION_SELECTION_EXPIRED');

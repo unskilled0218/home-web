@@ -114,3 +114,27 @@ test('selection validation rejects duplicates, invalid IDs and oversized arrays 
   assert.equal(valid.homeAssistantDeviceSelections.length, 256);
   assert.ok(Buffer.byteLength(JSON.stringify({ preferences: valid, revision: 1, integrations: {} })) < 65536);
 });
+
+test('bookmark choices distinguish setup from empty, enforce exact records, and fit alongside maximum device choices', () => {
+  const defaults = normalizeDashboardPreferences(); assert.equal(defaults.bookmarkLinkSelections, null);
+  const record = { selectionId: 'b_' + 'a'.repeat(43), collectionSelectionId: 'c'.repeat(43) };
+  assert.deepEqual(validateDashboardPreferences({ ...defaults, bookmarkLinkSelections: [] }).bookmarkLinkSelections, []);
+  for (const invalid of [{}, false, [record, record], [{ ...record, url: 'https://private.test' }], [{ ...record, selectionId: 'raw' }], [{ ...record, collectionSelectionId: 'x' }], Array.from({ length: 257 }, () => record)]) assert.throws(() => validateDashboardPreferences({ ...defaults, bookmarkLinkSelections: invalid }));
+  const bookmarkLinkSelections = Array.from({ length: 256 }, (_, index) => ({ selectionId: 'b_' + String(index).padStart(43, 'a'), collectionSelectionId: 'c'.repeat(43) }));
+  const homeAssistantDeviceSelections = Array.from({ length: 256 }, (_, index) => 'd_' + String(index).padStart(43, 'a'));
+  const maximum = validateDashboardPreferences({ ...defaults, bookmarkLinkSelections, homeAssistantDeviceSelections });
+  assert.ok(Buffer.byteLength(JSON.stringify({ preferences: maximum, revision: 1, integrations: { linkwarden: { baseUrl: 'x'.repeat(2048), username: 'x'.repeat(120) }, calendar: { serverUrl: 'x'.repeat(2048), username: 'x'.repeat(120) }, weather: {} } })) < 65536, 'maximum choices and bounded integration metadata fit the response budget');
+});
+
+test('old bookmark preference records decode without writes; explicit saves persist choices and keep conflict ownership', async (t) => {
+  const env = await setup(t); const preferences = normalizeDashboardPreferences({ color: '#123456' }); const old = { ...preferences }; delete old.bookmarkLinkSelections; delete old.homeAssistantDeviceSelections;
+  const db = new DatabaseSync(env.filename); t.after(() => db.close()); db.prepare('INSERT INTO dashboard_preferences (id, configuration, revision) VALUES (1, ?, 7)').run(JSON.stringify(old));
+  const read = await (await env.api()).json(); assert.equal(read.revision, 7); assert.equal(read.preferences.bookmarkLinkSelections, null); assert.deepEqual(read.preferences.homeAssistantDeviceSelections, []); assert.equal(db.prepare('SELECT configuration FROM dashboard_preferences').get().configuration, JSON.stringify(old));
+  assert.equal((await env.api('/api/dashboard/settings', 'PUT', { revision: 7, preferences: old })).status, 400);
+  const canonical = await (await env.api('/api/dashboard/settings', 'PUT', { revision: 7, preferences: read.preferences })).json(); assert.equal(canonical.revision, 8); assert.equal(JSON.parse(db.prepare('SELECT configuration FROM dashboard_preferences').get().configuration).bookmarkLinkSelections, null);
+  const choice = { selectionId: 'b_' + 'a'.repeat(43), collectionSelectionId: 'c'.repeat(43) };
+  const selected = await (await env.api('/api/dashboard/settings', 'PUT', { revision: 8, preferences: { ...canonical.preferences, bookmarkLinkSelections: [choice] } })).json(); assert.equal(selected.preferences.color, '#123456'); assert.deepEqual(selected.preferences.bookmarkLinkSelections, [choice]);
+  assert.equal((await env.api('/api/dashboard/settings', 'PUT', { revision: 8, preferences: canonical.preferences })).status, 409);
+  const reopened = createStore(env.filename); assert.deepEqual(reopened.getDashboardPreferences(), { initialized: true, revision: selected.revision, preferences: selected.preferences }); reopened.close();
+  const empty = await (await env.api('/api/dashboard/settings', 'PUT', { revision: selected.revision, preferences: { ...selected.preferences, bookmarkLinkSelections: [] } })).json(); assert.deepEqual(empty.preferences.bookmarkLinkSelections, []);
+});

@@ -27,7 +27,7 @@ export function createDashboardPreferenceStore(db) {
         const current = getDashboardPreferences();
         if (current.revision !== revision) return null;
         if (!current.initialized) insert.run(JSON.stringify(preferences));
-        else if (JSON.stringify(current.preferences) !== JSON.stringify(preferences)) update.run(JSON.stringify(preferences), revision);
+      else if (read.get().configuration !== JSON.stringify(preferences)) update.run(JSON.stringify(preferences), revision);
         return getDashboardPreferences();
       });
     }
