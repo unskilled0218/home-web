@@ -196,5 +196,16 @@
       "suggestion": 0
     },
     "scope": "Branch review: 41-home-assistant-wol-dashboard vs main (d584f24...b274e52)"
+  },
+  {
+    "date": "2026-10-14",
+    "mode": "PR Review",
+    "score": 89,
+    "findings": {
+      "critical": 0,
+      "warning": 2,
+      "suggestion": 1
+    },
+    "scope": "Plan review: tasks/42-safe-server-shutdown/2-plan.md"
   }
 ]
