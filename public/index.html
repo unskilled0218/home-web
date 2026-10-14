@@ -46,7 +46,26 @@
         </div>
         <div class="settings-panels">
           <section id="settings-panel-general" role="tabpanel" aria-labelledby="settings-tab-general" tabindex="0">
-            <h3>General</h3><p class="settings-description">Position and overall scale apply to desktop. Mobile starts at the top with separate display options in Time, Weather, and Calendar.</p>
+            <h3>General</h3><p class="settings-description">Position and overall scale apply to desktop. Choose which sections appear over the background without changing connections or selections.</p>
+            <fieldset id="background-display"><legend>Display on background</legend>
+              <fieldset><legend>Desktop</legend>
+                <label class="toggle"><input name="timeVisible" form="preferences" type="checkbox">Time</label>
+                <label class="toggle"><input name="weatherVisible" form="preferences" type="checkbox">Weather</label>
+                <label class="toggle"><input name="calendarVisible" form="preferences" type="checkbox">Calendar</label>
+                <label class="toggle"><input name="bookmarksVisible" form="preferences" type="checkbox">Bookmarks</label>
+                <label class="toggle"><input name="homeAssistantVisible" form="preferences" type="checkbox">Home Assistant</label>
+                <label class="toggle"><input name="wolVisible" form="preferences" type="checkbox">Wake-on-LAN</label>
+              </fieldset>
+              <fieldset><legend>Mobile</legend>
+                <label class="toggle"><input name="mobileTimeVisible" form="preferences" type="checkbox">Time</label>
+                <label class="toggle"><input name="mobileWeatherVisible" form="preferences" type="checkbox">Weather</label>
+                <label class="toggle"><input name="mobileCalendarVisible" form="preferences" type="checkbox">Calendar</label>
+                <label class="toggle"><input name="mobileBookmarksVisible" form="preferences" type="checkbox">Bookmarks</label>
+                <label class="toggle"><input name="mobileHomeAssistantVisible" form="preferences" type="checkbox">Home Assistant</label>
+                <label class="toggle"><input name="mobileWolVisible" form="preferences" type="checkbox">Wake-on-LAN</label>
+              </fieldset>
+              <p class="settings-description">Mobile applies up to and including 600px wide. Edit either profile on any screen. Changes apply after Save preferences.</p>
+            </fieldset>
             <fieldset><legend>Information layout</legend>
               <label>Position<select name="position" form="preferences"><option value="left">Lower left</option><option value="right">Lower right</option></select></label>
               <label>Overall scale<input name="scale" form="preferences" type="number" min="0.5" max="2" step="0.1"></label>
@@ -55,14 +74,12 @@
           <section id="settings-panel-time" role="tabpanel" aria-labelledby="settings-tab-time" tabindex="0" hidden>
             <h3>Time</h3><p class="settings-description">Choose how your clock looks. Timezone also applies to weather and calendar times.</p>
             <fieldset><legend>Desktop display</legend>
-              <label class="toggle"><input name="timeVisible" form="preferences" type="checkbox">Show clock</label>
               <label>Clock scale<input name="timeScale" form="preferences" type="number" min="0.5" max="2" step="0.1"></label>
             </fieldset>
             <fieldset><legend>Mobile display</legend>
-              <label class="toggle"><input name="mobileTimeVisible" form="preferences" type="checkbox">Show clock on mobile</label>
               <label>Clock scale on mobile<input name="mobileTimeScale" form="preferences" type="number" min="0.5" max="2" step="0.1"></label>
             </fieldset>
-            <p class="settings-description">Mobile display applies up to 600px wide, with scale in 0.1 increments. Both profiles can be edited on any screen.</p>
+            <p class="settings-description">Choose visibility in General → Display on background. Mobile scale uses 0.1 increments. Both profiles can be edited on any screen.</p>
             <fieldset><legend>Shared format</legend>
               <label>Timezone<input name="timezone" form="preferences" maxlength="80" placeholder="Europe/London" required></label>
               <label>Date style<select name="dateStyle" form="preferences"><option>short</option><option>medium</option><option>long</option><option>full</option></select></label>
@@ -73,14 +90,12 @@
           <section id="settings-panel-weather" role="tabpanel" aria-labelledby="settings-tab-weather" tabindex="0" hidden>
             <h3>Weather</h3><p class="settings-description">Local conditions, forecasts, and units at a glance.</p>
             <fieldset><legend>Desktop display</legend>
-              <label class="toggle"><input name="weatherVisible" form="preferences" type="checkbox">Show weather</label>
               <label>Weather scale<input name="weatherScale" form="preferences" type="number" min="0.5" max="2" step="0.1"></label>
             </fieldset>
             <fieldset><legend>Mobile display</legend>
-              <label class="toggle"><input name="mobileWeatherVisible" form="preferences" type="checkbox">Show weather on mobile</label>
               <label>Weather scale on mobile<input name="mobileWeatherScale" form="preferences" type="number" min="0.5" max="2" step="0.1"></label>
             </fieldset>
-            <p class="settings-description">Mobile display applies up to 600px wide, with scale in 0.1 increments. Units apply to both layouts.</p>
+            <p class="settings-description">Choose visibility in General → Display on background. Mobile scale uses 0.1 increments. Units apply to both layouts.</p>
             <fieldset><legend>Shared units</legend>
               <label>Temperature<select name="temperature" form="preferences"><option value="celsius">Celsius</option><option value="fahrenheit">Fahrenheit</option></select></label>
               <label>Wind<select name="wind" form="preferences"><option value="kmh">km/h</option><option value="mph">mph</option><option value="ms">m/s</option><option value="kn">knots</option></select></label>
@@ -91,14 +106,12 @@
           <section id="settings-panel-calendar" role="tabpanel" aria-labelledby="settings-tab-calendar" tabindex="0" hidden>
             <h3>Calendar</h3><p class="settings-description">Keep upcoming events close with your Baikal calendar.</p>
             <fieldset><legend>Desktop display</legend>
-              <label class="toggle"><input name="calendarVisible" form="preferences" type="checkbox">Show calendar</label>
               <label>Calendar scale<input name="calendarScale" form="preferences" type="number" min="0.5" max="2" step="0.1"></label>
             </fieldset>
             <fieldset><legend>Mobile display</legend>
-              <label class="toggle"><input name="mobileCalendarVisible" form="preferences" type="checkbox">Show calendar on mobile</label>
               <label>Calendar scale on mobile<input name="mobileCalendarScale" form="preferences" type="number" min="0.5" max="2" step="0.1"></label>
             </fieldset>
-            <p class="settings-description">Mobile display applies up to 600px wide, with scale in 0.1 increments. The connection is shared; events refresh when either profile shows the calendar.</p>
+            <p class="settings-description">Choose visibility in General → Display on background. Mobile scale uses 0.1 increments. The connection is shared; events refresh when either profile shows the calendar.</p>
             <section class="settings-section" aria-labelledby="calendar-settings-title"><h4 id="calendar-settings-title">Baikal calendar</h4><p>Enter the Baikal server URL. Event calendars are discovered automatically. The password is encrypted on this server and never shown again; leave it blank to retain it when the URL and username are unchanged.</p><form id="calendar-connection"><label>Baikal server URL<input id="calendar-url" name="serverUrl" type="url" maxlength="2048" placeholder="https://baikal.example.test" autocomplete="url" required></label><label>Username<input id="calendar-username" name="username" maxlength="120" autocomplete="username" required></label><label>Password<input id="calendar-password" name="password" type="password" maxlength="2000" autocomplete="current-password"></label><div class="calendar-settings-actions"><button id="connect-calendar" type="submit">Connect calendar</button><button id="disconnect-calendar" type="button">Disconnect calendar</button></div></form><p id="calendar-settings-status" role="status"></p></section>
           </section>
           <section id="settings-panel-bookmarks" role="tabpanel" aria-labelledby="settings-tab-bookmarks" tabindex="0" hidden>

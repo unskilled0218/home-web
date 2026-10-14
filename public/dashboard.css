@@ -9,6 +9,7 @@ button:hover, .page-tools a:hover { background: #30475c; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 .page-tools { position: relative; z-index: 2; display: flex; justify-content: flex-end; flex-wrap: wrap; gap: .5rem; padding: 1rem; }
 :fullscreen .page-tools { display: none; }
+:fullscreen .background-only .page-tools { display: flex; }
 #page-status { position: relative; z-index: 2; margin: 0 1rem; text-align: right; }
 #photos, .photo-layer, .photo-layer img { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 #photos { overflow: hidden; }
@@ -52,10 +53,9 @@ summary { cursor: pointer; padding: .5rem 0; }
 .forecast-label, .forecast-temperature { font-weight: 700; }
 .forecast-condition { font-size: .85em; }
 #photo-caption { overflow-wrap: anywhere; }
-#dashboard-content { display: grid; flex: 1; grid-template-columns: minmax(0, 1fr) clamp(14rem, 24vw, 22rem); gap: 1rem; margin: 0 1rem 1rem; align-items: end; }
-.bookmarks-shown #dashboard-content { grid-template-columns: minmax(0, 1fr) clamp(14rem, 22vw, 20rem) clamp(10rem, 24vw, 22rem); }
+#dashboard-content { display: grid; flex: 1; grid-template-columns: var(--dashboard-columns, minmax(0, 1fr)); gap: 1rem; margin: 0 1rem 1rem; align-items: end; }
 #dashboard-content #information { width: 100%; margin: 0; min-width: 0; }
-#dashboard-devices { position: relative; z-index: 1; align-self: start; height: max(20rem, calc(100dvh - 8rem)); display: grid; grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); gap: 1rem; min-width: 0; text-shadow: 0 2px 5px #000; }
+#dashboard-devices { position: relative; z-index: 1; align-self: start; height: max(20rem, calc(100dvh - 8rem)); display: grid; grid-template-rows: var(--device-rows, minmax(0, 1fr)); gap: 1rem; min-width: 0; text-shadow: 0 2px 5px #000; }
 #dashboard-devices > section { display: grid; grid-template-rows: auto auto auto minmax(0, 1fr); min-height: 0; min-width: 0; overflow: hidden; padding: .5rem; }
 #dashboard-devices h2 { font-size: 1.1rem; }
 #dashboard-devices [role=status], #dashboard-ha-updated { font-size: .8rem; overflow-wrap: anywhere; }
@@ -110,6 +110,8 @@ input[type=color] { min-height: 2.5rem; }
 #settings-dialog .settings-description, #settings-dialog .settings-section > p { color: #a6b6cf; font-size: .85rem; line-height: 1.6; }
 #settings-dialog fieldset { min-width: 0; min-inline-size: 0; grid-template-columns: repeat(auto-fit, minmax(min(12rem, 100%), 1fr)); padding: 1rem; margin: 1.25rem 0; gap: 1rem; border-color: #2c3c54; border-radius: .8rem; background: #152033; }
 #settings-dialog legend { padding: 0 .4rem; color: #c4d3eb; font-size: .8rem; font-weight: 600; }
+#settings-dialog #background-display { display: block; }
+#settings-dialog #background-display > fieldset { display: grid; margin: .75rem 0; }
 #settings-dialog label { min-width: 0; gap: .45rem; font-size: .85rem; color: #c5d1e3; }
 #settings-dialog input, #settings-dialog select { width: 100%; padding: .65rem .7rem; border-color: #354965; border-radius: .5rem; background: #0e1828; color: #eff4fc; }
 #settings-dialog input:hover, #settings-dialog select:hover { border-color: #6885b3; }

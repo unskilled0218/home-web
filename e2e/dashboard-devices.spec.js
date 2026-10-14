@@ -105,6 +105,26 @@ test('Wake rows contain only name and Wake, dispatch once, report cooldown/failu
   } finally { env.releaseWake(); await a.close(); await env.close(); }
 });
 
+test('hidden device overlays retain snapshots, connections and pending Wake completion', async ({ browser }) => {
+  const env = await environment({ selected: true }); const a = await client(browser, env);
+  try {
+    await expect(a.page.locator('#dashboard-ha-devices')).toContainText('20.00 °C');
+    env.blockWake(); await a.page.getByRole('button', { name: 'Wake Office PC', exact: true }).click(); await expect.poll(() => env.sent).toBe(1);
+    const before = env.store.getDashboardPreferences().preferences;
+    await a.page.locator('#open-settings').click();
+    for (const name of ['homeAssistantVisible', 'wolVisible']) await a.page.locator(`[name="${name}"]`).uncheck();
+    await save(a.page); await a.page.locator('#close-settings').click(); await expect(a.page.locator('#dashboard-devices')).toBeHidden();
+    env.releaseWake(); await expect(a.page.locator('#dashboard-wol-action-status')).toContainText('does not confirm'); expect(env.auditCount()).toBe(1);
+    await poll(a.page); await expect(a.page.locator('#dashboard-devices')).toBeHidden();
+    await a.page.locator('#open-settings').click();
+    for (const name of ['homeAssistantVisible', 'wolVisible']) await a.page.locator(`[name="${name}"]`).check();
+    await save(a.page); await a.page.locator('#close-settings').click();
+    await expect(a.page.locator('#dashboard-ha-devices')).toContainText('20.00 °C'); await expect(a.page.getByRole('button', { name: 'Wake Office PC', exact: true })).toBeEnabled();
+    expect(env.store.getDashboardPreferences().preferences.homeAssistantDeviceSelections).toEqual(before.homeAssistantDeviceSelections); expect(env.sent).toBe(1);
+    expect((await (await fetch(env.base + '/api/home-assistant')).json()).homeAssistant.configured).toBe(true);
+  } finally { env.releaseWake(); await a.close(); await env.close(); }
+});
+
 for (const [width, height] of [[1200, 850], [1200, 420], [900, 850], [390, 850], [320, 600]]) test(`device geometry contains long lists at ${width}×${height} and survives fullscreen hiding`, async ({ browser }) => {
   const env = await environment({ count: 40, selected: true, long: true });
   for (let i = 0; i < 40; i++) env.store.create({ name: `Computer ${i} ` + 'LongName'.repeat(8), macAddress: `02:00:00:00:00:${i.toString(16).padStart(2, '0')}`, broadcastAddress: '192.168.1.255', ipAddress: null, group: '' });

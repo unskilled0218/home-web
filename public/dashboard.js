@@ -13,6 +13,7 @@ import { createIntegrationSettings } from './dashboard-integration-settings.js';
 import { createDashboardDevices } from './dashboard-devices.js';
 import { createDeviceSelection } from './dashboard-device-selection.js';
 import { createDashboardDeviceView } from './dashboard-device-view.js';
+import { dashboardDisplay, applyDashboardDisplay } from './dashboard-display.js';
 
 const $ = (id) => document.getElementById(id);
 const currentWeatherSubValues = document.createElement('div');
@@ -132,7 +133,12 @@ function renderCalendar(state = calendarState) {
 }
 const calendar = createCalendarController({ onChange: renderCalendar, autoStart: false });
 function stopAnimations() { animations.forEach((animation) => animation.cancel()); animations = []; }
-function clearPhotos() { stopAnimations(); $('photos').replaceChildren(); $('photo-caption').textContent = ''; }
+function applyVisibilityLayout() {
+  const display = dashboardDisplay(settings, { mobile: mobileViewport.matches, fullscreen: Boolean(document.fullscreenElement), caption: Boolean($('photo-caption').textContent) });
+  applyDashboardDisplay(document, display);
+  return display;
+}
+function clearPhotos() { stopAnimations(); $('photos').replaceChildren(); $('photo-caption').textContent = ''; applyVisibilityLayout(); }
 const photos = createPhotoController({
   clear: clearPhotos,
   report: (message) => { $('photo-status').textContent = message; },
@@ -146,6 +152,7 @@ const photos = createPhotoController({
     const image = new Image(); image.alt = ''; image.src = photo.url; layer.append(image); layer.style.opacity = options.opacity;
     container.append(layer);
     $('photo-caption').textContent = options.imageInfo ? photo.file.name : '';
+    applyVisibilityLayout();
     if (previous && options.animation !== 'none' && options.duration > 0 && !reducedMotion.matches && layer.animate) {
       const frames = options.animation === 'slide' ? [{ transform: 'translateX(100%)' }, { transform: 'translateX(0)' }] : [{ opacity: 0 }, { opacity: options.opacity }];
       const animation = layer.animate(frames, { duration: options.duration * 1000, easing: 'ease-in-out' });
@@ -164,7 +171,6 @@ function applyPresentation() {
   $('clock').style.setProperty('--time-scale', display.timeScale);
   $('weather').style.setProperty('--weather-scale', display.weatherScale);
   $('calendar').style.setProperty('--calendar-scale', display.calendarScale);
-  $('clock').hidden = !display.timeVisible; $('weather').hidden = !display.weatherVisible; $('calendar').hidden = !display.calendarVisible;
   if (mobileLayout !== mobile) {
     const order = mobile ? ['clock', 'weather', 'calendar'] : ['calendar', 'clock', 'weather'];
     $('photo-caption').before(...order.map($));
@@ -175,9 +181,7 @@ function applyPresentation() {
 }
 
 function applyBookmarkPresentation() {
-  const hidden = settings.hideBookmarksFullscreen && Boolean(document.fullscreenElement);
-  $('bookmarks').hidden = hidden;
-  document.body.classList.toggle('bookmarks-shown', !hidden);
+  const hidden = !applyVisibilityLayout().bookmarksVisible;
   bookmarks.setPresentation({ mobile: mobileViewport.matches, mode: settings.mobileBookmarksMode, hidden });
 }
 
@@ -190,7 +194,7 @@ const settingsSync = createSettingsSync({ storage,
     const first = !servicesStarted;
     if (first || changed(['position', 'scale', 'timeVisible', 'timeScale', 'weatherVisible', 'weatherScale', 'calendarVisible', 'calendarScale', 'mobileTimeVisible', 'mobileTimeScale', 'mobileWeatherVisible', 'mobileWeatherScale', 'mobileCalendarVisible', 'mobileCalendarScale'])) applyPresentation();
     else if (changed(['timezone', 'dateStyle', 'hour12', 'seconds'])) startClock();
-    if (first || changed(['mobileBookmarksMode', 'hideBookmarksFullscreen'])) applyBookmarkPresentation();
+    if (first || changed(['mobileBookmarksMode', 'hideBookmarksFullscreen', 'bookmarksVisible', 'mobileBookmarksVisible', 'homeAssistantVisible', 'mobileHomeAssistantVisible', 'wolVisible', 'mobileWolVisible'])) applyBookmarkPresentation();
     if (first || changed(['homeAssistantDeviceSelections'])) deviceIntegrations.configure(settings.homeAssistantDeviceSelections);
     if (first || changed(['bookmarkLinkSelections'])) bookmarks.configure(settings.bookmarkLinkSelections);
     document.body.style.backgroundColor = settings.color;

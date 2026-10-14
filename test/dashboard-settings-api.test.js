@@ -30,6 +30,25 @@ test('global schema is complete, UTC-based, strictly validated, and native-step 
   for (const override of [{ scale: 1.25 }, { scale: '1' }, { timezone: 'bad' }, { blur: 1.5 }, { mobileBookmarksMode: 'bad' }, { hideBookmarksFullscreen: 'true' }, { accessToken: 'secret' }]) assert.throws(() => validateDashboardPreferences({ ...defaults, ...override }));
 });
 
+test('new overlay fields upgrade missing values only, preserving independent profiles and strict writes', async (t) => {
+  const env = await setup(t);
+  const keys = ['bookmarksVisible', 'homeAssistantVisible', 'wolVisible', 'mobileBookmarksVisible', 'mobileHomeAssistantVisible', 'mobileWolVisible'];
+  const preferences = normalizeDashboardPreferences({ timeVisible: false, mobileWeatherVisible: false, mobileCalendarVisible: false, bookmarkLinkSelections: [], homeAssistantDeviceSelections: ['d_' + 'a'.repeat(43)] });
+  const old = { ...preferences }; for (const key of keys) delete old[key];
+  assert.deepEqual(decodeStoredDashboardPreferences(old), preferences);
+  for (const key of keys) { assert.throws(() => decodeStoredDashboardPreferences({ ...old, [key]: 'false' })); assert.throws(() => validateDashboardPreferences({ ...preferences, [key]: 0 })); }
+  assert.throws(() => decodeStoredDashboardPreferences({ ...old, extra: true }));
+  const db = new DatabaseSync(env.filename); t.after(() => db.close());
+  db.prepare('INSERT INTO dashboard_preferences (id, configuration, revision) VALUES (1, ?, 7)').run(JSON.stringify(old));
+  const read = await (await env.api()).json(); assert.equal(read.revision, 7); assert.deepEqual(read.preferences, preferences);
+  assert.equal(db.prepare('SELECT configuration FROM dashboard_preferences').get().configuration, JSON.stringify(old));
+  assert.equal((await env.api('/api/dashboard/settings', 'PUT', { revision: 7, preferences: old })).status, 400);
+  const next = { ...read.preferences, ...Object.fromEntries(keys.map((key) => [key, false])) };
+  const saved = await (await env.api('/api/dashboard/settings', 'PUT', { revision: 7, preferences: next })).json(); assert.equal(saved.revision, 8); assert.deepEqual(saved.preferences, next);
+  assert.equal((await env.api('/api/dashboard/settings', 'PUT', { revision: 7, preferences })).status, 409);
+  const reopened = createStore(env.filename); assert.deepEqual(reopened.getDashboardPreferences().preferences, next); reopened.close();
+});
+
 test('uninitialized reads do not write, migration races choose one winner, and stale saves cannot replace it', async (t) => {
   const env = await setup(t); const defaults = normalizeDashboardPreferences();
   const first = await env.api(); assert.equal(first.headers.get('cache-control'), 'no-store'); assert.equal((await first.json()).initialized, false);

@@ -39,6 +39,16 @@ test('fresh uninitialized preview leaves storage unchanged and reset authority c
   await env.client.start(); assert.equal(env.calls.length, 1); assert.equal(values.has(SHARED_SETTINGS_KEY), false); assert.equal(env.client.getState().snapshot.revision, 0);
 });
 
+test('old confirmed caches gain visibility defaults and remote profiles remain authoritative', async (t) => {
+  const old = normalizeDashboardPreferences({ timeVisible: false, mobileCalendarVisible: false });
+  for (const key of ['bookmarksVisible', 'homeAssistantVisible', 'wolVisible', 'mobileBookmarksVisible', 'mobileHomeAssistantVisible', 'mobileWolVisible']) delete old[key];
+  const values = new Map([[SHARED_SETTINGS_KEY, JSON.stringify({ schema: 1, initialized: true, revision: 7, preferences: old })]]);
+  const remote = normalizeDashboardPreferences({ bookmarksVisible: false, mobileHomeAssistantVisible: false });
+  const env = setup(t, { values, handler: () => Response.json(snapshot({ revision: 8, preferences: remote })) });
+  assert.equal(env.client.getState().cache, true); assert.equal(env.client.getState().snapshot.preferences.bookmarksVisible, true); assert.equal(env.client.getState().snapshot.preferences.timeVisible, false);
+  await env.client.start(); assert.deepEqual(env.client.getState().snapshot.preferences, remote); assert.equal(env.calls.length, 1); assert.equal(env.tasks.size, 1);
+});
+
 test('successful preference confirmation does not depend on cache writes or stale service observers', async (t) => {
   let finish; const env = setup(t, { brokenStorage: true, handler: (_url, options) => options.method === 'PUT' ? new Promise((resolve) => { finish = () => resolve(Response.json(snapshot({ revision: 2, preferences: normalizeDashboardPreferences({ color: '#123456' }) }))); }) : Response.json(snapshot()) });
   await env.client.start(); env.observed.length = 0;

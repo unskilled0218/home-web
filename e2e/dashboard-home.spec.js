@@ -30,6 +30,11 @@ async function seedPreferences(page, preferences) {
   await page.addInitScript((value) => { window.sharedSeedPreferences = value; }, preferences);
 }
 
+async function displayToggle(page, name, checked) {
+  await page.getByRole('tab', { name: 'General', exact: true }).click();
+  await page.locator(`[name="${name}"]`).setChecked(checked);
+}
+
 async function mockSharedSettings(page) {
   let preferences; let revision = 1;
   const snapshot = () => { const weather = weatherMetadata.get(page)?.(); return { initialized: true, revision, preferences, integrations: { weather: weather ? { available: true, revision: weather.revision, location: weather.location } : { available: false }, calendar: { available: false }, linkwarden: { available: false } } }; };
@@ -104,10 +109,12 @@ async function mobileGeometry(page) {
     const tools = document.querySelector('.page-tools').getBoundingClientRect();
     const information = document.getElementById('information').getBoundingClientRect();
     const sections = [...document.querySelectorAll('#information > section:not([hidden])')].map((section) => ({ id: section.id, top: section.getBoundingClientRect().top, bottom: section.getBoundingClientRect().bottom, width: section.getBoundingClientRect().width }));
-    return { toolsBottom: tools.bottom, top: information.top, right: information.right, sections, width: innerWidth, scrollWidth: document.documentElement.scrollWidth };
+    return { hidden: document.getElementById('information').hidden, toolsBottom: tools.bottom, top: information.top, right: information.right, sections, width: innerWidth, scrollWidth: document.documentElement.scrollWidth };
   });
-  expect(layout.top).toBeGreaterThanOrEqual(layout.toolsBottom);
-  expect(layout.top - layout.toolsBottom, 'short mobile pages must not bottom-align information').toBeLessThanOrEqual(24);
+  if (!layout.hidden) {
+    expect(layout.top).toBeGreaterThanOrEqual(layout.toolsBottom);
+    expect(layout.top - layout.toolsBottom, 'short mobile pages must not bottom-align information').toBeLessThanOrEqual(24);
+  } else expect(layout.sections).toEqual([]);
   expect(layout.scrollWidth, 'mobile document must not overflow horizontally').toBe(layout.width);
   expect(layout.right).toBeLessThanOrEqual(layout.width);
   for (let i = 1; i < layout.sections.length; i++) expect(layout.sections[i].top, `${layout.sections[i].id} follows the previous section without overlap`).toBeGreaterThanOrEqual(layout.sections[i - 1].bottom);
@@ -150,8 +157,7 @@ test('existing preferences load at home and edits survive reload and legacy redi
   await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(18, 52, 86)');
   await page.locator('#open-settings').click();
   await page.locator('[name="position"]').selectOption('left');
-  await page.getByRole('tab', { name: 'Time', exact: true }).click();
-  await page.getByLabel('Show clock', { exact: true }).check();
+  await displayToggle(page, 'timeVisible', true);
   await page.getByRole('button', { name: 'Save preferences', exact: true }).click();
   await expect(page.locator('#settings-status')).toHaveText('Preferences saved for all browsers.');
   const saved = await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).preferences, settingsKey);
@@ -261,16 +267,15 @@ test('legacy mobile defaults start at the top even with unconfigured or hidden c
   await mobileGeometry(page);
   expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).preferences, settingsKey)).toMatchObject(legacy);
   await page.locator('#open-settings').click();
-  for (const [tab, label] of [['Time', 'Show clock on mobile'], ['Weather', 'Show weather on mobile'], ['Calendar', 'Show calendar on mobile']]) {
-    await page.getByRole('tab', { name: tab, exact: true }).click(); await page.getByLabel(label, { exact: true }).uncheck();
+  for (const name of ['mobileTimeVisible', 'mobileWeatherVisible', 'mobileCalendarVisible']) {
+    await displayToggle(page, name, false);
   }
   await savePreferences(page); await page.locator('#close-settings').click();
   for (const id of ['clock', 'weather', 'calendar']) await expect(page.locator(`#${id}`)).toBeHidden();
   await mobileGeometry(page);
   await page.locator('#open-settings').click();
   await expect(page.locator('#settings-dialog')).toBeVisible();
-  await page.getByRole('tab', { name: 'Weather', exact: true }).click();
-  await expect(page.getByLabel('Show weather on mobile', { exact: true })).toBeVisible();
+  await expect(page.locator('[name="mobileWeatherVisible"]')).toBeVisible();
 });
 
 test('each mobile toggle hides only its view and preserves ordering without empty gaps', async ({ page }) => {
@@ -278,17 +283,16 @@ test('each mobile toggle hides only its view and preserves ordering without empt
   await mockWeather(page); await mockCalendar(page); await page.goto('/');
   await expect(page.locator('#calendar-events')).toContainText('Planning meeting');
   await page.locator('#open-settings').click();
-  for (const [tab, label, id] of [['Time', 'Show clock on mobile', 'clock'], ['Weather', 'Show weather on mobile', 'weather'], ['Calendar', 'Show calendar on mobile', 'calendar']]) {
-    await page.getByRole('tab', { name: tab, exact: true }).click();
-    await page.getByLabel(label, { exact: true }).uncheck(); await savePreferences(page);
+  for (const [name, id] of [['mobileTimeVisible', 'clock'], ['mobileWeatherVisible', 'weather'], ['mobileCalendarVisible', 'calendar']]) {
+    await displayToggle(page, name, false); await savePreferences(page);
     await page.locator('#close-settings').click();
     await expect(page.locator(`#${id}`)).toBeHidden();
     for (const other of ['clock', 'weather', 'calendar'].filter((view) => view !== id)) await expect(page.locator(`#${other}`)).toBeVisible();
     expect(await sectionOrder(page)).toEqual(['clock', 'weather', 'calendar']); await mobileGeometry(page);
     const firstGap = await page.locator('#information > section:not([hidden])').first().evaluate((node) => node.getBoundingClientRect().top - document.getElementById('information').getBoundingClientRect().top);
     expect(firstGap).toBeLessThanOrEqual(1);
-    await page.locator('#open-settings').click(); await page.getByRole('tab', { name: tab, exact: true }).click();
-    await page.getByLabel(label, { exact: true }).check(); await savePreferences(page);
+    await page.locator('#open-settings').click();
+    await displayToggle(page, name, true); await savePreferences(page);
   }
 });
 
@@ -296,12 +300,12 @@ test('mobile preferences save across tabs and reload without changing desktop va
   await page.setViewportSize({ width: 320, height: 800 });
   const desktop = { position: 'right', scale: 1.4, timeVisible: false, timeScale: 0.7, weatherVisible: true, weatherScale: 1.6, calendarVisible: false, calendarScale: 0.8 };
   await seedPreferences(page, desktop); await page.goto('/'); await page.locator('#open-settings').click();
-  await page.getByRole('tab', { name: 'Time', exact: true }).click();
-  await page.getByLabel('Show clock on mobile', { exact: true }).uncheck(); await page.getByLabel('Clock scale on mobile', { exact: true }).fill('1.2');
+  await displayToggle(page, 'mobileTimeVisible', false); await page.getByRole('tab', { name: 'Time', exact: true }).click();
+  await page.getByLabel('Clock scale on mobile', { exact: true }).fill('1.2');
   await page.getByRole('tab', { name: 'Weather', exact: true }).click();
   await page.getByLabel('Weather scale on mobile', { exact: true }).fill('0.8');
-  await page.getByRole('tab', { name: 'Calendar', exact: true }).click();
-  await page.getByLabel('Show calendar on mobile', { exact: true }).uncheck(); await page.getByLabel('Calendar scale on mobile', { exact: true }).fill('1.7');
+  await displayToggle(page, 'mobileCalendarVisible', false); await page.getByRole('tab', { name: 'Calendar', exact: true }).click();
+  await page.getByLabel('Calendar scale on mobile', { exact: true }).fill('1.7');
   await page.getByRole('tab', { name: 'Time', exact: true }).click(); await expect(page.getByLabel('Clock scale on mobile', { exact: true })).toHaveValue('1.2');
   await savePreferences(page);
   const saved = await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).preferences, settingsKey);
@@ -311,7 +315,7 @@ test('mobile preferences save across tabs and reload without changing desktop va
   await expect(page.locator('#information')).toHaveClass('right'); expect(await sectionOrder(page)).toEqual(['calendar', 'clock', 'weather']);
   expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).preferences, settingsKey)).toEqual(saved);
   await page.setViewportSize({ width: 320, height: 800 }); await page.locator('#open-settings').click();
-  await page.getByRole('tab', { name: 'Time', exact: true }).click(); await page.getByLabel('Show clock', { exact: true }).check(); await page.getByLabel('Clock scale', { exact: true }).fill('1.5');
+  await displayToggle(page, 'timeVisible', true); await page.getByRole('tab', { name: 'Time', exact: true }).click(); await page.getByLabel('Clock scale', { exact: true }).fill('1.5');
   await savePreferences(page); await page.locator('#close-settings').click();
   await expect(page.locator('#clock')).toBeHidden();
   await page.setViewportSize({ width: 900, height: 800 }); await expect(page.locator('#clock')).toBeVisible();
@@ -439,7 +443,8 @@ test('hiding calendar in both profiles pauses events while retaining connection 
   await page.clock.install({ time: instant }); await seedPreferences(page, { calendarVisible: false, mobileCalendarVisible: true });
   const calendar = await mockCalendar(page); await page.goto('/'); await expect.poll(() => calendar.events).toBe(1);
   await page.locator('#open-settings').click(); await page.getByRole('tab', { name: 'Calendar', exact: true }).click();
-  await page.getByLabel('Show calendar on mobile', { exact: true }).uncheck(); await savePreferences(page);
+  await displayToggle(page, 'mobileCalendarVisible', false); await savePreferences(page);
+  await page.getByRole('tab', { name: 'Calendar', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Disconnect calendar', exact: true })).toBeEnabled();
   await expect(page.getByLabel('Baikal server URL', { exact: true })).toHaveValue('https://baikal.example.test');
   await page.locator('#close-settings').click();
@@ -545,6 +550,12 @@ test('bookmark-only preference saves and fullscreen keep the photo and unrelated
   await page.evaluate(() => { window.savedPhoto = document.querySelector('.photo-layer'); }); const before = calls.length;
   await page.getByLabel('Hide bookmarks in fullscreen', { exact: true }).check(); await savePreferences(page); await page.locator('#close-settings').click();
   await page.locator('#fullscreen').click(); await expect(page.locator('#bookmarks')).toBeHidden(); await page.evaluate(() => document.exitFullscreen()); await expect(page.locator('#bookmarks')).toBeVisible();
+  const selections = await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).preferences.bookmarkLinkSelections, settingsKey);
+  await page.locator('#open-settings').click(); await displayToggle(page, 'bookmarksVisible', false); await savePreferences(page); await page.locator('#close-settings').click(); await expect(page.locator('#bookmarks')).toBeHidden();
+  await page.locator('#fullscreen').click(); await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(true); await page.evaluate(() => document.exitFullscreen()); await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(false); await expect(page.locator('#bookmarks')).toBeHidden();
+  await page.locator('#open-settings').click(); await displayToggle(page, 'bookmarksVisible', true); await savePreferences(page); await page.locator('#close-settings').click();
+  await expect(page.getByRole('link', { name: 'Deep bookmark', exact: true })).toBeVisible(); await expect(page.getByRole('link', { name: 'Deep bookmark', exact: true })).toHaveAttribute('target', '_blank');
+  expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).preferences.bookmarkLinkSelections, settingsKey)).toEqual(selections);
   expect(calls.length).toBe(before); expect(await page.evaluate(() => window.savedPhoto === document.querySelector('.photo-layer'))).toBe(true); expect(mock.requests.tree).toBe(1);
 });
 
@@ -613,7 +624,7 @@ test('tabs support pointer and vertical keyboard navigation with one selected pa
   await page.keyboard.press('Tab');
   await expect(page.getByRole('tabpanel', { name: 'General', exact: true })).toBeFocused();
   await page.keyboard.press('Tab');
-  await expect(page.getByRole('combobox', { name: 'Position', exact: true })).toBeFocused();
+  await expect(page.locator('[name="timeVisible"]')).toBeFocused();
   await page.keyboard.press('Shift+Tab');
   await page.keyboard.press('Shift+Tab');
   await expect(general).toBeFocused();

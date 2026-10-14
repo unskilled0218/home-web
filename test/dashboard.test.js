@@ -231,8 +231,8 @@ test('mobile fields use strict booleans and finite clamped scales matching the f
 test('display projection selects independent profiles without mutating saved preferences', () => {
   const value = normalizeSettings({ position: 'right', scale: 2, timeVisible: false, timeScale: 1.5, weatherVisible: true, weatherScale: 0.5, calendarVisible: false, calendarScale: 1.8, mobileTimeVisible: true, mobileTimeScale: 0.7, mobileWeatherVisible: false, mobileWeatherScale: 1.3, mobileCalendarVisible: true, mobileCalendarScale: 2 });
   const before = structuredClone(value);
-  assert.deepEqual(resolveDisplayPreferences(value, true), { position: 'left', scale: 1, timeVisible: true, timeScale: 0.7, weatherVisible: false, weatherScale: 1.3, calendarVisible: true, calendarScale: 2 });
-  assert.deepEqual(resolveDisplayPreferences(value, false), { position: 'right', scale: 2, timeVisible: false, timeScale: 1.5, weatherVisible: true, weatherScale: 0.5, calendarVisible: false, calendarScale: 1.8 });
+  assert.deepEqual(resolveDisplayPreferences(value, true), { position: 'left', scale: 1, timeVisible: true, timeScale: 0.7, weatherVisible: false, weatherScale: 1.3, calendarVisible: true, calendarScale: 2, bookmarksVisible: true, homeAssistantVisible: true, wolVisible: true });
+  assert.deepEqual(resolveDisplayPreferences(value, false), { position: 'right', scale: 2, timeVisible: false, timeScale: 1.5, weatherVisible: true, weatherScale: 0.5, calendarVisible: false, calendarScale: 1.8, bookmarksVisible: true, homeAssistantVisible: true, wolVisible: true });
   assert.deepEqual(value, before, 'projection cannot overwrite either profile');
   assert.equal(MOBILE_MEDIA_QUERY, '(max-width: 600px)');
 });
@@ -243,11 +243,18 @@ test('Settings separates profile visibility and scale from shared format and uni
     const markup = html.match(new RegExp(`<section id="settings-panel-${panel}"[\\s\\S]*?<\\/section>`))[0];
     const fields = [...markup.matchAll(/<fieldset><legend>([^<]+)<\/legend>([\s\S]*?)<\/fieldset>/g)];
     const names = (legend) => [...fields.find((field) => field[1] === legend)[2].matchAll(/name="([^"]+)"/g)].map((match) => match[1]);
-    assert.deepEqual(names('Desktop display'), [panel === 'time' ? 'timeVisible' : `${panel}Visible`, panel === 'time' ? 'timeScale' : `${panel}Scale`]);
-    assert.deepEqual(names('Mobile display'), [`mobile${view}Visible`, `mobile${view}Scale`]);
+    assert.deepEqual(names('Desktop display'), [`${panel}Scale`]);
+    assert.deepEqual(names('Mobile display'), [`mobile${view}Scale`]);
     if (panel === 'time') assert.deepEqual(names('Shared format'), ['timezone', 'dateStyle', 'hour12', 'seconds']);
     if (panel === 'weather') assert.deepEqual(names('Shared units'), ['temperature', 'wind', 'precipitation']);
     assert.match(markup, new RegExp(`name="mobile${view}Scale"[^>]*form="preferences"[^>]*min="0.5"[^>]*max="2"[^>]*step="0.1"`));
+  }
+  const general = html.match(/<section id="settings-panel-general"[\s\S]*?<\/section>/)[0];
+  assert.match(general, /<legend>Display on background<\/legend>/);
+  for (const profile of ['', 'mobile']) for (const section of ['time', 'weather', 'calendar', 'bookmarks', 'homeAssistant', 'wol']) {
+    const name = `${profile}${profile ? section[0].toUpperCase() + section.slice(1) : section}Visible`;
+    assert.equal([...html.matchAll(new RegExp(`name="${name}"`, 'g'))].length, 1);
+    assert.match(general, new RegExp(`name="${name}" form="preferences" type="checkbox"`));
   }
 });
 
