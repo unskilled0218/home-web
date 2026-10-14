@@ -1,6 +1,6 @@
 {
   "name": "dashboard",
-  "version": "0.17.11",
+  "version": "0.17.12",
   "private": true,
   "description": "A self-hosted photo dashboard with a clock, weather forecasts, CalDAV events, and Linkwarden bookmarks.",
   "type": "module",
@@ -10,7 +10,7 @@
   "scripts": {
     "start": "node --env-file-if-exists=.env src/server.js",
     "start:lan": "node --env-file-if-exists=.env src/server.js",
-    "dev": "node --watch --env-file-if-exists=.env src/server.js",
+    "dev": "node scripts/dev.js",
     "test": "node --test",
     "test:browser": "playwright test --browser=chromium",
     "check": "node --check src/*.js && node --check public/*.js"

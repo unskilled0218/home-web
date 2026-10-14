@@ -40,7 +40,7 @@ function safelyMounted(entry, requireNfs) {
   return REQUIRED_OPTIONS.every((value) => options.has(value)) && Number.isInteger(timeo) && timeo <= 50 && Number.isInteger(retrans) && retrans <= 2;
 }
 
-export async function prepareNfs(config, { mounts = defaultMounts, mkdirImpl = mkdir, statImpl = stat, run = execFile } = {}) {
+export async function prepareNfs(config, { mounts = defaultMounts, mkdirImpl = mkdir, statImpl = stat, run = execFile, onChild = () => {} } = {}) {
   if (!config || config.mode === 'disabled') return { available: false, reason: 'disabled', root: null };
   if (config.error) return { available: false, reason: 'configuration', root: null };
   try {
@@ -58,7 +58,9 @@ export async function prepareNfs(config, { mounts = defaultMounts, mkdirImpl = m
     }
     await mkdirImpl(config.mountPath, { recursive: true });
     const options = [...new Set([...config.options, ...SAFE_OPTIONS])].join(',');
-    await run('mount', ['-t', 'nfs', '-o', options, config.source, config.mountPath], { timeout: 5_000, maxBuffer: 8_192, windowsHide: true });
+    const preparation = run('mount', ['-t', 'nfs', '-o', options, config.source, config.mountPath], { timeout: 5_000, maxBuffer: 8_192, windowsHide: true });
+    onChild(preparation.child);
+    await preparation;
     const mounted = (await mounts()).find((entry) => entry.path === config.mountPath);
     if (!safelyMounted(mounted, true) || mounted.source !== config.source) throw new Error('mount verification failed');
     return { available: true, reason: 'mounted', root: config.mountPath };

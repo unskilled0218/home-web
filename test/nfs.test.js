@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseMountInfo, prepareNfs } from '../src/nfs.js';
+import { FakeChild, deferred, tick } from './fixtures/lifecycle.js';
 
 const directory = { isDirectory: () => true };
 
@@ -47,4 +48,10 @@ test('converts mount command and verification failures into unavailable results'
   assert.deepEqual(failed, { available: false, reason: 'failed', root: null });
   const unverified = await prepareNfs(config, { mounts: async () => [], mkdirImpl: async () => {}, run: async () => {} });
   assert.deepEqual(unverified, { available: false, reason: 'failed', root: null });
+});
+
+test('preparation ownership is registered before awaiting a command and rejection does not imply child exit', async () => {
+  const child = new FakeChild(); const command = deferred(); const operation = Object.assign(command.promise, { child }); let owned; let exited = false; child.on('exit', () => { exited = true; });
+  const result = prepareNfs({ mode: 'mount', source: 'nas:/photos', mountPath: '/photos', options: [] }, { mounts: async () => [], mkdirImpl: async () => {}, run: () => operation, onChild: (value) => { owned = value; } });
+  await tick(); assert.equal(owned, child); command.reject(Object.assign(new Error('timeout kill denied'), { code: 'EACCES' })); assert.equal((await result).reason, 'failed'); assert.equal(exited, false); child.close(); assert.equal(exited, true);
 });

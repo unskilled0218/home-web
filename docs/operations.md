@@ -9,6 +9,16 @@
 - Keep the dashboard on a trusted LAN. It intentionally has no authentication, so do not expose it on an untrusted network.
 - Back up `data/wol.db` and `data/linkwarden-config-encryption.key` together; the database contains the device inventory, wake attempt audit trail, and encrypted integration credentials, including the Baikal password when configured.
 
+## Server shutdown
+
+Ctrl+C/SIGINT and SIGTERM enter one shutdown path, including during asynchronous startup. Repeated signals do not start a second cleanup or a replacement server. Admission closes immediately; weather scheduling stops; handler promises are tracked separately from socket closure. SQLite closes only after startup, weather, and store-using handlers settle. Connections receive five seconds to drain before remaining owned sockets are destroyed. The overall deadline is 30 seconds; exceeding it forces this application process to exit nonzero without closing SQLite underneath runnable callbacks. Previously committed records remain persistent, but interrupted operations are not claimed completed.
+
+A normal successful stop exits 0 and releases the port for immediate reuse. Startup/runtime/cleanup failure is nonzero. Development uses one polling/IPC supervisor rather than `node --watch`; it waits for child exit before restarting, and retains recoverable application failure until a corrected edit reaches readiness. Supervisor/spawn failure, native crash, failed cleanup, or unknown preparation ownership prevents automatic recovery. An owner IPC disconnect also requests child shutdown. An unresponsive child that cannot receive IPC or permitted OS signals is an operator-level cleanup blocker, not a successful stop.
+
+Optional mount-mode NFS creates a separate preparation child. Its `execFile` timeout attempts a signal and does not prove the helper exited. The lifecycle tracks actual helper exit and rejects clean completion or replacement startup while ownership remains live/unknown. Disabled NFS and safely pre-mounted `existing` mode create no preparation child. Where ordinary child termination is denied, use those modes or ask the operator to provide that narrow capability; configuration is never silently rewritten and cleanup performs no new mount/unmount operations. Forced exit of the dashboard alone does not prove that a nested helper stopped.
+
+See [local setup](local-setup.md) for direct launch commands when npm forwarding reports `EACCES`, and startup-only private-CA environment requirements. Do not suppress diagnostics, disable core dumps, or delete existing core files/logs as a shutdown fix.
+
 See [Wake-on-LAN API](wake-on-lan.md) for device management.
 
 [Back to README](../README.md)

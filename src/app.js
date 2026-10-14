@@ -17,6 +17,7 @@ import { createUnavailablePhotoLibrary } from './photo-library.js';
 import { MAX_HOME_SETTINGS_BYTES, normalizeHomeSettings } from './home-settings.js';
 import { validateWeatherLocation, weatherTimezone } from '../public/weather-data.js';
 import { validateDashboardPreferences } from '../public/dashboard-helpers.js';
+import { CONNECTION_SHUTDOWN_GRACE_MS } from './lifecycle-constants.js';
 
 export const MAX_JSON_BODY_BYTES = 16_384;
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -532,18 +533,42 @@ export function createDashboardServer({ runtimeConfig, store, linkwarden, homeAs
     return json(response, 404, { error: 'Not found.' });
   }
 
-  return http.createServer((request, response) => {
-    void (async () => {
+  const active = new Set(); const sockets = new Set(); let stopping = false; let drain;
+  const server = http.createServer((request, response) => {
+    if (stopping) { response.setHeader('Connection', 'close'); return json(response, 503, { error: 'Dashboard is shutting down.' }); }
+    const operation = Promise.resolve().then(async () => {
       let pathname;
       try { pathname = new URL(request.url, 'http://localhost').pathname; }
       catch { return json(response, 400, { error: 'Invalid request target.' }); }
       if (pathname.startsWith('/api/')) return handleApi(request, response, pathname);
       return serveStatic(request, response, pathname);
-    })().catch(() => {
+    }).catch(() => {
       console.error('Unexpected request handling failure.');
       if (response.destroyed || response.writableEnded) return;
       try { if (!response.headersSent) json(response, 500, { error: 'Internal server error.' }); else response.end(); }
       catch { response.destroy(); }
-    });
+    }).finally(() => active.delete(operation));
+    active.add(operation);
   });
+  server.on('connection', (socket) => { sockets.add(socket); socket.once('close', () => sockets.delete(socket)); });
+  server.lifecycle = {
+    shutdown({ graceMs = CONNECTION_SHUTDOWN_GRACE_MS, schedule = setTimeout, cancel = clearTimeout } = {}) {
+      if (drain) return drain;
+      stopping = true;
+      drain = (async () => {
+        let deadline;
+        const closed = new Promise((resolve, reject) => {
+          deadline = schedule(() => { for (const socket of sockets) socket.destroy(); }, graceMs);
+          server.close((error) => { cancel(deadline); if (error && error.code !== 'ERR_SERVER_NOT_RUNNING') reject(error); else resolve(); });
+          server.closeIdleConnections();
+        });
+        const [closure] = await Promise.allSettled([closed, Promise.allSettled([...active])]);
+        if (closure.status === 'rejected') throw closure.reason;
+      })();
+      return drain;
+    },
+    get activeRequests() { return active.size; },
+    get stopping() { return stopping; }
+  };
+  return server;
 }
