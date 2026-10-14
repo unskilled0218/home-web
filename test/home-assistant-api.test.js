@@ -139,7 +139,7 @@ test('connects Home Assistant atomically and exposes only safe configuration', a
   failure = homeAssistantWebSocketError({ error: { code: 'UNABLE_TO_VERIFY_LEAF_SIGNATURE', message: 'private detail' } });
   const certificateFailure = await api('/api/home-assistant/devices');
   assert.equal(certificateFailure.status, 503);
-  assert.match(certificateFailure.body.error, /certificate is not trusted.*NODE_EXTRA_CA_CERTS/);
+  assert.match(certificateFailure.body.error, /certificate is not trusted.*HOME_ASSISTANT_CA_FILE/);
   assert.equal(JSON.stringify(certificateFailure.body).includes('private detail'), false);
 
   assert.equal((await api('/api/home-assistant', { method: 'DELETE' })).status, 204);

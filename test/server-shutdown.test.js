@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { once } from 'node:events';
-import { cp, mkdtemp, readdir, stat, writeFile, readFile, rm } from 'node:fs/promises';
+import { cp, mkdtemp, readdir, stat, writeFile, readFile, rm, symlink } from 'node:fs/promises';
 import net from 'node:net';
 import https from 'node:https';
 import path from 'node:path';
@@ -16,6 +16,7 @@ async function reservePort() { const server = net.createServer(); server.listen(
 async function fixture(t) {
   const root = await mkdtemp('/tmp/opencode/shutdown-process-'); t.after(() => rm(root, { recursive: true, force: true }));
   for (const directory of ['src', 'public', 'scripts']) await cp(path.join(project, directory), path.join(root, directory), { recursive: true });
+  await symlink(path.join(project, 'node_modules'), path.join(root, 'node_modules'), 'dir');
   await cp(path.join(project, 'package.json'), path.join(root, 'package.json')); const port = await reservePort();
   const environment = { ...process.env }; for (const name of ['HOST', 'PORT', 'DATABASE_PATH', 'NFS_SOURCE', 'NFS_MOUNT_MODE', 'NFS_MOUNT_PATH', 'NODE_EXTRA_CA_CERTS', 'LINKWARDEN_CONFIG_ENCRYPTION_KEY_FILE']) delete environment[name];
   environment.LINKWARDEN_CONFIG_ENCRYPTION_KEY = Buffer.alloc(32, 4).toString('base64');

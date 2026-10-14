@@ -5,16 +5,22 @@ Release images are published to the private Forgejo registry as `git.lan/dev/hom
 ```sh
 docker login git.lan
 mkdir -p data certs
+cp .env.example .env
 docker compose pull
-HOST=192.168.1.10 docker compose up -d
+docker compose up -d
 ```
 
-Only `./data` is writable application storage. The root container creates `data/wol.db` and `data/linkwarden-config-encryption.key`, so files newly created through Compose are normally root-owned on the host. Back them up together and use host administrator privileges when ownership or permissions need to change. The source checkout is not mounted into `/app`; recreating the container always runs the code baked into the selected image.
+Before starting, edit `.env` and set `HOST` to the Docker host's private address. Compose forwards ordinary settings through `env_file: .env`; its explicit path settings override that file: SQLite is `/app/data/wol.db` and photos are `/photos`. Key-file overrides must be container-visible persistent paths. Shell values drive Compose interpolation, but do not automatically override ordinary env-file application values; use a Compose override file or `docker compose run -e` when needed. Compose requires `.env`; do not overwrite an existing configured file with the example.
+
+Only `./data` is writable application storage. First startup creates/reuses SQLite and `linkwarden-config-encryption.key` there; new files are normally root-owned on the host. The key is random, restricted, atomically published, and never written into `.env` or logged. Existing keys are not replaced; missing key material with saved credentials fails startup until restored. Back up database and key together. Production dependencies install with `npm ci --omit=dev` at image build time, never server startup; development/browser packages and secrets are excluded. Container recreation retains the mounted data/key and uses source/dependencies from the selected image.
 
 For private DNS, list the exact hostname used in the browser:
 
-```sh
-HOST=192.168.1.10 DASHBOARD_ALLOWED_HOSTS=home.lan docker compose up -d
+Save these values in `.env`, then run `docker compose up -d`:
+
+```dotenv
+HOST=192.168.1.10
+DASHBOARD_ALLOWED_HOSTS=home.lan
 ```
 
 `DASHBOARD_ALLOWED_HOSTS` is a comma-separated list of hostnames or IP addresses without schemes, ports, paths, or wildcards. Every API request must use either the configured `HOST` address or one of these names. If a reverse proxy is used, keep it LAN-only, preserve the browser-facing Host header, and list that hostname. Do not allow arbitrary Host values or trust forwarded-host headers because that would reintroduce DNS-rebinding access. A wildcard bind such as `0.0.0.0` or `::` requires at least one explicit allowed host.
@@ -34,7 +40,7 @@ docker run -d \
   --network host \
   --volume "$PWD/data:/app/data" \
   --volume "$PWD/certs:/app/certs:ro" \
-  --env HOST=192.168.1.10 \
+  --env-file .env \
   --env DATABASE_PATH=/app/data/wol.db \
   --env LINKWARDEN_CONFIG_ENCRYPTION_KEY_FILE=/app/data/linkwarden-config-encryption.key \
   git.lan/dev/home-web:latest

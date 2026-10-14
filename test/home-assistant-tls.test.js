@@ -3,11 +3,14 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, cpSync, symlinkSync } from 'node:fs';
 import https from 'node:https';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
+import net from 'node:net';
+import { rootCertificates } from 'node:tls';
+import { within } from './fixtures/lifecycle.js';
 
 const root = path.resolve(import.meta.dirname, '..');
 const clientModule = pathToFileURL(path.join(root, 'src/home-assistant.js')).href;
@@ -69,26 +72,64 @@ function createWebSocketServer(certificatePath, keyPath) {
 
 async function runClient(baseUrl, caFile) {
   const source = `import { createHomeAssistantClient } from ${JSON.stringify(clientModule)};
+import { loadScopedCa } from ${JSON.stringify(new URL('../src/ca-file.js', import.meta.url).href)};
+import https from 'node:https';
+const deadline = setTimeout(() => process.exit(2), 4500);
+const ca = await loadScopedCa(process.env.HOME_ASSISTANT_CA_FILE, 'HOME_ASSISTANT_CA_FILE');
+const client = createHomeAssistantClient({ timeoutMs: 2000, ca });
 try {
-  const devices = await createHomeAssistantClient({ timeoutMs: 2000 }).listDevices({ baseUrl: process.env.TEST_HOME_ASSISTANT_URL, accessToken: 'test-token' });
+  const settings = { baseUrl: process.env.TEST_HOME_ASSISTANT_URL, accessToken: 'test-token' };
+  const devices = await client.listDevices(settings);
+  await client.controlEntity(settings, { domain: 'light', entityId: 'light.lamp' }, 'turn_on');
+  if (ca) {
+    const code = await new Promise(resolve => { const request = https.get(settings.baseUrl, response => { response.resume(); resolve('trusted'); }); request.on('error', error => resolve(error.code)); request.setTimeout(1000, () => request.destroy()); });
+    if (!['UNABLE_TO_VERIFY_LEAF_SIGNATURE', 'UNABLE_TO_GET_ISSUER_CERT_LOCALLY', 'SELF_SIGNED_CERT_IN_CHAIN'].includes(code)) throw new Error('Home Assistant CA leaked into unrelated HTTPS trust: ' + code);
+  }
   process.stdout.write(JSON.stringify({ ok: true, devices }));
 } catch (error) {
   process.stdout.write(JSON.stringify({ ok: false, message: error.message }));
-}`;
+} finally { await client.dispose(); clearTimeout(deadline); }`;
   const environment = { ...process.env, TEST_HOME_ASSISTANT_URL: baseUrl };
   delete environment.NODE_EXTRA_CA_CERTS;
   delete environment.NODE_TLS_REJECT_UNAUTHORIZED;
-  if (caFile) environment.NODE_EXTRA_CA_CERTS = caFile;
+  delete environment.HOME_ASSISTANT_CA_FILE;
+  if (caFile) environment.HOME_ASSISTANT_CA_FILE = caFile;
   const child = spawn(process.execPath, ['--dns-result-order=ipv4first', '--input-type=module', '--eval', source], { cwd: root, env: environment, stdio: ['ignore', 'pipe', 'pipe'] });
   let stdout = '';
   let stderr = '';
   child.stdout.on('data', (chunk) => { stdout += chunk; });
   child.stderr.on('data', (chunk) => { stderr += chunk; });
-  const timer = setTimeout(() => child.kill('SIGKILL'), 5_000);
   const [code] = await once(child, 'exit');
-  clearTimeout(timer);
   assert.equal(code, 0, stderr);
   return JSON.parse(stdout);
+}
+
+async function verifyDevelopmentReload(baseUrl, caFile) {
+  const directory = mkdtempSync('/tmp/opencode/ha-trust-reload-'); let child; let exited;
+  try {
+    for (const folder of ['src', 'public', 'scripts']) cpSync(path.join(root, folder), path.join(directory, folder), { recursive: true });
+    cpSync(path.join(root, 'package.json'), path.join(directory, 'package.json')); symlinkSync(path.join(root, 'node_modules'), path.join(directory, 'node_modules'), 'dir');
+    const socket = net.createServer(); socket.listen(0, '127.0.0.1'); await once(socket, 'listening'); const port = socket.address().port; await new Promise(resolve => socket.close(resolve));
+    const values = `HOST=127.0.0.1\nPORT=${port}\nDATABASE_PATH=${directory}/db.sqlite\nNFS_MOUNT_MODE=disabled\n`;
+    writeFileSync(path.join(directory, '.env'), values);
+    child = spawn(process.execPath, ['scripts/dev.js'], { cwd: directory, env: { PATH: process.env.PATH }, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] }); exited = once(child, 'exit');
+    let ready = 0; let errors = ''; child.stdout.on('data', chunk => { if (chunk.toString().includes('dashboard listening')) ready++; }); child.stderr.on('data', chunk => { errors += chunk; });
+    const waitReady = async count => { const until = Date.now() + 4000; while (ready < count && Date.now() < until) await new Promise(resolve => setTimeout(resolve, 25)); assert.ok(ready >= count, errors); };
+    await waitReady(1);
+    const connect = () => fetch(`http://127.0.0.1:${port}/api/home-assistant`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: baseUrl, accessToken: 'test-token' }), signal: AbortSignal.timeout(2500) });
+    assert.equal((await connect()).status, 400, 'no Home Assistant private trust initially');
+    writeFileSync(path.join(directory, '.env'), values + `HOME_ASSISTANT_CA_FILE=${caFile}\n`); await waitReady(2);
+    assert.equal((await connect()).status, 200, 'new child trusts HOME_ASSISTANT_CA_FILE from env file');
+    writeFileSync(path.join(directory, '.env'), values); await waitReady(3);
+    const result = await fetch(`http://127.0.0.1:${port}/api/home-assistant/devices?controls=0&refresh=1`, { signal: AbortSignal.timeout(2500) });
+    assert.equal(result.status, 503, 'removing CA restores rejection without pinning trust');
+    assert.match((await result.json()).error, /HOME_ASSISTANT_CA_FILE|certificate/, 'trust failure remains actionable');
+    const status = await (await fetch(`http://127.0.0.1:${port}/api/home-assistant`)).json(); assert.equal(status.homeAssistant.configured, true, 'failed trust does not delete encrypted credentials');
+  } finally {
+    if (child && child.exitCode === null) child.send({ type: 'dashboard:shutdown' });
+    if (exited) await within(exited, 5000);
+    rmSync(directory, { recursive: true, force: true });
+  }
 }
 
 test('trusts a configured private CA while preserving hostname verification', async (context) => {
@@ -117,14 +158,18 @@ test('trusts a configured private CA while preserving hostname verification', as
 
     const untrusted = await runClient(`https://127.0.0.1:${port}`);
     assert.equal(untrusted.ok, false);
-    assert.match(untrusted.message, /connection failed.*NODE_EXTRA_CA_CERTS/);
+    assert.match(untrusted.message, /(?:connection failed|not trusted).*HOME_ASSISTANT_CA_FILE/);
+
+    const wrongCa = path.join(directory, 'wrong-ca.pem'); writeFileSync(wrongCa, rootCertificates[0]);
+    assert.equal((await runClient(`https://127.0.0.1:${port}`, wrongCa)).ok, false, 'unrelated valid CA does not establish private trust');
 
     const trusted = await runClient(`https://127.0.0.1:${port}`, caCertificate);
     assert.deepEqual(trusted, { ok: true, devices: [{ deviceId: 'lamp', name: 'Lamp', area: 'Office', disabled: false, measurements: [{ entityId: 'sensor.temperature', name: 'Temperature', value: '22.5', status: 'available', available: true, unit: '°C', deviceClass: 'temperature' }], controls: [{ entityId: 'light.lamp', domain: 'light', name: 'Lamp', state: 'off' }] }] });
 
     const wrongHostname = await runClient(`https://localhost:${port}`, caCertificate);
     assert.equal(wrongHostname.ok, false);
-    assert.match(wrongHostname.message, /connection failed.*NODE_EXTRA_CA_CERTS/);
+    assert.match(wrongHostname.message, /(?:connection failed.*HOME_ASSISTANT_CA_FILE|does not match.*hostname)/);
+    await verifyDevelopmentReload(`https://127.0.0.1:${port}`, caCertificate);
   } finally {
     fixture?.destroySockets();
     if (fixture?.server.listening) await new Promise((resolve) => fixture.server.close(resolve));

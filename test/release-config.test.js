@@ -18,7 +18,8 @@ test('production image contains only runtime files and retains the root user', (
   assert.match(dockerfile, /^COPY public\/ \.\/public\/$/m);
   assert.match(dockerfile, /^CMD \["node", "src\/server\.js"\]$/m);
   assert.doesNotMatch(dockerfile, /^USER\s/m);
-  assert.doesNotMatch(dockerfile, /npm (?:ci|install)/);
+  assert.match(dockerfile, /^RUN npm ci --omit=dev --ignore-scripts/m);
+  assert.doesNotMatch(dockerfile, /CMD.*npm (?:ci|install)/);
   assert.deepEqual(dockerignore.trim().split('\n'), ['*', '!Dockerfile', '!.dockerignore', '!package.json', '!package-lock.json', '!src/', '!src/**', '!public/', '!public/**']);
 });
 
@@ -28,12 +29,32 @@ test('Compose deploys the Forgejo image as root with data, trust, and optional N
   assert.match(compose, /^    network_mode: host$/m);
   assert.match(compose, /^      - \.\/data:\/app\/data$/m);
   assert.match(compose, /^      - \.\/certs:\/app\/certs:ro$/m);
-  assert.match(compose, /^      NFS_MOUNT_MODE: \$\{NFS_MOUNT_MODE:-disabled\}$/m);
+  assert.match(compose, /^    env_file: \.env$/m);
+  assert.doesNotMatch(compose, /NODE_EXTRA_CA_CERTS|^      (?:HOST|PORT|HOME_ASSISTANT_CA_FILE|LINKWARDEN_CONFIG_ENCRYPTION_KEY):/m);
   assert.match(compose, /^      NFS_MOUNT_PATH: \/photos$/m);
   assert.match(compose, /^      - \$\{NFS_HOST_MOUNT_PATH:-\.\/photos\}:\/photos:ro$/m);
   assert.doesNotMatch(compose, /^    user:/m);
   assert.doesNotMatch(compose, /^    (?:working_dir|command):/m);
   assert.doesNotMatch(compose, /\.\/:\/app/);
+});
+
+test('Compose parser forwards env-file values and preserves fixed container paths without global HA trust', t => {
+  const available = spawnSync('docker', ['compose', 'version'], { encoding: 'utf8', timeout: 10000 });
+  if (available.error?.code === 'ENOENT' || available.status !== 0) { t.skip('Docker Compose parser unavailable; static wiring checks remain separate.'); return; }
+  const directory = mkdtempSync('/tmp/opencode/compose-env-');
+  try {
+    copyFileSync(path.join(root, 'docker-compose.yml'), path.join(directory, 'docker-compose.yml'));
+    writeFileSync(path.join(directory, '.env'), 'HOST=127.0.0.1\nPORT=4555\nDATABASE_PATH=/host/not-container.db\nHOME_ASSISTANT_CA_FILE=./certs/ha.pem\nNFS_MOUNT_MODE=existing\nNFS_MOUNT_PATH=/host/not-photos\nNFS_HOST_MOUNT_PATH=/fixture/wallpaper\nLINKWARDEN_CONFIG_ENCRYPTION_KEY_FILE=\n');
+    const result = spawnSync('docker', ['compose', 'config', '--format', 'json'], { cwd: directory, env: { PATH: process.env.PATH, HOME: directory, HOST: '192.0.2.1' }, encoding: 'utf8', timeout: 10000 });
+    assert.equal(result.status, 0, result.stderr);
+    const service = JSON.parse(result.stdout).services.dashboard;
+    assert.equal(service.environment.HOST, '127.0.0.1', 'shell does not override a literal env-file application value');
+    assert.equal(service.environment.PORT, '4555'); assert.equal(service.environment.DATABASE_PATH, '/app/data/wol.db');
+    assert.equal(service.environment.NFS_MOUNT_PATH, '/photos'); assert.equal(service.environment.NFS_MOUNT_MODE, 'existing');
+    assert.equal(service.environment.LINKWARDEN_CONFIG_ENCRYPTION_KEY_FILE, '/app/data/linkwarden-config-encryption.key');
+    assert.equal(service.environment.HOME_ASSISTANT_CA_FILE, './certs/ha.pem'); assert.equal(Object.hasOwn(service.environment, 'NODE_EXTRA_CA_CERTS'), false);
+    assert.ok(service.volumes.some(volume => volume.target === '/photos' && volume.source === '/fixture/wallpaper' && volume.read_only));
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
 test('release helpers are executable, strict, and publish only latest last', () => {

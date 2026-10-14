@@ -13,18 +13,19 @@ NFS_MOUNT_OPTIONS=vers=4.2
 
 To read a directory that is already mounted by the host or service manager, mount it with `ro,nosuid,nodev,noexec,soft,timeo=20,retrans=2`, omit `NFS_SOURCE`, and use:
 
-```sh
+```dotenv
 NFS_MOUNT_MODE=existing
 NFS_MOUNT_PATH=/srv/dashboard-photos
 ```
 
 The standard Compose service runs as root but does not install an NFS client or receive mount capabilities. The host-mounted share must allow that container process to read and traverse the files; account for the NFS export's root-squash and mode settings on the host. Mount NFS on the Docker host with the bounded read-only options above, then enable the integrated read-only mount:
 
-```sh
-NFS_MOUNT_MODE=existing NFS_HOST_MOUNT_PATH=/srv/dashboard-photos docker compose up -d
+```dotenv
+NFS_MOUNT_MODE=existing
+NFS_HOST_MOUNT_PATH=/srv/dashboard-photos
 ```
 
-Compose mounts `${NFS_HOST_MOUNT_PATH:-./photos}` at `/photos` but leaves NFS disabled unless `NFS_MOUNT_MODE=existing` is set.
+Save those values in `.env`, then run `docker compose up -d`. Compose mounts `${NFS_HOST_MOUNT_PATH:-./photos}` at `/photos` but leaves NFS disabled unless existing mode is set. Direct development uses `NFS_MOUNT_MODE=existing` and the application-visible `NFS_MOUNT_PATH` in `.env`, followed by `node scripts/dev.js`. A host mount alone does not configure a server that already started with NFS disabled.
 
 ## TrueNAS host mount example
 
@@ -47,7 +48,8 @@ findmnt -M /srv/dashboard-photos -o TARGET,SOURCE,FSTYPE,OPTIONS
 It must be the intended NFS/NFS4 mount with `ro,nosuid,nodev,noexec,soft,timeo=20,retrans=2`. Then set these values for Compose, replacing the host path as needed:
 
 ```sh
-NFS_MOUNT_MODE=existing NFS_HOST_MOUNT_PATH=/srv/dashboard-photos docker compose up -d
+NFS_MOUNT_MODE=existing
+NFS_HOST_MOUNT_PATH=/srv/dashboard-photos
 ```
 
 Compose keeps `NFS_MOUNT_PATH=/photos` inside the container; `NFS_HOST_MOUNT_PATH` is the different host-side path. A `:ro` Docker bind protects against writes but does not convert a host's `hard,timeo=600` NFS retry policy to `soft,timeo=20`. The application validates mount options visible in its own namespace and can reject an unsafe share before accessing its files. Container root must still have read/traverse access under the export's root-squash/ACL rules; do not disable root-squash as a generic workaround.

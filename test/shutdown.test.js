@@ -16,6 +16,20 @@ test('shutdown is shared and waits for startup, HTTP and weather before closing 
   assert.equal(shutdown.shutdown(), first);
 });
 
+test('owned Home Assistant transport disposes after admitted HTTP work and before SQLite closes', async () => {
+  const clock = fakeClock(); const http = deferred(); const transport = deferred(); const order = [];
+  const lifecycle = createShutdownCoordinator({ ...clock, report() {} });
+  lifecycle.attach('server', { lifecycle: { shutdown() { order.push('http'); return http.promise; } } });
+  lifecycle.attach('homeAssistant', { dispose() { order.push('transport'); return transport.promise; } });
+  lifecycle.attach('store', { close() { order.push('store'); } }); lifecycle.startupFinished();
+  const stopping = lifecycle.shutdown(); await tick(); assert.deepEqual(order, ['http']);
+  http.resolve(); await tick(); assert.deepEqual(order, ['http', 'transport']);
+  transport.resolve(); assert.equal((await stopping).code, 0); assert.deepEqual(order, ['http', 'transport', 'store']);
+  const failed = createShutdownCoordinator({ ...clock, report() {} }); let closed = false;
+  failed.attach('homeAssistant', { dispose() { throw new Error('fixture'); } }); failed.attach('store', { close() { closed = true; } }); failed.startupFinished();
+  assert.equal((await failed.shutdown()).cleanupSafe, false); assert.equal(closed, false);
+});
+
 test('startup failure remains nonzero but a safely drained application can recover under its supervisor', async () => {
   const clock = fakeClock(); const messages = []; let closed = 0;
   const shutdown = createShutdownCoordinator({ ...clock, report: (message) => messages.push(message) }); shutdown.attach('store', { close() { closed++; } });

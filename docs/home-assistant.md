@@ -35,17 +35,17 @@ printf '\nHOME_ASSISTANT_CA_FILE=./certs/home-assistant-ca.pem\n' >> .env
 docker compose up -d
 ```
 
-For a direct Node run, use Node's native startup variable:
+For a direct Node run, use the same dedicated setting:
 
 ```sh
-printf '\nNODE_EXTRA_CA_CERTS=./certs/home-assistant-ca.pem\n' >> .env
+printf '\nHOME_ASSISTANT_CA_FILE=./certs/home-assistant-ca.pem\n' >> .env
 npm start
 ```
 
-The PEM file must contain one or more CA certificates and no private key. A self-signed Home Assistant leaf certificate can be used only when that certificate is itself the trust anchor. The hostname in the configured Home Assistant URL must appear in the certificate's subject alternative names; adding the CA does not bypass hostname, expiration, or chain verification. Changing or rotating the bundle requires a full dashboard process restart because Node reads `NODE_EXTRA_CA_CERTS` only during initialization.
+The PEM file must contain one or more CA certificates and no private key. A self-signed leaf certificate can be used only when it is itself the trust anchor. The URL hostname must match the certificate SAN; adding a CA never bypasses hostname, expiration, or chain checks. Bundles are validated/loaded before connections at startup. Replacing certificate contents requires a server restart; editing/removing the `.env` path restarts a development child.
 
-The supplied Compose service maps `HOME_ASSISTANT_CA_FILE` to Node's `NODE_EXTRA_CA_CERTS`; an explicitly supplied `NODE_EXTRA_CA_CERTS` remains a fallback for existing deployments. This augments trust for the whole Node process because the built-in WebSocket client has no per-connection CA option. Use the narrowest appropriate private CA. The existing read-only project mount makes `./certs/home-assistant-ca.pem` available at that path inside `/app`. For a CA outside the project, mount it read-only and use its container path.
+`HOME_ASSISTANT_CA_FILE` configures a Home Assistant-only Undici dispatcher for reads and service calls. It extends public/default trust without changing other HTTPS clients or a global dispatcher; `NODE_EXTRA_CA_CERTS` is not required and is not the Home Assistant alias. Host networking does not share host certificate stores. Compose's read-only cert mount makes `./certs/home-assistant-ca.pem` available inside `/app`; outside bundles require an explicit read-only bind and container-visible path. Use only public CA certificates, never a private key.
 
-If a connection fails, verify that the dashboard host can reach Home Assistant, the URL uses the certificate's exact DNS name or IP SAN, the full issuing chain is present, and the certificates and system clock are current. A trust error points to `NODE_EXTRA_CA_CERTS`; a hostname error requires correcting the URL or certificate rather than adding another CA. Node 24 may report some WebSocket TLS failures only as a generic network error, so check all of these items when no narrower category is available. Plain `http://` sends the token over the local network and should be used only on a network you trust. Keep the dashboard and Home Assistant LAN-only.
+If a connection fails, verify network access, exact DNS name/IP SAN, full issuing chain, and certificate/system-clock validity. A trust error points to `HOME_ASSISTANT_CA_FILE`; a hostname error requires fixing the URL or certificate, not another CA. Some WebSocket failures remain generic, so check all these items when no narrower category is available. Plain HTTP sends the token over the local network; use only a trusted LAN.
 
 [Back to README](../README.md)

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { Agent, WebSocket } from 'undici';
 
 const MAX_MESSAGE_BYTES = 1_000_000;
 const MAX_REGISTRY_ENTRIES = 5_000;
@@ -8,7 +9,7 @@ const CONTROL_DOMAINS = new Set(['light', 'switch', 'fan', 'input_boolean']);
 const CONTROL_ACTIONS = new Set(['turn_on', 'turn_off']);
 const NUMERIC_SENSOR_STATE = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
 const TRUST_ERROR_CODES = new Set(['DEPTH_ZERO_SELF_SIGNED_CERT', 'SELF_SIGNED_CERT_IN_CHAIN', 'UNABLE_TO_GET_ISSUER_CERT', 'UNABLE_TO_GET_ISSUER_CERT_LOCALLY', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE', 'CERT_UNTRUSTED']);
-const CONNECTION_FAILED = 'Home Assistant connection failed. Check the URL and network; for a private certificate, configure NODE_EXTRA_CA_CERTS and restart the dashboard.';
+const CONNECTION_FAILED = 'Home Assistant connection failed. Check the URL and network; for a private certificate, configure HOME_ASSISTANT_CA_FILE and restart the dashboard.';
 
 class HomeAssistantClientError extends Error {}
 
@@ -21,7 +22,7 @@ export function isHomeAssistantClientError(error) {
 export function homeAssistantWebSocketError(event) {
   const candidates = [event?.error, event?.error?.cause, event, event?.cause];
   const code = candidates.map((candidate) => candidate?.code).find((value) => typeof value === 'string');
-  if (TRUST_ERROR_CODES.has(code)) return clientError('Home Assistant certificate is not trusted. Configure NODE_EXTRA_CA_CERTS with its private CA bundle and restart the dashboard.');
+  if (TRUST_ERROR_CODES.has(code)) return clientError('Home Assistant certificate is not trusted. Configure HOME_ASSISTANT_CA_FILE with its private CA bundle and restart the dashboard.');
   if (code === 'ERR_TLS_CERT_ALTNAME_INVALID') return clientError('Home Assistant certificate does not match the configured hostname. Fix the Home Assistant URL or certificate subject alternative names.');
   if (code === 'CERT_HAS_EXPIRED' || code === 'CERT_NOT_YET_VALID') return clientError('Home Assistant certificate is expired or not yet valid. Replace the certificate or correct the system clock.');
   return clientError(CONNECTION_FAILED);
@@ -243,7 +244,15 @@ function serviceCall(settings, target, action, { webSocketFactory, timeoutMs, ma
   });
 }
 
-export function createHomeAssistantClient({ webSocketFactory = (url) => new WebSocket(url), timeoutMs = 8_000, cacheSeconds = 30, maxMessageBytes = MAX_MESSAGE_BYTES, maxEntries = MAX_REGISTRY_ENTRIES, now = Date.now } = {}) {
+export function createHomeAssistantClient({ webSocketFactory, ca, timeoutMs = 8_000, cacheSeconds = 30, maxMessageBytes = MAX_MESSAGE_BYTES, maxEntries = MAX_REGISTRY_ENTRIES, now = Date.now } = {}) {
+  const dispatcher = webSocketFactory ? null : new Agent({ connect: { ...(ca && { ca }), rejectUnauthorized: true } });
+  const sockets = new Set(); let disposed = false; let disposal;
+  webSocketFactory ??= (url) => {
+    if (disposed) throw clientError('Home Assistant client is closed.');
+    const socket = new WebSocket(url, { dispatcher });
+    sockets.add(socket); socket.addEventListener('close', () => sockets.delete(socket), { once: true });
+    return socket;
+  };
   const cache = new Map();
   const inFlight = new Map();
   let cacheGeneration = 0;
@@ -251,7 +260,15 @@ export function createHomeAssistantClient({ webSocketFactory = (url) => new WebS
   const clearCache = () => { cacheGeneration += 1; cache.clear(); inFlight.clear(); };
   return {
     clearCache,
+    dispose() {
+      if (disposal) return disposal;
+      disposed = true; clearCache();
+      for (const socket of sockets) { try { socket.close(); } catch {} }
+      sockets.clear(); disposal = dispatcher ? dispatcher.destroy() : Promise.resolve();
+      return disposal;
+    },
     async listDevices(settings, { force = false } = {}) {
+      if (disposed) throw clientError('Home Assistant client is closed.');
       const key = keyFor(settings);
       const cached = cache.get(key);
       if (!force && cached && now() - cached.fetchedAt < cacheSeconds * 1_000) return cached.devices;
@@ -267,6 +284,7 @@ export function createHomeAssistantClient({ webSocketFactory = (url) => new WebS
       } finally { if (inFlight.get(key) === request) inFlight.delete(key); }
     },
     async controlEntity(settings, target, action) {
+      if (disposed) throw clientError('Home Assistant client is closed.');
       if (!target || !CONTROL_DOMAINS.has(target.domain) || !CONTROL_ACTIONS.has(action) || typeof target.entityId !== 'string' || !target.entityId.startsWith(`${target.domain}.`) || !/^[a-z0-9_]+\.[a-z0-9_]+$/.test(target.entityId)) throw clientError('Home Assistant control target is invalid.');
       await serviceCall(settings, target, action, { webSocketFactory, timeoutMs, maxMessageBytes });
       clearCache();

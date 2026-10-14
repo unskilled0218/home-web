@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { isIP } from 'node:net';
-import { resolveLinkwardenEncryptionKey } from './linkwarden-key.js';
+import { encryptionKey } from './linkwarden-crypto.js';
 
 const integer = (value, fallback, name) => {
   const parsed = Number.parseInt(value ?? fallback, 10);
@@ -53,17 +53,19 @@ export function allowedDashboardHosts(bindHost, configuredHosts = '') {
 
 export function loadConfig(environment = process.env) {
   const host = environment.HOST ?? '127.0.0.1';
+  const databasePath = path.resolve(environment.DATABASE_PATH || './data/wol.db');
+  const explicitSecret = environment.LINKWARDEN_CONFIG_ENCRYPTION_KEY || '';
+  if (explicitSecret) encryptionKey(explicitSecret);
   return Object.freeze({
     host,
     port: integer(environment.PORT, 3000, 'PORT'),
     allowedHosts: allowedDashboardHosts(host, environment.DASHBOARD_ALLOWED_HOSTS),
-    databasePath: path.resolve(environment.DATABASE_PATH ?? './data/wol.db'),
+    databasePath,
     wolPort: integer(environment.WOL_PORT, 9, 'WOL_PORT'),
     wakeCooldownSeconds: integer(environment.WAKE_COOLDOWN_SECONDS, 20, 'WAKE_COOLDOWN_SECONDS'),
-    linkwardenEncryptionKey: resolveLinkwardenEncryptionKey({
-      explicitSecret: environment.LINKWARDEN_CONFIG_ENCRYPTION_KEY,
-      filePath: environment.LINKWARDEN_CONFIG_ENCRYPTION_KEY_FILE
-    }),
+    linkwardenEncryptionKey: explicitSecret,
+    linkwardenEncryptionKeyFile: path.resolve(environment.LINKWARDEN_CONFIG_ENCRYPTION_KEY_FILE || path.join(path.dirname(databasePath), 'linkwarden-config-encryption.key')),
+    homeAssistantCaFile: environment.HOME_ASSISTANT_CA_FILE ? path.resolve(environment.HOME_ASSISTANT_CA_FILE) : null,
     linkwardenCacheSeconds: integer(environment.LINKWARDEN_CACHE_SECONDS, 60, 'LINKWARDEN_CACHE_SECONDS'),
     linkwardenCaFile: environment.LINKWARDEN_CA_FILE ? path.resolve(environment.LINKWARDEN_CA_FILE) : null,
     nodeExtraCaFile: environment.NODE_EXTRA_CA_CERTS ? path.resolve(environment.NODE_EXTRA_CA_CERTS) : null,

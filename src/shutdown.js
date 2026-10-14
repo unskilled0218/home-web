@@ -41,6 +41,8 @@ export function createShutdownCoordinator({ report = console.error, notify = () 
       await startup; beginDrains();
       await Promise.all([httpDrain, weatherDrain, ...[...preparations.values()].map((owner) => owner.exited)]);
       if (finished) return;
+      if (resources.homeAssistant) await clean('Home Assistant transport', () => resources.homeAssistant.dispose());
+      if (finished) return;
       if (failure !== 'cleanup') { try { resources.store?.close(); } catch { markFailure('cleanup', 'SQLite closure failed.'); } }
       finish();
     })().catch(() => { markFailure('cleanup', 'Dashboard cleanup failed.'); finish(); });

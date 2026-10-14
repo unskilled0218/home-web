@@ -9,6 +9,9 @@ import { createCalDavClient } from './caldav.js';
 import { prepareNfs } from './nfs.js';
 import { createPhotoLibrary, createUnavailablePhotoLibrary } from './photo-library.js';
 import { createWeatherService } from './weather.js';
+import { resolveLinkwardenEncryptionKey } from './linkwarden-key.js';
+import { mkdirSync } from 'node:fs';
+import path from 'node:path';
 
 function notify(message) { if (process.connected) { try { process.send(message, () => {}); } catch { /* Supervisor loss is handled by disconnect. */ } } }
 const lifecycle = createShutdownCoordinator({ notify });
@@ -35,7 +38,8 @@ if (process.channel) { process.on('message', onMessage); process.on('disconnect'
 notify({ type: 'dashboard:control-ready' });
 
 async function boot() {
-  const { config } = await import('./config.js');
+  const { config: parsedConfig } = await import('./config.js');
+  let config = parsedConfig;
   if (lifecycle.stopping) return;
   const { createDashboardServer } = await import('./app.js');
   if (lifecycle.stopping) return;
@@ -45,9 +49,14 @@ async function boot() {
   if (lifecycle.stopping) return;
   const calDavCa = await loadScopedCa(config.calDavCaFile, 'CALDAV_CA_FILE');
   if (lifecycle.stopping) return;
+  const homeAssistantCa = await loadScopedCa(config.homeAssistantCaFile, 'HOME_ASSISTANT_CA_FILE');
+  if (lifecycle.stopping) return;
+  mkdirSync(path.dirname(config.databasePath), { recursive: true, mode: 0o700 });
   const store = createStore(config.databasePath); lifecycle.attach('store', store);
+  config = { ...config, linkwardenEncryptionKey: resolveLinkwardenEncryptionKey({ explicitSecret: config.linkwardenEncryptionKey, filePath: config.linkwardenEncryptionKeyFile, hasEncryptedCredentials: Boolean(store.getLinkwarden() || store.getHomeAssistant() || store.getCalDav()) }) };
+  if (lifecycle.stopping) return;
   const linkwarden = createLinkwardenClient({ cacheSeconds: config.linkwardenCacheSeconds, ca });
-  const homeAssistant = createHomeAssistantClient({ cacheSeconds: config.homeAssistantCacheSeconds });
+  const homeAssistant = createHomeAssistantClient({ cacheSeconds: config.homeAssistantCacheSeconds, ca: homeAssistantCa }); lifecycle.attach('homeAssistant', homeAssistant);
   const homeAssistantControls = createHomeAssistantControlStore();
   const calDav = createCalDavClient({ cacheSeconds: config.calDavCacheSeconds, ca: calDavCa });
   const nfs = await prepareNfs(config.nfs, { onChild: lifecycle.ownPreparation });

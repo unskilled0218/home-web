@@ -18,9 +18,10 @@ test('rejects wildcard binds without an explicit host and malformed allowed host
 
 test('loads Home Assistant runtime configuration', async () => {
   const { loadConfig } = await import('../src/config.js');
-  const config = loadConfig({ HOST: '127.0.0.1', HOME_ASSISTANT_CACHE_SECONDS: '45', NODE_EXTRA_CA_CERTS: './certs/home-assistant-ca.pem' });
+  const config = loadConfig({ HOST: '127.0.0.1', HOME_ASSISTANT_CACHE_SECONDS: '45', HOME_ASSISTANT_CA_FILE: './certs/home-assistant-ca.pem' });
   assert.equal(config.homeAssistantCacheSeconds, 45);
-  assert.equal(config.nodeExtraCaFile, path.resolve('./certs/home-assistant-ca.pem'));
+  assert.equal(config.homeAssistantCaFile, path.resolve('./certs/home-assistant-ca.pem'));
+  assert.equal(config.nodeExtraCaFile, null);
 });
 
 test('loads scoped CalDAV runtime configuration', async () => {

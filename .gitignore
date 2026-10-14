@@ -1,6 +1,9 @@
 data/*.db
 data/*.db-*
 data/*.key
+**/linkwarden-config-encryption.key
+**/linkwarden-config-encryption.key.*.tmp
+data/*.key.*.tmp
 .env
 node_modules/
 certs/

@@ -168,12 +168,12 @@ test('caps sorted sensor readings per device', () => {
 
 test('classifies safe TLS failures without exposing upstream details', () => {
   const cases = [
-    ['DEPTH_ZERO_SELF_SIGNED_CERT', /not trusted.*NODE_EXTRA_CA_CERTS/],
+    ['DEPTH_ZERO_SELF_SIGNED_CERT', /not trusted.*HOME_ASSISTANT_CA_FILE/],
     ['UNABLE_TO_VERIFY_LEAF_SIGNATURE', /not trusted/],
     ['ERR_TLS_CERT_ALTNAME_INVALID', /does not match.*hostname/],
     ['CERT_HAS_EXPIRED', /expired or not yet valid/],
     ['CERT_NOT_YET_VALID', /expired or not yet valid/],
-    ['PRIVATE_UPSTREAM_CODE', /^Home Assistant connection failed.*NODE_EXTRA_CA_CERTS/]
+    ['PRIVATE_UPSTREAM_CODE', /^Home Assistant connection failed.*HOME_ASSISTANT_CA_FILE/]
   ];
   for (const [code, expected] of cases) {
     const error = homeAssistantWebSocketError({ error: { code, message: 'private-token https://secret.internal' } });
@@ -300,4 +300,13 @@ test('bounds messages and caches, deduplicates, refreshes, and clears snapshots'
   } });
   await assert.rejects(bounded.listDevices(settings), /invalid response/);
   assert.equal(boundedSocket.closed, true);
+});
+
+test('disposal is idempotent and never disposes a caller-injected factory', async () => {
+  const factory = successfulFactory(); let factoryDisposals = 0; factory.dispose = () => { factoryDisposals++; };
+  const client = createHomeAssistantClient({ webSocketFactory: factory });
+  const settings = { baseUrl: 'http://fixture.local', accessToken: 'fixture' };
+  await client.listDevices(settings); const stopped = client.dispose(); assert.equal(stopped, client.dispose()); await stopped;
+  assert.equal(factoryDisposals, 0); await assert.rejects(client.listDevices(settings), /client is closed/);
+  await assert.rejects(client.controlEntity(settings, { domain: 'light', entityId: 'light.lamp' }, 'turn_on'), /client is closed/);
 });

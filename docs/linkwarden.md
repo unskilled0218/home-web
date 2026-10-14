@@ -17,7 +17,9 @@ The five-second global configuration poll discovers connections, disconnections,
 The server needs a persistent encryption key before connecting. The example environment configures the same server-only key file for direct and Compose runs:
 
 ```sh
-LINKWARDEN_CONFIG_ENCRYPTION_KEY_FILE=./data/linkwarden-config-encryption.key npm start
+cp .env.example .env
+npm ci
+npm start
 ```
 
 Alternatively, generate a key once and provide that same value through the process environment on every run:
@@ -46,6 +48,6 @@ cp /path/to/private-ca.pem certs/linkwarden-ca.pem
 printf '\nLINKWARDEN_CA_FILE=./certs/linkwarden-ca.pem\n' >> .env
 ```
 
-Unlike Home Assistant's process-wide `NODE_EXTRA_CA_CERTS`, the configured `LINKWARDEN_CA_FILE` extends trust only for Linkwarden requests; hostname verification remains enabled and other Node HTTPS traffic is unaffected. An unreadable or empty CA file stops startup with a configuration error. Protect and back up the database and encryption key together. Losing, deleting, or replacing the key makes saved credentials unrecoverable; changing it requires deliberately decrypting and re-encrypting the saved token while the old secret is available. A malformed or unreadable persisted key stops startup rather than silently replacing the secret. Existing saved URL, username, and encrypted-token data is retained when upgrading from the former single-collection configuration.
+`LINKWARDEN_CA_FILE` extends trust only for Linkwarden, just as `HOME_ASSISTANT_CA_FILE` and `CALDAV_CA_FILE` scope their clients. Hostname verification remains enabled. Unreadable/empty CA files stop startup. The shared integration key is automatically generated beside SQLite when missing on a clean installation; new owned parents use `0700`, and the file uses `0600`. An explicit secret wins without creating a file. Invalid keys and missing keys with saved credentials stop startup rather than rotating. Back up database/key together; moving their paths is an operator migration. Existing saved URL, username, and encrypted-token data remains intact.
 
 [Back to README](../README.md)

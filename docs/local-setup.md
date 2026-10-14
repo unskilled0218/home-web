@@ -1,9 +1,10 @@
 # Run locally
 
-This project requires Node.js 24 or later. No package installation is necessary.
+This project requires Node.js 24 or later. Install the locked dependencies first; Undici supplies the scoped Home Assistant WebSocket transport.
 
 ```sh
 cp .env.example .env
+npm ci
 npm start
 ```
 
@@ -19,7 +20,7 @@ node scripts/dev.js
 
 `npm run dev` runs the same polling supervisor. It checks JavaScript under `src/` and `public/`, `.env`, and `package.json` every 500ms, coalesces changes, and restarts one server child only after the previous child stops. Database writes, tasks, logs, dependencies, and core files do not trigger reloads. This replaces Node's native watch supervisor and its problematic watcher teardown. Reload the browser normally for frontend changes; live-browser reload is not added.
 
-Development resolves `.env` separately for each child using Node's native parser, without assigning its values to the supervisor's environment. Inherited environment values still win, and removing `.env` is supported. The child also receives the native env-file flag. Pre-resolving the child environment ensures `NODE_EXTRA_CA_CERTS` is present at process creation; on the observed Node 24.21.0 runtime, the env-file flag alone populated that variable but did not enable its private CA trust. Normal direct/start launches on affected Node versions should supply this startup-only variable explicitly, for example `NODE_EXTRA_CA_CERTS=./certs/home-assistant-ca.pem node --env-file-if-exists=.env src/server.js`. Do not disable certificate verification.
+Development resolves `.env` separately for each child using Node's native parser, without mutating the supervisor environment. Inherited values win, and removing `.env` is supported. For Home Assistant private trust, set `HOME_ASSISTANT_CA_FILE=./certs/home-assistant-ca.pem` in `.env`; it loads into the Home Assistant-only transport before connections in direct/dev startup. No `NODE_EXTRA_CA_CERTS` assignment is required. Editing/removing the path restarts the child; replacing certificate contents requires a server restart. Do not disable certificate verification.
 
 Syntax/import errors and invalid environment values leave the supervisor waiting for a new edit, with no automatic retry loop. Correcting the file restarts the child once. A successful listening/readiness notification clears the remembered failure; stopping before recovery retains a nonzero status. Changing `src/lifecycle-constants.js` requires relaunching the supervisor so parent and child use matching shutdown budgets.
 
@@ -28,5 +29,9 @@ Ctrl+C requests cooperative shutdown. The server stops admitting requests, cance
 Some restricted containers deny userspace signals even between owned processes. npm still calls its own `kill()` forwarding path when it receives Ctrl+C and can print `kill EACCES`; application handlers cannot grant that permission. Use the direct development command above, or `node --env-file-if-exists=.env src/server.js` for a normal run. The direct commands passed terminal Ctrl+C tests in the affected container. Silent npm shutdown additionally requires ordinary owned-process signal permission from the operator's environment policy; no root workaround or privilege change is performed by this project.
 
 For another device on the LAN to reach the dashboard, set `HOST` to the server's explicit private address, such as `192.168.1.10`. That address is accepted automatically as an HTTP Host. If the browser uses a private DNS name instead, also set `DASHBOARD_ALLOWED_HOSTS` to that hostname. Do not bind the service to a public interface or expose its port through a router.
+
+## Automatic integration key
+
+Edit `.env` once for host, CA, and NFS settings, then use ordinary startup commands. First server startup generates a key named `linkwarden-config-encryption.key` beside SQLite, with a restricted new directory/file. Later starts reuse it. Back up database and key together. A nonempty `LINKWARDEN_CONFIG_ENCRYPTION_KEY` overrides the file and creates no key file; `LINKWARDEN_CONFIG_ENCRYPTION_KEY_FILE` selects another persistent path. Missing key material for existing encrypted credentials fails startup and requires restoring the original key, not generating a replacement. Configuration inspection does not read/create key files or directories.
 
 [Back to README](../README.md)

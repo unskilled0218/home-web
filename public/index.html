@@ -137,7 +137,7 @@
             </form>
             <p id="home-assistant-settings-status" role="status"></p>
             <fieldset><legend>Dashboard devices</legend><p id="home-assistant-selection-status" role="status" tabindex="-1">Connect Home Assistant to choose devices.</p><ul id="home-assistant-device-picker" aria-label="Home Assistant device selections"></ul></fieldset>
-            <p class="settings-description">For a private certificate, configure the public CA bundle on the server and restart it. Certificate verification cannot be bypassed here. See <a href="https://www.home-assistant.io/docs/authentication/" target="_blank" rel="noopener noreferrer">Home Assistant authentication</a> for long-lived tokens.</p>
+            <p class="settings-description">For a private certificate, set HOME_ASSISTANT_CA_FILE to its public CA bundle in the server's .env and restart it. This trust applies only to Home Assistant. Certificate verification cannot be bypassed here. See <a href="https://www.home-assistant.io/docs/authentication/" target="_blank" rel="noopener noreferrer">Home Assistant authentication</a> for long-lived tokens.</p>
           </section>
           <section id="settings-panel-wol" role="tabpanel" aria-labelledby="settings-tab-wol" tabindex="0" hidden>
             <h3>Wake-on-LAN</h3><p class="settings-description">Manage devices saved on this server for all browsers. This tab does not send wake packets.</p>

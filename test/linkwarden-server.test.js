@@ -117,7 +117,7 @@ test('connects atomically and navigates collections through opaque tokens', asyn
     assert.deepEqual(bookmarks.body.bookmarks, [{ id: 9, name: 'Docs', url: 'https://example.test/docs', selectionId: bookmarkSelectionId }]);
 
     await stopDashboard();
-    await startDashboard('invalid-key');
+    await startDashboard(Buffer.alloc(32, 3).toString('base64'));
     const unreadable = await api('/api/linkwarden');
     assert.equal(unreadable.body.linkwarden.configured, false);
     assert.equal(unreadable.body.linkwarden.needsReauthentication, true);

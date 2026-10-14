@@ -4,10 +4,11 @@ A self-hosted photo dashboard with a clock, weather forecasts, an optional Baika
 
 ## Quick start
 
-Requires Node.js 24 or later. The server needs no runtime package installation.
+Requires Node.js 24 or later. Edit `.env` once; the integration encryption key is created automatically on first startup.
 
 ```sh
 cp .env.example .env
+npm ci
 npm start
 ```
 

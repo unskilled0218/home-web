@@ -2,22 +2,10 @@ services:
   dashboard:
     image: ${HOME_WEB_IMAGE:-git.lan/dev/home-web:latest}
     network_mode: host
+    env_file: .env
     environment:
-      HOST: ${HOST:-127.0.0.1}
-      PORT: ${PORT:-3000}
-      DASHBOARD_ALLOWED_HOSTS: ${DASHBOARD_ALLOWED_HOSTS:-}
       DATABASE_PATH: /app/data/wol.db
-      WOL_PORT: ${WOL_PORT:-9}
-      WAKE_COOLDOWN_SECONDS: ${WAKE_COOLDOWN_SECONDS:-20}
-      LINKWARDEN_CONFIG_ENCRYPTION_KEY: ${LINKWARDEN_CONFIG_ENCRYPTION_KEY:-}
-      LINKWARDEN_CONFIG_ENCRYPTION_KEY_FILE: /app/data/linkwarden-config-encryption.key
-      LINKWARDEN_CACHE_SECONDS: ${LINKWARDEN_CACHE_SECONDS:-60}
-      LINKWARDEN_CA_FILE: ${LINKWARDEN_CA_FILE:-}
-      HOME_ASSISTANT_CACHE_SECONDS: ${HOME_ASSISTANT_CACHE_SECONDS:-30}
-      NODE_EXTRA_CA_CERTS: ${HOME_ASSISTANT_CA_FILE:-${NODE_EXTRA_CA_CERTS:-}}
-      CALDAV_CACHE_SECONDS: ${CALDAV_CACHE_SECONDS:-300}
-      CALDAV_CA_FILE: ${CALDAV_CA_FILE:-}
-      NFS_MOUNT_MODE: ${NFS_MOUNT_MODE:-disabled}
+      LINKWARDEN_CONFIG_ENCRYPTION_KEY_FILE: ${LINKWARDEN_CONFIG_ENCRYPTION_KEY_FILE:-/app/data/linkwarden-config-encryption.key}
       NFS_MOUNT_PATH: /photos
     volumes:
       - ./data:/app/data

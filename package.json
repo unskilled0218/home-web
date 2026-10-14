@@ -1,6 +1,6 @@
 {
   "name": "dashboard",
-  "version": "0.17.14",
+  "version": "0.17.15",
   "private": true,
   "description": "A self-hosted photo dashboard with a clock, weather forecasts, CalDAV events, and Linkwarden bookmarks.",
   "type": "module",
@@ -14,6 +14,9 @@
     "test": "node --test",
     "test:browser": "playwright test --browser=chromium",
     "check": "node --check src/*.js && node --check public/*.js"
+  },
+  "dependencies": {
+    "undici": "8.11.2"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0"
