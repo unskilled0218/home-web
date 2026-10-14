@@ -1,30 +1,29 @@
 import { MAX_BOOKMARK_SELECTIONS, normalizeBookmarkSelections } from './bookmark-selection-data.js';
 
-export function createBookmarkSelection({ document, root, foldersRoot, status, selectNone, onChange, onToggle, onRetry }) {
+export function createBookmarkSelection({ document, root, foldersRoot, status, selectNone, reload, onChange, onToggle, onReload }) {
   let draft = new Map(); let configured = false; let state; let saving = false; let message = '';
   const rows = new Map(); const folderRows = new Map();
   const element = (tag, text = '') => { const node = document.createElement(tag); node.textContent = text; return node; };
   function changed() { configured = true; message = ''; onChange(); render(); }
   selectNone.addEventListener('click', () => { if (saving) return; draft.clear(); changed(); });
+  reload.addEventListener('click', () => { if (!reload.disabled) onReload(); });
 
-  function renderFolders(nodes, parent, retained, path = []) {
+  function renderFolders(nodes, parent, retained) {
     for (const node of nodes) {
       const folder = state.folders[node.selectionId]; retained.add(node.selectionId);
       let row = folderRows.get(node.selectionId);
       if (!row) {
-        const item = element('li'); const details = element('details'); const summary = element('summary'); const notice = element('p'); const retry = element('button', 'Reload folder'); const links = element('ul'); const children = element('ul');
+        const item = element('li'); const details = element('details'); const summary = element('summary'); const notice = element('p'); const links = element('ul'); const children = element('ul');
         links.className = 'bookmark-picker-links'; details.dataset.selectionId = node.selectionId;
-        retry.type = 'button'; details.append(summary, notice, retry, links, children); item.append(details);
+        details.append(summary, notice, links, children); item.append(details);
         summary.addEventListener('click', (event) => { event.preventDefault(); onToggle(node.selectionId, !details.open); });
-        retry.addEventListener('click', () => onRetry(node.selectionId));
-        row = { item, details, summary, notice, retry, links, children }; folderRows.set(node.selectionId, row);
+        row = { item, details, summary, notice, links, children }; folderRows.set(node.selectionId, row);
       }
       if (row.item.parentNode !== parent) parent.append(row.item);
       row.summary.textContent = node.name; row.details.open = folder.pickerOpen;
-      row.notice.textContent = folder.error || (folder.loading ? 'Loading links…' : folder.evicted ? 'Catalog content evicted. Reload this folder.' : folder.budgetLimited ? 'Catalog content limited. Reload this folder.' : folder.truncated ? 'Provider result truncated.' : folder.loaded && !folder.bookmarks.length ? 'No bookmarks in this folder.' : folder.loaded ? `${folder.bookmarks.length} available links listed below.` : 'Open or reload this folder to list links.');
+      row.notice.textContent = folder.error || (folder.loading ? 'Loading links…' : folder.evicted ? 'Catalog content evicted. Open this folder and use Reload folder.' : folder.budgetLimited ? 'Catalog content limited. Open this folder and use Reload folder.' : folder.truncated ? 'Provider result truncated.' : folder.loaded && !folder.bookmarks.length ? 'No bookmarks in this folder.' : folder.loaded ? `${folder.bookmarks.length} available links listed below.` : 'Open this folder to list links, or use Reload folder.');
       if (folder.stale) row.notice.textContent += ' Saved links are stale.';
-      row.retry.disabled = folder.loading || state.mutationPending; row.retry.setAttribute('aria-label', `Reload folder ${[...path, node.name].join(' / ')}`);
-      renderFolders(node.children, row.children, retained, [...path, node.name]);
+      renderFolders(node.children, row.children, retained);
     }
   }
 
@@ -89,6 +88,7 @@ export function createBookmarkSelection({ document, root, foldersRoot, status, s
     }
     for (const [id, row] of rows) if (!ids.has(id)) { if (row.item.contains(document.activeElement)) status.focus(); row.item.remove(); rows.delete(id); }
     selectNone.disabled = saving;
+    reload.disabled = saving || !state?.configured || state.needsReauthentication || state.accessDenied || state.mutationPending || !state.tree.length || Object.values(state.folders).some((folder) => folder.loading);
     status.textContent = message || (!state?.discovered ? 'Loading saved connection…' : state.needsReauthentication || state.accessDenied ? 'Reconnect Linkwarden to browse links. Existing choices are kept.' : !state.configured ? 'Connect Linkwarden to choose links. Existing choices are kept.' : state.error ? `${state.error} Existing choices are kept.` : `Select up to 256 links, then Save preferences. ${draft.size} selected. Open folders to browse; unavailable choices stay saved until removed.${state.limit ? ' Catalog content is limited; reload folders as needed.' : ''}`);
     if (focused?.isConnected && document.activeElement !== focused) focused.focus({ preventScroll: true });
   }

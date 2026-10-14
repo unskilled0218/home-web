@@ -267,6 +267,12 @@ export function createBookmarkController({ onChange, fetchImpl = fetch, now = Da
     },
     setPickerOpen(value) { pickerOpen = value; emit(); queueRequired(); },
     setPickerFolderOpen(id, value) { const folder = folders.get(id); if (!folder) return; pickerOverrides.set(id, value); folder.lastUsed = ++accessOrder; emit(); queueRequired(); },
+    reloadPickerFolders() {
+      if (!pickerOpen || [...folders.values()].some((folder) => folder.loading)) return;
+      const required = [...folders].filter(([id, folder]) => selectedFolders.has(id) || pickerDisclosed(folder));
+      required.sort(([left], [right]) => Number(selectedFolders.has(right)) - Number(selectedFolders.has(left)));
+      for (const [id] of required) enqueue(id, true);
+    },
     start() { return discovered ? Promise.resolve() : refresh(); }, refresh,
     setPresentation({ mobile = false, mode = 'compact', hidden: nextHidden = false }) { profile = bookmarkProfile(mobile, mode); hidden = nextHidden; emit(); queueRequired(); },
     setFolderOpen(id, value) { const folder = folders.get(id); if (!folder || open(folder) === value) return; if (!overrides.has(profile)) overrides.set(profile, new Map()); overrides.get(profile).set(id, value); emit(); queueRequired(); },

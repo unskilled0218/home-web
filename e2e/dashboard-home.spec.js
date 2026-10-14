@@ -499,8 +499,8 @@ test('a failed bookmark folder preserves its siblings and retry does not reload 
   await expect(page.getByRole('link', { name: 'Root bookmark', exact: true })).toBeVisible(); await expect(page.getByRole('link', { name: 'Deep bookmark', exact: true })).toBeVisible();
   await expect(page.locator('#bookmarks-status')).toContainText('unavailable'); const trees = mock.requests.tree;
   await page.locator('#open-settings').click(); await page.getByRole('tab', { name: 'Bookmarks', exact: true }).click(); await page.locator(`details[data-selection-id="${mock.ids[1]}"] > summary`).click(); await expect(page.locator('#bookmark-picker-folders')).toContainText('Child unavailable.');
-  mock.fail(1, null); await page.getByRole('button', { name: 'Reload folder Root / Child', exact: true }).click(); await expect(page.locator('#bookmark-picker-folders')).toContainText('Child bookmark'); await page.locator('#close-settings').click(); await expect(page.getByRole('link', { name: 'Child bookmark', exact: true })).toBeVisible();
-  expect(mock.requests.tree).toBe(trees); expect(mock.requests.folders.filter((id) => id === 0)).toHaveLength(1);
+  mock.fail(1, null); await page.getByRole('button', { name: 'Reload folder', exact: true }).click(); await expect(page.locator('#bookmark-picker-folders')).toContainText('Child bookmark'); await page.locator('#close-settings').click(); await expect(page.getByRole('link', { name: 'Child bookmark', exact: true })).toBeVisible();
+  expect(mock.requests.tree).toBe(trees); expect(mock.requests.folders.filter((id) => id === 0)).toHaveLength(2);
 });
 
 test('Linkwarden connection controls stay independent from display drafts and never save the access token', async ({ page }) => {

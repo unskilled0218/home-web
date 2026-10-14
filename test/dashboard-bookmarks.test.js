@@ -268,3 +268,11 @@ test('genuinely over-budget selected bytes remain unresolved without exceeding t
   const selections = collections.map((collection, index) => ({ selectionId: rows[index].selectionId, collectionSelectionId: collection.selectionId })); env.client.configure(selections); env.client.setPickerOpen(false); await env.client.start(); await settle();
   const used = Object.values(env.latest.folders).reduce((total, folder) => total + folder.bytes, 0); assert.ok(used <= 8 * 1024 * 1024); assert.ok(env.latest.dashboard.unresolved.length > 0); assert.equal(env.latest.limit, true); assert.deepEqual(env.latest.selections, selections); assert.match(env.latest.dashboard.selectionMessage, /unavailable or not yet found/);
 });
+
+test('one picker reload batches disclosed and selected folders through the bounded queue without changing choices', async (t) => {
+  const env = setup(t); env.client.configure(null); await env.client.start(); await settle(); const before = env.calls.length;
+  env.client.reloadPickerFolders(); await settle(); assert.equal(env.calls.length, before + 1, 'only the open root is reloaded'); assert.equal(env.latest.selections, null);
+  env.client.setPickerFolderOpen(ids.child, true); await settle(); env.client.configure([{ selectionId: link(3).selectionId, collectionSelectionId: ids.deep }]); await settle(); const all = env.calls.length;
+  env.client.reloadPickerFolders(); await settle(); assert.equal(env.calls.length, all + 3, 'root, open child and selected deep folder are reloaded'); assert.deepEqual(env.latest.selections, [{ selectionId: link(3).selectionId, collectionSelectionId: ids.deep }]);
+  env.client.setPickerOpen(false); const closed = env.calls.length; env.client.reloadPickerFolders(); await settle(); assert.equal(env.calls.length, closed, 'closed picker has no reload demand');
+});

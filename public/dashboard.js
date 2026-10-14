@@ -34,7 +34,7 @@ const deviceSelection = createDeviceSelection({ document, root: $('home-assistan
 const deviceIntegrations = createDashboardDevices({ onChange: (state) => { deviceView.render(state); deviceSelection.update(state); } });
 const integrationSettings = createIntegrationSettings({ document, homeAssistant: deviceIntegrations.homeAssistant, wol: deviceIntegrations.wol });
 const bookmarkList = createBookmarkList({ root: $('bookmark-tree'), status: $('bookmarks-status'), onRetry: (id) => bookmarks.retryFolder(id) });
-const bookmarkSelection = createBookmarkSelection({ document, root: $('bookmark-link-picker'), foldersRoot: $('bookmark-picker-folders'), status: $('bookmark-selection-status'), selectNone: $('bookmark-select-none'), onChange: () => { draftDirty = true; }, onToggle: (id, open) => bookmarks.setPickerFolderOpen(id, open), onRetry: (id) => bookmarks.retryFolder(id) });
+const bookmarkSelection = createBookmarkSelection({ document, root: $('bookmark-link-picker'), foldersRoot: $('bookmark-picker-folders'), status: $('bookmark-selection-status'), selectNone: $('bookmark-select-none'), reload: $('bookmark-reload-folders'), onChange: () => { draftDirty = true; }, onToggle: (id, open) => bookmarks.setPickerFolderOpen(id, open), onReload: () => bookmarks.reloadPickerFolders() });
 const bookmarks = createBookmarkController({ onChange(state) {
   bookmarkList.render(state.dashboard); bookmarkSelection.update(state);
   const link = $('open-linkwarden'); const url = safeBookmarkUrl(state.baseUrl);

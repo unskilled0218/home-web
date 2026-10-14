@@ -77,6 +77,15 @@ test('Settings contains direct links within folder branches and the dashboard om
   await open(page); await box(page, 'Deep link', 'Root / Child / Deep').focus(); await poll(page, 300000); await expect(box(page, 'Deep link', 'Root / Child / Deep')).toBeFocused(); await expect(box(page, 'Deep link', 'Root / Child / Deep')).toBeChecked(); expect(errors).toEqual([]);
 });
 
+for (const width of [1200, 320]) test(`one reload button sits left of Clear and refreshes folders without clearing drafts at ${width}px`, async ({ browser, env }) => {
+  const { page, errors } = await client(browser, env, width); await open(page); await box(page, 'Docs').check(); await expect(page.locator('#bookmark-reload-folders')).toBeEnabled();
+  const reload = page.getByRole('button', { name: 'Reload folder', exact: true }); const clear = page.getByRole('button', { name: 'Clear', exact: true });
+  await expect(reload).toHaveCount(1); await expect(page.getByRole('button', { name: 'Select none', exact: true })).toHaveCount(0); await expect(page.locator('#bookmark-picker-folders').getByRole('button', { name: /^Reload folder/ })).toHaveCount(0);
+  const left = await reload.boundingBox(); const right = await clear.boundingBox(); expect(left.x + left.width).toBeLessThanOrEqual(right.x); expect(left.y).toBe(right.y); expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(width);
+  const reads = env.reads.length; await reload.click(); await expect.poll(() => env.reads.length).toBeGreaterThan(reads); await expect(reload).toBeEnabled(); await expect(box(page, 'Docs')).toBeChecked(); expect(env.store.getDashboardPreferences().preferences.bookmarkLinkSelections).toBeNull();
+  await clear.click(); await expect(page.locator('#bookmark-link-picker input:checked')).toHaveCount(0); expect(env.store.getDashboardPreferences().preferences.bookmarkLinkSelections).toBeNull(); await save(page); expect(env.store.getDashboardPreferences().preferences.bookmarkLinkSelections).toEqual([]); expect(errors).toEqual([]);
+});
+
 test('two browsers share choices while dirty selections and credential drafts retain revision conflicts', async ({ browser, env }) => {
   const a = await client(browser, env); const b = await client(browser, env, 390); await open(a.page); await box(a.page, 'Docs').check(); await save(a.page); await a.page.locator('#close-settings').click();
   await poll(b.page); await expect(b.page.getByRole('link', { name: 'Docs', exact: true })).toBeVisible(); await open(b.page); await box(b.page, 'Same').check(); await b.page.getByLabel('Linkwarden access token', { exact: true }).fill('credential-draft');
@@ -120,7 +129,7 @@ test('pending preference saves disable selection and repair without mutating ano
   let release; const gate = new Promise((resolve) => { release = resolve; });
   await page.route('**/api/dashboard/settings', async (route) => { if (route.request().method() === 'PUT') await gate; await route.continue(); });
   try {
-    await page.locator('#save-preferences').click(); await expect(page.locator('#settings-status')).toHaveText('Saving shared preferences…'); await expect(repair).toBeDisabled(); await expect(box(page, 'Docs', 'Other')).toBeDisabled(); await expect(page.locator('#bookmark-select-none')).toBeDisabled();
+    await page.locator('#save-preferences').click(); await expect(page.locator('#settings-status')).toHaveText('Saving shared preferences…'); await expect(repair).toBeDisabled(); await expect(box(page, 'Docs', 'Other')).toBeDisabled(); await expect(page.locator('#bookmark-select-none')).toBeDisabled(); await expect(page.locator('#bookmark-reload-folders')).toBeDisabled();
     release(); await expect(page.locator('#settings-status')).toHaveText('Preferences saved for all browsers.'); await expect(repair).toBeEnabled(); const choices = env.store.getDashboardPreferences().preferences.bookmarkLinkSelections; expect(choices).toHaveLength(2);
     await repair.click(); expect(env.store.getDashboardPreferences().preferences.bookmarkLinkSelections).toEqual(choices); await save(page); const changed = env.store.getDashboardPreferences().preferences.bookmarkLinkSelections; expect(changed.map((record) => record.selectionId)).toEqual(choices.map((record) => record.selectionId)); expect(changed.filter((record) => choices.find((old) => old.selectionId === record.selectionId).collectionSelectionId !== record.collectionSelectionId)).toHaveLength(1); expect(errors).toEqual([]);
   } finally { release(); }
@@ -130,7 +139,7 @@ test('bookmark polling pauses while hidden and resumes after persisted-page susp
   const { page, errors } = await client(browser, env); await open(page); await box(page, 'Docs').check(); await save(page); await box(page, 'Same').check(); await page.getByLabel('Linkwarden access token', { exact: true }).fill('still-a-draft');
   const reads = env.reads.length;
   await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, get: () => true }); document.dispatchEvent(new Event('visibilitychange')); }); await poll(page, 300000); expect(env.reads.length).toBe(reads); await expect(box(page, 'Same')).toBeChecked();
-  await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, get: () => false }); document.dispatchEvent(new Event('visibilitychange')); }); await expect.poll(() => env.reads.length).toBeGreaterThan(reads); await expect(page.locator('#bookmark-picker-folders button:disabled')).toHaveCount(0); await expect(box(page, 'Same')).toBeChecked();
+  await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, get: () => false }); document.dispatchEvent(new Event('visibilitychange')); }); await expect.poll(() => env.reads.length).toBeGreaterThan(reads); await expect(page.locator('#bookmark-reload-folders')).toBeEnabled(); await expect(box(page, 'Same')).toBeChecked();
   await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }))); const suspendedReads = env.reads.length; await poll(page, 300000); expect(env.reads.length).toBe(suspendedReads);
   await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }))); await expect.poll(() => env.reads.length).toBeGreaterThan(suspendedReads); await expect(box(page, 'Same')).toBeChecked(); await expect(page.getByLabel('Linkwarden access token', { exact: true })).toHaveValue('still-a-draft'); await expect(page.locator('#bookmark-tree a')).toHaveCount(1); expect(errors).toEqual([]);
 });

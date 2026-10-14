@@ -139,6 +139,8 @@ input[type=color] { min-height: 2.5rem; }
 #bookmark-link-picker label { margin: .5rem 0; overflow-wrap: anywhere; }
 #bookmark-link-picker input { flex: 0 0 auto; }
 #bookmark-link-picker button { margin: .25rem 0; max-width: 100%; }
+.bookmark-selection-actions { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: .5rem; grid-column: 1 / -1; max-width: 20rem; }
+.bookmark-selection-actions button { min-width: 0; overflow-wrap: anywhere; }
 #bookmark-picker-folders summary { cursor: pointer; padding: .35rem 0; }
 #bookmark-picker-folders p { font-size: .8rem; margin: .35rem 0; }
 @media (max-width: 1000px) {
