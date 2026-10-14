@@ -67,6 +67,16 @@ test('mouse and keyboard links open protected loopback tabs while the dashboard 
   await open(page); await expect(box(page, 'Docs')).toBeChecked(); expect(errors).toEqual([]);
 });
 
+test('Settings contains direct links within folder branches and the dashboard omits every parent label', async ({ browser, env }) => {
+  const { page, errors } = await client(browser, env); await open(page);
+  const root = page.locator('#bookmark-picker-folders > li > details').filter({ has: page.locator(':scope > summary', { hasText: 'Root' }) });
+  await expect(root.locator(':scope > .bookmark-picker-links')).toContainText('Docs'); await expect(root.locator(':scope > .bookmark-picker-links')).not.toContainText('Deep link');
+  const child = root.locator(':scope > ul:not(.bookmark-picker-links) > li > details'); await child.locator(':scope > summary').click(); await expect(child.locator(':scope > .bookmark-picker-links')).toContainText('Same');
+  const deep = child.locator(':scope > ul:not(.bookmark-picker-links) > li > details'); await deep.locator(':scope > summary').click(); await expect(deep.locator(':scope > .bookmark-picker-links')).toContainText('Deep link');
+  await box(page, 'Deep link', 'Root / Child / Deep').check(); await save(page); await page.locator('#close-settings').click(); await expect(page.locator('#bookmark-tree > li > a')).toHaveText(['Deep link']); await expect(page.locator('#bookmark-tree details, #bookmark-tree summary, #bookmark-tree ul')).toHaveCount(0); await expect(page.locator('#bookmark-tree')).not.toContainText('Root'); await expect(page.locator('#bookmark-tree')).not.toContainText('Child');
+  await open(page); await box(page, 'Deep link', 'Root / Child / Deep').focus(); await poll(page, 300000); await expect(box(page, 'Deep link', 'Root / Child / Deep')).toBeFocused(); await expect(box(page, 'Deep link', 'Root / Child / Deep')).toBeChecked(); expect(errors).toEqual([]);
+});
+
 test('two browsers share choices while dirty selections and credential drafts retain revision conflicts', async ({ browser, env }) => {
   const a = await client(browser, env); const b = await client(browser, env, 390); await open(a.page); await box(a.page, 'Docs').check(); await save(a.page); await a.page.locator('#close-settings').click();
   await poll(b.page); await expect(b.page.getByRole('link', { name: 'Docs', exact: true })).toBeVisible(); await open(b.page); await box(b.page, 'Same').check(); await b.page.getByLabel('Linkwarden access token', { exact: true }).fill('credential-draft');
@@ -127,7 +137,7 @@ test('bookmark polling pauses while hidden and resumes after persisted-page susp
 
 for (const width of [1200, 390, 320]) test(`nested duplicate-name selection fits ${width}px and survives mode changes and fullscreen`, async ({ browser, env }) => {
   const { page, errors } = await client(browser, env, width); await open(page); await page.locator('#bookmark-picker-folders summary', { hasText: 'Child' }).click(); await expect(box(page, 'Same', 'Root / Child')).toBeVisible(); await box(page, 'Same', 'Root / Child').check(); await expect(box(page, 'Same', 'Root')).not.toBeChecked(); await save(page); await page.locator('#close-settings').click();
-  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(width); await expect(page.locator('#bookmark-tree a')).toHaveCount(1); if (width < 600) await page.locator('#bookmark-tree summary', { hasText: 'Child' }).click(); await expect(page.getByRole('link', { name: 'Same', exact: true })).toBeVisible();
-  await open(page); await page.getByRole('combobox', { name: 'Mobile bookmark display', exact: true }).selectOption('expanded'); await page.getByLabel('Hide bookmarks in fullscreen', { exact: true }).check(); await save(page); await page.locator('#close-settings').click(); await expect(page.locator('#bookmark-tree a')).toHaveCount(1);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(width); await expect(page.locator('#bookmark-tree a')).toHaveCount(1); await expect(page.locator('#bookmark-tree details, #bookmark-tree summary')).toHaveCount(0); await expect(page.getByRole('link', { name: 'Same', exact: true })).toBeVisible();
+  await open(page); await expect(page.locator('#bookmark-picker-folders details').filter({ has: box(page, 'Same', 'Root / Child') }).last()).toContainText('Same'); await page.getByLabel('Hide bookmarks in fullscreen', { exact: true }).check(); await save(page); await page.locator('#close-settings').click(); await expect(page.locator('#bookmark-tree a')).toHaveCount(1);
   await page.locator('#fullscreen').click(); await expect(page.locator('#bookmarks')).toBeHidden(); await page.evaluate(() => document.exitFullscreen()); await expect(page.locator('#bookmarks')).toBeVisible(); await expect(page.locator('#bookmark-tree a')).toHaveCount(1); expect(errors).toEqual([]);
 });

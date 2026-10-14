@@ -67,7 +67,7 @@ test('redirects only legacy dashboard documents to the canonical home URL', asyn
 
 test('serves retained dashboard assets with their MIME and cache headers', async (context) => {
   const base = await staticServer(context);
-  for (const name of ['dashboard.js', 'dashboard-helpers.js', 'dashboard-weather.js', 'weather-data.js', 'dashboard-photos.js', 'dashboard-calendar.js', 'dashboard-settings.js', 'dashboard-configuration.js', 'dashboard-home-assistant.js', 'dashboard-wol.js', 'dashboard-integration-settings.js', 'bookmark-data.js', 'dashboard-bookmarks.js', 'dashboard-bookmark-tree.js', 'dashboard.css', 'home-layout.js']) {
+  for (const name of ['dashboard.js', 'dashboard-helpers.js', 'dashboard-weather.js', 'weather-data.js', 'dashboard-photos.js', 'dashboard-calendar.js', 'dashboard-settings.js', 'dashboard-configuration.js', 'dashboard-home-assistant.js', 'dashboard-wol.js', 'dashboard-integration-settings.js', 'bookmark-data.js', 'bookmark-selection-data.js', 'dashboard-bookmarks.js', 'dashboard-bookmark-selection.js', 'dashboard-bookmark-list.js', 'dashboard.css', 'home-layout.js']) {
     const result = await fetch(`${base}/${name}`); assert.equal(result.status, 200); assert.match(result.headers.get('content-type'), name.endsWith('.css') ? /text\/css/ : /text\/javascript/); assert.equal(result.headers.get('cache-control'), name.endsWith('.js') ? 'no-store' : 'no-cache'); assert.equal(result.headers.get('x-content-type-options'), 'nosniff');
   }
 });

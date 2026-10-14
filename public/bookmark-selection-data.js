@@ -17,10 +17,12 @@ export function normalizeBookmarkSelections(value = null) {
 
 export function selectedBookmarkProjection(state, selections) {
   const selected = new Set((selections ?? []).map((record) => record.selectionId));
-  const found = new Set(); const folders = {};
+  const found = new Set(); const folders = {}; const links = []; const linkFolders = {};
   const walk = (nodes) => nodes.flatMap((node) => {
     const folder = state.folders[node.selectionId];
     const bookmarks = (folder?.bookmarks ?? []).filter((link) => selected.has(link.selectionId) && !found.has(link.selectionId) && (found.add(link.selectionId), true));
+    links.push(...bookmarks);
+    for (const link of bookmarks) linkFolders[link.selectionId] = node.selectionId;
     const children = walk(node.children);
     if (!bookmarks.length && !children.length) return [];
     folders[node.selectionId] = { ...folder, bookmarks };
@@ -32,5 +34,5 @@ export function selectedBookmarkProjection(state, selections) {
   let selectionMessage = selections === null ? 'Choose links in Settings → Bookmarks.' : !selections.length ? 'No bookmark links selected.' : unresolved.length ? `${unresolved.length} selected link${unresolved.length === 1 ? '' : 's'} ${loading ? 'loading' : 'unavailable or not yet found'}. Open Settings → Bookmarks to reload folders or repair moved links.` : '';
   if (unresolved.some((record) => state.folders[record.collectionSelectionId]?.budgetLimited)) selectionMessage += ' Selected content could not fit within the dashboard cache limit.';
   if (unresolved.some((record) => state.folders[record.collectionSelectionId]?.truncated)) selectionMessage += ' The provider folder result was truncated; unseen links are not confirmed missing.';
-  return { ...state, tree, folders, selectionMessage, unresolved, selectionLoading: loading };
+  return { ...state, tree, folders, bookmarks: links, linkFolders, selectionMessage, unresolved, selectionLoading: loading };
 }

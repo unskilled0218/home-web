@@ -5,7 +5,7 @@ import { createCalendarController, formatCalendarEvent } from './dashboard-calen
 import { createSettingsTabs } from './dashboard-settings.js';
 import { formatWeatherUpdated } from './weather-data.js';
 import { createBookmarkController } from './dashboard-bookmarks.js';
-import { createBookmarkTree } from './dashboard-bookmark-tree.js';
+import { createBookmarkList } from './dashboard-bookmark-list.js';
 import { createBookmarkSelection } from './dashboard-bookmark-selection.js';
 import { safeBookmarkUrl } from './bookmark-data.js';
 import { createSettingsSync } from './dashboard-settings-sync.js';
@@ -33,10 +33,10 @@ const deviceView = createDashboardDeviceView({ document, wake: (id) => deviceInt
 const deviceSelection = createDeviceSelection({ document, root: $('home-assistant-device-picker'), status: $('home-assistant-selection-status'), onChange: () => { draftDirty = true; } });
 const deviceIntegrations = createDashboardDevices({ onChange: (state) => { deviceView.render(state); deviceSelection.update(state); } });
 const integrationSettings = createIntegrationSettings({ document, homeAssistant: deviceIntegrations.homeAssistant, wol: deviceIntegrations.wol });
-const bookmarkTree = createBookmarkTree({ root: $('bookmark-tree'), status: $('bookmarks-status'), onToggle: (id, open) => bookmarks.setFolderOpen(id, open), onRetry: (id) => bookmarks.retryFolder(id) });
+const bookmarkList = createBookmarkList({ root: $('bookmark-tree'), status: $('bookmarks-status'), onRetry: (id) => bookmarks.retryFolder(id) });
 const bookmarkSelection = createBookmarkSelection({ document, root: $('bookmark-link-picker'), foldersRoot: $('bookmark-picker-folders'), status: $('bookmark-selection-status'), selectNone: $('bookmark-select-none'), onChange: () => { draftDirty = true; }, onToggle: (id, open) => bookmarks.setPickerFolderOpen(id, open), onRetry: (id) => bookmarks.retryFolder(id) });
 const bookmarks = createBookmarkController({ onChange(state) {
-  bookmarkTree.render(state.dashboard); bookmarkSelection.update(state);
+  bookmarkList.render(state.dashboard); bookmarkSelection.update(state);
   const link = $('open-linkwarden'); const url = safeBookmarkUrl(state.baseUrl);
   link.hidden = !url; if (url) { link.href = url; link.target = '_blank'; link.rel = 'noopener noreferrer'; } else link.removeAttribute('href');
   $('connect-linkwarden').disabled = state.mutationPending || (state.discovered && !state.encryptionReady);

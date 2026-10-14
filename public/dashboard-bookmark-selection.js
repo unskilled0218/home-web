@@ -12,11 +12,12 @@ export function createBookmarkSelection({ document, root, foldersRoot, status, s
       const folder = state.folders[node.selectionId]; retained.add(node.selectionId);
       let row = folderRows.get(node.selectionId);
       if (!row) {
-        const item = element('li'); const details = element('details'); const summary = element('summary'); const notice = element('p'); const retry = element('button', 'Reload folder'); const children = element('ul');
-        retry.type = 'button'; details.append(summary, notice, retry, children); item.append(details);
+        const item = element('li'); const details = element('details'); const summary = element('summary'); const notice = element('p'); const retry = element('button', 'Reload folder'); const links = element('ul'); const children = element('ul');
+        links.className = 'bookmark-picker-links'; details.dataset.selectionId = node.selectionId;
+        retry.type = 'button'; details.append(summary, notice, retry, links, children); item.append(details);
         summary.addEventListener('click', (event) => { event.preventDefault(); onToggle(node.selectionId, !details.open); });
         retry.addEventListener('click', () => onRetry(node.selectionId));
-        row = { item, details, summary, notice, retry, children }; folderRows.set(node.selectionId, row);
+        row = { item, details, summary, notice, retry, links, children }; folderRows.set(node.selectionId, row);
       }
       if (row.item.parentNode !== parent) parent.append(row.item);
       row.summary.textContent = node.name; row.details.open = folder.pickerOpen;
@@ -44,6 +45,7 @@ export function createBookmarkSelection({ document, root, foldersRoot, status, s
   }
 
   function render() {
+    const focused = document.activeElement;
     const retainedFolders = new Set(); if (state) renderFolders(state.tree, foldersRoot, retainedFolders);
     for (const [id, row] of folderRows) if (!retainedFolders.has(id)) { row.item.remove(); folderRows.delete(id); }
     const available = catalog(); const ids = new Set([...available.keys(), ...draft.keys()]);
@@ -63,7 +65,10 @@ export function createBookmarkSelection({ document, root, foldersRoot, status, s
       }
       const candidates = available.get(id) ?? []; const chosen = draft.get(id);
       const candidate = candidates.find((value) => value.collectionSelectionId === chosen?.collectionSelectionId) ?? candidates[0];
-      row.title.textContent = candidate ? `${candidate.link.name} · ${candidate.path} · ${id.slice(-8)}` : `Unavailable selected link ${id.slice(-8)} — reload folders or remove this choice`;
+      const parent = candidate ? folderRows.get(candidate.collectionSelectionId).links : root;
+      if (row.item.parentNode !== parent) parent.append(row.item);
+      row.title.textContent = candidate ? candidate.link.name : `Unavailable selected link ${id.slice(-8)} — reload folders or remove this choice`;
+      row.input.setAttribute('aria-label', candidate ? `${candidate.link.name} · ${candidate.path} · ${id.slice(-8)}` : row.title.textContent);
       row.input.checked = Boolean(chosen); row.input.disabled = saving;
       const repairs = chosen ? candidates.filter((value) => value.collectionSelectionId !== chosen.collectionSelectionId) : [];
       const repaired = new Set();
@@ -85,6 +90,7 @@ export function createBookmarkSelection({ document, root, foldersRoot, status, s
     for (const [id, row] of rows) if (!ids.has(id)) { if (row.item.contains(document.activeElement)) status.focus(); row.item.remove(); rows.delete(id); }
     selectNone.disabled = saving;
     status.textContent = message || (!state?.discovered ? 'Loading saved connection…' : state.needsReauthentication || state.accessDenied ? 'Reconnect Linkwarden to browse links. Existing choices are kept.' : !state.configured ? 'Connect Linkwarden to choose links. Existing choices are kept.' : state.error ? `${state.error} Existing choices are kept.` : `Select up to 256 links, then Save preferences. ${draft.size} selected. Open folders to browse; unavailable choices stay saved until removed.${state.limit ? ' Catalog content is limited; reload folders as needed.' : ''}`);
+    if (focused?.isConnected && document.activeElement !== focused) focused.focus({ preventScroll: true });
   }
 
   return {

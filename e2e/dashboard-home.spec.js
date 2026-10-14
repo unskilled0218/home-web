@@ -448,10 +448,11 @@ test('hiding calendar in both profiles pauses events while retaining connection 
   expect(calendar.events).toBe(1); expect(calendar.status).toBe(1);
 });
 
-for (const position of ['left', 'right']) test(`desktop bookmark tree stays expanded to the right without overlapping ${position} information`, async ({ page }) => {
+for (const position of ['left', 'right']) test(`flat selected bookmarks stay to the right without overlapping ${position} information`, async ({ page }) => {
   await page.setViewportSize({ width: 1200, height: 900 }); await seedPreferences(page, { position }); const mock = await mockBookmarks(page);
   await page.goto('/'); await expect(page.getByRole('link', { name: 'Deep bookmark', exact: true })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Root bookmark', exact: true })).toBeVisible();
+  await expect(page.locator('#bookmark-tree details, #bookmark-tree summary')).toHaveCount(0);
   await expect(page.getByRole('link', { name: 'Unsafe', exact: true })).toHaveCount(0); await expect(page.locator('#bookmark-tree img')).toHaveCount(0);
   await expect(page.getByRole('link', { name: '<img src=x onerror=alert(1)>', exact: true })).toHaveAttribute('href', 'https://safe.test/');
   for (const width of [1200, 601]) {
@@ -465,24 +466,26 @@ for (const position of ['left', 'right']) test(`desktop bookmark tree stays expa
   expect(mock.requests.tree).toBe(1); expect(mock.requests.folders.sort()).toEqual([0, 1, 2]);
 });
 
-for (const width of [320, 390]) test(`mobile Compact bookmarks open roots and reveal only the clicked child at ${width}px`, async ({ page }) => {
+for (const width of [320, 390]) test(`Settings nests links under folders while the mobile dashboard stays flat at ${width}px`, async ({ page }) => {
   await page.setViewportSize({ width, height: 800 }); const mock = await mockBookmarks(page, { long: true }); await page.goto('/');
   await expect(page.getByRole('link', { name: 'Root bookmark', exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Deep bookmark', exact: true })).toBeVisible(); await expect(page.locator('#bookmark-tree details')).toHaveCount(0);
+  const info = await page.locator('#information').boundingBox(); const bookmarkBounds = await page.locator('#bookmarks').boundingBox(); expect(bookmarkBounds.y).toBeGreaterThanOrEqual(info.y + info.height);
+  await page.locator('#open-settings').click(); await page.getByRole('tab', { name: 'Bookmarks', exact: true }).click();
   const root = page.locator(`details[data-selection-id="${mock.ids[0]}"]`); const child = page.locator(`details[data-selection-id="${mock.ids[1]}"]`); const deep = page.locator(`details[data-selection-id="${mock.ids[2]}"]`);
   await expect(root).toHaveJSProperty('open', true); await expect(child).toHaveJSProperty('open', false); await expect(deep).toHaveJSProperty('open', false); expect(mock.requests.folders.sort()).toEqual([0, 1, 2]);
-  const info = await page.locator('#information').boundingBox(); const bookmarkBounds = await page.locator('#bookmarks').boundingBox(); expect(bookmarkBounds.y).toBeGreaterThanOrEqual(info.y + info.height);
   await child.locator(':scope > summary').focus(); await page.keyboard.press('Enter');
-  await expect(page.getByRole('link', { name: 'Child bookmark', exact: true })).toBeVisible(); await expect(deep).toHaveJSProperty('open', false); expect(mock.requests.folders.sort()).toEqual([0, 1, 2]);
-  await deep.locator(':scope > summary').focus(); await page.keyboard.press('Space'); await expect(page.getByRole('link', { name: 'Deep bookmark', exact: true })).toBeVisible();
+  await expect(child.locator(':scope > .bookmark-picker-links')).toContainText('Child bookmark'); await expect(deep).toHaveJSProperty('open', false); expect(mock.requests.folders.sort()).toEqual([0, 1, 2]);
+  await deep.locator(':scope > summary').focus(); await page.keyboard.press('Space'); await expect(deep.locator(':scope > .bookmark-picker-links')).toContainText('Deep bookmark');
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(width);
   await child.locator(':scope > summary').click(); await expect(child).toHaveJSProperty('open', false);
-  await child.locator(':scope > summary').click(); await expect(page.getByRole('link', { name: 'Deep bookmark', exact: true })).toBeVisible(); expect(mock.requests.folders).toEqual([0, 1, 2]);
+  await child.locator(':scope > summary').click(); await expect(deep).toHaveJSProperty('open', true); expect(mock.requests.folders).toEqual([0, 1, 2]); await page.locator('#close-settings').click(); await expect(page.getByRole('link', { name: 'Deep bookmark', exact: true })).toBeVisible();
 });
 
-test('mobile bookmark mode persists and repeated presentation changes keep fresh folder data', async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 800 }); const mock = await mockBookmarks(page); await page.goto('/');
+test('legacy mobile bookmark preferences round-trip while selected links stay flat and fresh', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 800 }); await seedPreferences(page, { mobileBookmarksMode: 'expanded' }); const mock = await mockBookmarks(page); await page.goto('/');
   await expect(page.getByRole('link', { name: 'Root bookmark', exact: true })).toBeVisible(); await page.locator('#open-settings').click(); await page.getByRole('tab', { name: 'Bookmarks', exact: true }).click();
-  await page.getByRole('combobox', { name: 'Mobile bookmark display', exact: true }).selectOption('expanded'); await savePreferences(page); await page.locator('#close-settings').click();
+  await expect(page.getByRole('combobox', { name: 'Mobile bookmark display', exact: true })).toHaveCount(0); await savePreferences(page); await page.locator('#close-settings').click();
   await expect(page.getByRole('link', { name: 'Deep bookmark', exact: true })).toBeVisible();
   const reads = mock.requests.folders.length;
   for (const width of [601, 390, 900, 320]) { await page.setViewportSize({ width, height: 800 }); await expect(page.getByRole('link', { name: 'Deep bookmark', exact: true })).toBeVisible(); }
@@ -494,8 +497,9 @@ test('mobile bookmark mode persists and repeated presentation changes keep fresh
 test('a failed bookmark folder preserves its siblings and retry does not reload the whole tree', async ({ page }) => {
   const mock = await mockBookmarks(page); mock.fail(1, { status: 503, error: 'Child unavailable.' }); await page.goto('/');
   await expect(page.getByRole('link', { name: 'Root bookmark', exact: true })).toBeVisible(); await expect(page.getByRole('link', { name: 'Deep bookmark', exact: true })).toBeVisible();
-  await expect(page.locator('#bookmark-tree')).toContainText('Child unavailable.'); const trees = mock.requests.tree;
-  mock.fail(1, null); await page.getByRole('button', { name: 'Retry folder Child', exact: true }).click(); await expect(page.getByRole('link', { name: 'Child bookmark', exact: true })).toBeVisible();
+  await expect(page.locator('#bookmarks-status')).toContainText('unavailable'); const trees = mock.requests.tree;
+  await page.locator('#open-settings').click(); await page.getByRole('tab', { name: 'Bookmarks', exact: true }).click(); await page.locator(`details[data-selection-id="${mock.ids[1]}"] > summary`).click(); await expect(page.locator('#bookmark-picker-folders')).toContainText('Child unavailable.');
+  mock.fail(1, null); await page.getByRole('button', { name: 'Reload folder Root / Child', exact: true }).click(); await expect(page.locator('#bookmark-picker-folders')).toContainText('Child bookmark'); await page.locator('#close-settings').click(); await expect(page.getByRole('link', { name: 'Child bookmark', exact: true })).toBeVisible();
   expect(mock.requests.tree).toBe(trees); expect(mock.requests.folders.filter((id) => id === 0)).toHaveLength(1);
 });
 
@@ -514,9 +518,10 @@ test('Linkwarden connection controls stay independent from display drafts and ne
 
 for (const width of [390, 1200]) test(`fullscreen bookmark hiding releases space and restores disclosure state at ${width}px`, async ({ page }) => {
   await page.setViewportSize({ width, height: 800 }); const mock = await mockBookmarks(page); await page.goto('/'); await expect(page.getByRole('link', { name: 'Root bookmark', exact: true })).toBeVisible();
+  await page.locator('#open-settings').click(); await page.getByRole('tab', { name: 'Bookmarks', exact: true }).click();
   const child = page.locator(`details[data-selection-id="${mock.ids[1]}"]`); await child.locator(':scope > summary').click();
   const openBefore = await child.evaluate((node) => node.open);
-  await page.locator('#open-settings').click(); await page.getByRole('tab', { name: 'Bookmarks', exact: true }).click(); await page.getByLabel('Hide bookmarks in fullscreen', { exact: true }).check(); await savePreferences(page); await page.locator('#close-settings').click();
+  await page.getByLabel('Hide bookmarks in fullscreen', { exact: true }).check(); await savePreferences(page); await page.locator('#close-settings').click();
   const requests = mock.requests.folders.length; await page.locator('#fullscreen').click(); await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(true); await expect(page.locator('#bookmarks')).toBeHidden();
   await expect(page.locator('body')).not.toHaveClass(/bookmarks-shown/);
   expect(await page.locator('#dashboard-content').evaluate((node) => getComputedStyle(node).display)).toBe(width > 1000 ? 'grid' : 'block');
@@ -538,7 +543,7 @@ test('bookmark-only preference saves and fullscreen keep the photo and unrelated
   await page.goto('/'); await expect(page.getByRole('link', { name: 'Deep bookmark', exact: true })).toBeVisible(); await expect(page.locator('#photos .photo-layer img')).toBeVisible();
   await page.locator('#open-settings').click(); await page.getByRole('tab', { name: 'Bookmarks', exact: true }).click();
   await page.evaluate(() => { window.savedPhoto = document.querySelector('.photo-layer'); }); const before = calls.length;
-  await page.getByRole('combobox', { name: 'Mobile bookmark display', exact: true }).selectOption('expanded'); await page.getByLabel('Hide bookmarks in fullscreen', { exact: true }).check(); await savePreferences(page); await page.locator('#close-settings').click();
+  await page.getByLabel('Hide bookmarks in fullscreen', { exact: true }).check(); await savePreferences(page); await page.locator('#close-settings').click();
   await page.locator('#fullscreen').click(); await expect(page.locator('#bookmarks')).toBeHidden(); await page.evaluate(() => document.exitFullscreen()); await expect(page.locator('#bookmarks')).toBeVisible();
   expect(calls.length).toBe(before); expect(await page.evaluate(() => window.savedPhoto === document.querySelector('.photo-layer'))).toBe(true); expect(mock.requests.tree).toBe(1);
 });
@@ -547,7 +552,7 @@ test('renewed bookmark tokens retain folder and link focus while updating labels
   await page.clock.install({ time: instant }); const mock = await mockBookmarks(page); await page.goto('/'); await expect(page.getByRole('link', { name: 'Deep bookmark', exact: true })).toBeVisible();
   await page.getByRole('link', { name: 'Root bookmark', exact: true }).focus(); await page.getByRole('link', { name: 'Root bookmark', exact: true }).evaluate((node) => { window.initialBookmarkLink = node; });
   mock.renew(); await page.clock.fastForward(300000);
-  await expect(page.locator('#bookmark-tree')).toContainText('Renamed root'); await expect(page.getByRole('link', { name: 'Root bookmark', exact: true })).toBeFocused();
+  await expect(page.locator('#bookmark-picker-folders')).toContainText('Renamed root'); await expect(page.locator('#bookmark-tree')).not.toContainText('Renamed root'); await expect(page.getByRole('link', { name: 'Root bookmark', exact: true })).toBeFocused();
   expect(await page.evaluate(() => window.initialBookmarkLink.isConnected)).toBe(true); expect(mock.requests.tree).toBe(2);
 });
 
@@ -565,7 +570,7 @@ test('deep bookmark indentation and large desktop scales fit the narrow sidebar 
   for (let i = 14; i >= 0; i--) folder = { selectionId: `collection-deep-test-${String(i).padStart(2, '0')}`.padEnd(43, 'x'), name: 'Deep label'.repeat(12), collectionToken: `token-deep-test-${String(i).padStart(2, '0')}`, children: [folder] };
   await page.addInitScript(() => { window.bookmarkFixtureSelections = [{ selectionId: 'b_' + '8'.repeat(43), collectionSelectionId: 'collection-deep-test-15'.padEnd(43, 'x') }]; });
   mock.setTree([folder]); await page.route('**/api/bookmarks?*', (route) => route.fulfill({ json: { configurationId: mock.getStatus().configurationId, collectionSelectionId: 'collection-deep-test-15'.padEnd(43, 'x'), bookmarks: [{ id: 8, selectionId: 'b_' + '8'.repeat(43), name: 'Deep selected link', url: 'https://example.test/deep' }], stale: false } }));
-  await page.goto('/'); await expect(page.locator('#bookmark-tree details')).toHaveCount(16); await expect(page.locator('#calendar-events')).toContainText('VeryLongUnbrokenCalendarTitle');
+  await page.goto('/'); await expect(page.locator('#bookmark-tree details')).toHaveCount(0); await expect(page.getByRole('link', { name: 'Deep selected link', exact: true })).toBeVisible(); await expect(page.locator('#bookmark-picker-folders details')).toHaveCount(16); await expect(page.locator('#calendar-events')).toContainText('VeryLongUnbrokenCalendarTitle');
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(601);
   expect(await page.locator('#bookmarks').evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
   await page.setViewportSize({ width: 320, height: 700 }); expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(320);
