@@ -1,0 +1,99 @@
+# plan
+
+## scope
+
+Implement `1-goal.md`: provide one **Display on background** group in Settings → General for Time, Weather, Calendar, Bookmarks, Home Assistant, and Wake-on-LAN. Preserve independent desktop/mobile preferences, shared revisioned persistence, existing connections and selections, image behavior, and the flat selected-bookmark dashboard. Remove layout tracks reserved for hidden sections and keep controls reachable in a background-only view. Do not implement archived review remedies, reconnect/delete integrations, redesign the photo service, add dependencies or authentication, or touch `todo.md`. This planning stage changes no implementation code, version, dependencies, or user data.
+
+## Current Structure
+
+- `public/index.html` has six dashboard sections. Time/Weather/Calendar already expose desktop/mobile visibility checkboxes in their service tabs; the other three have no ordinary visibility preferences. Bookmarks separately supports `hideBookmarksFullscreen`.
+- `public/dashboard-helpers.js` owns canonical preferences, legacy decoding, strict request validation, and `resolveDisplayPreferences()`. The active profile breakpoint is 600px, independent of the 1000px layout stacking breakpoint.
+- `src/dashboard-preferences.js` persists the preference JSON and compare-and-save revision in SQLite. `public/dashboard-settings-sync.js` reads the same record, decodes confirmed local caches, preserves dirty drafts, and fences integration observations.
+- `public/dashboard.js:159-181` applies information visibility and scales separately from bookmark fullscreen visibility. Shared snapshots, viewport changes, and fullscreen events use overlapping application paths. Photos are reconfigured only when image-related fields change.
+- `public/dashboard.css:55-59` reserves two or three desktop grid columns and two device rows. Merely setting a child section's `hidden` attribute does not remove explicit tracks. `#information` may still contain the independently enabled image filename caption.
+- `:fullscreen .page-tools` currently hides Settings and fullscreen buttons. Without another visible overlay, that policy can leave a touch user with no dashboard control to exit fullscreen or restore sections.
+- Clock updates already follow active-profile visibility. Weather discovery/snapshot reads are intentionally independent from weather display; the server owns hourly provider retrieval. Calendar event eligibility follows the OR of both saved visibility profiles. Selected Home Assistant snapshots, device metadata, and bookmarks already have their own document-visible request owners and Settings demand.
+
+## Implementation Plan
+
+### 1. Extend the existing visibility schema without resetting either profile
+
+- Keep `timeVisible`, `weatherVisible`, `calendarVisible`, `mobileTimeVisible`, `mobileWeatherVisible`, and `mobileCalendarVisible` unchanged.
+- Add six boolean preferences: `bookmarksVisible`, `homeAssistantVisible`, `wolVisible`, `mobileBookmarksVisible`, `mobileHomeAssistantVisible`, and `mobileWolVisible`. Default all six to `true`, preserving the currently visible behavior of existing installations.
+- Extend `normalizeSettings()` and therefore `PREFERENCE_KEYS` and canonical shared preferences. Extend `resolveDisplayPreferences(settings, mobile)` with projected `bookmarksVisible`, `homeAssistantVisible`, and `wolVisible` alongside the existing three information visibility flags and scales.
+- Extend `decodeStoredDashboardPreferences()` to supply only missing new visibility fields. Preserve all existing values and the earlier missing device/bookmark selection defaults. Invalid present values, extra fields, corrupt records, and invalid selection arrays must still fail validation rather than masquerade as valid defaults.
+- Keep complete live-write validation strict. Older clients missing the new fields must reload before saving; do not accept an incomplete write that can erase another browser's choices. Preserve normalization of valid legacy local preferences and confirmed cache decoding.
+- Reuse the existing JSON preference row and revision API; no new table, endpoint, settings cache, or versioned storage owner is needed. Reads do not write or increment revision; the next explicit save stores canonical fields through the existing compare-and-save transaction.
+- Verify the expanded schema still fits the 65,536-byte preference request/response bounds with maximum bookmark/device choices. Do not raise limits for six boolean fields.
+
+### 2. Consolidate visibility controls into General
+
+- Add a fieldset labeled **Display on background** to Settings → General in `public/index.html`, with accessible **Desktop** and **Mobile** subgroups. Each subgroup has six native checkboxes labeled Time, Weather, Calendar, Bookmarks, Home Assistant, and Wake-on-LAN, bound to the corresponding profile's preference field.
+- Make both profiles editable from any viewport. State that Mobile applies at widths up to and including 600px; resizing previews the saved active profile without rewriting the other profile.
+- Move, rather than copy, existing Time/Weather/Calendar visibility inputs out of their service tabs. Each preference name must have exactly one form-associated input. Retain each service tab's scale, formatting, units, location, and connection controls, and update descriptions to point to General for visibility.
+- Keep all visibility inputs associated with the existing `preferences` form. Existing form filling, dirty tracking, save disabling, revision capture, successful save, and explicit shared reload remain authoritative. Toggling an unsaved checkbox does not immediately change the dashboard or submit an integration form.
+- Preserve existing display/selection and credential drafts during polling, including when a remote preference update changes the dashboard while General has a dirty draft. Closing/reopening Settings discards unsaved preferences as before, without deleting service data.
+- Add only scoped group styles: clearly distinguish Desktop/Mobile, keep all controls keyboard accessible, fit 320px screens without horizontal overflow, and leave Save preferences/Close accessible while the panel scrolls. This is not a new generic settings UI framework.
+
+### 3. Apply all six overlay decisions through one presentation boundary
+
+- In `public/dashboard.js`, consolidate overlay hidden-state and layout updates into a narrowly named presentation helper, using `resolveDisplayPreferences()` rather than independently decoding preference flags in renderers.
+- Apply projected flags to `#clock`, `#weather`, `#calendar`, `#bookmarks`, `#dashboard-ha`, and `#dashboard-wol`. Bookmarks is effectively visible only when its active-profile checkbox is true and the existing fullscreen-hide condition is false. Exiting fullscreen never overrides an unchecked normal visibility flag.
+- Derive wrapper visibility from visible children: `#dashboard-devices` is hidden when both device sections are hidden; `#information` is hidden when all three information sections are hidden and no independently enabled photo-caption text is displayed. A hidden child must not leave an empty wrapper track or inherited margin/padding.
+- Preserve Images → image-info behavior as a separate preference. Update information-wrapper/layout state when `photos.show()` changes the caption and when `clearPhotos()` clears it, without restarting the photo owner or starting an unrelated service. A caption can keep the information wrapper present even with Time/Weather/Calendar disabled; when no caption exists, that wrapper collapses.
+- Call the same visibility/layout helper from confirmed preference changes, viewport changes, fullscreen changes, and caption updates. Keep scale/section-order logic and the single clock timer in the existing presentation path; do not duplicate direct hidden writes in bookmark/device renderers that later polling can undo.
+- Extend the relevant changed-key sets so new visibility fields trigger presentation updates. Image owner configuration remains restricted to image preference changes; a display-only save must not reload the photo manifest, recreate layers, reset slideshow order, or cancel transitions.
+- Keep visibility purely presentational for integration ownership in this task. Do not repurpose `setVisible()` (document visibility) to mean an individual overlay checkbox, and do not dispose or disconnect a hidden integration. Existing metadata/content polling policies remain unchanged: weather continues its server-backed snapshots, calendar follows either profile, selected Home Assistant snapshots and bookmark caches retain their bounded owners, and Settings can still discover/configure hidden services. Checkbox changes must not create an extra timer or request loop.
+- Hidden sections retain cached view models, selections, controls, and queued action ownership. Re-enabling restores the current safe snapshot; an in-flight Wake request remains correctly owned even if its section is hidden. No checkbox can trigger a Wake/control action, credential mutation, or selection clear.
+
+### 4. Collapse only absent layout groups and protect background-only controls
+
+- Derive desktop layout tracks from the actually visible information, device, and bookmark groups. When all three are present, preserve the current three-column geometry; when information and one sidebar are present, keep a flexible information track plus that sidebar's bounded track. With information absent, allocate tracks only to remaining sidebars; with one remaining group, allocate one track; with none, hide/collapse `#dashboard-content` while fixed background photos/color continue filling the viewport.
+- Use a small explicit group-state class/data policy or CSS custom-property value owned by the presentation helper; do not encode a separate visibility decision in selectors scattered across each service view. Keep current all-visible desktop widths and the 1000px stacking breakpoint, distinct from profile projection at 600px.
+- For `#dashboard-devices`, retain two equal independently scrollable rows only when both Home Assistant and Wake-on-LAN are enabled. With one enabled, use one row without an empty half; with neither, remove the device wrapper entirely. Keep short-window accessibility and Wake-button geometry, without taking on unrelated archived layout warnings.
+- On stacked layouts, only visible sections participate in normal flow. Eliminate margins belonging solely to hidden wrappers; preserve existing section order, top-start mobile behavior, long-content scrolling, and text wrapping.
+- Derive a **no visible dashboard sections** state from the six effective section decisions, independently of the optional image caption. In that state, keep `.page-tools` visible even in fullscreen, overriding the current immersive fullscreen hiding rule. A photo-caption-only page also retains Settings/Exit fullscreen, and a bookmark-only page whose fullscreen policy hides it does not strand users.
+- Leave existing fullscreen tool hiding intact when ordinary dashboard sections remain visible. Do not add a new exit button, fullscreen API, keyboard handler, or browser-permission workaround. Include the same guard on first render, shared preference updates, and fullscreen exit.
+
+### 5. Verify migration, visible geometry, and owner independence
+
+- Extend helper/schema tests in `test/dashboard.test.js` and `test/dashboard-settings-api.test.js` for all new boolean fields, exact live-write validation, default-true upgrades, mixed previously hidden profile values, preservation of selection arrays and legacy fields, no read-time writes, canonical explicit saves, maximum payload size, and restart persistence. Include old records missing several generations of optional fields and reject invalid present values.
+- Extend `test/dashboard-settings-sync.test.js` for old confirmed-cache decoding, remote visibility updates, dirty captured revisions, failed writes, 409 conflicts, and explicit reload without integration-draft resets.
+- Update markup tests to assert the Display on background/Desktop/Mobile group labels, exactly one input per visibility preference, association with the preference form, and removal of duplicate service-tab visibility controls. Retain service scale/format/connection ownership checks.
+- Add `e2e/background-display-options.spec.js`, using isolated real-server preference persistence and stubbed providers, to cover every checkbox independently in both profiles, draft-versus-confirmed behavior, each newly introduced default, reload/restart, two-browser propagation, stale-save rejection, explicit reload, and preservation of credentials/link/device choices.
+- Cover all-hidden, information-only, device-only, bookmarks-only, caption-only, one-device-row, and mixed groups at 1200px, 900px, 601px, 600px, 390px, 320px, and a short desktop height. Assert computed tracks and bounding boxes for visible groups, absence of hidden-only tracks/rows, lack of horizontal overflow, and Settings/save-control accessibility. A layout's unused background area is not an invisible reserved track.
+- Cover fullscreen enter/exit while bookmarks is unchecked, while bookmarks is the only enabled section and fullscreen-hidden, and while every section is disabled. Assert actual Settings/Exit fullscreen visibility in background-only fullscreen, not just stored attributes. Repeat with image-info enabled and disabled.
+- Verify hide/re-enable preserves flat selected bookmark links and protected popup navigation, Home Assistant selected read-only values, and Wake-on-LAN devices/audit behavior. Toggle during a pending Wake request and confirm completion ownership is unchanged; never use a real broadcast packet in this verification.
+- Assert photo layer identity/order and manifest-request counts remain unchanged on visibility-only saves and viewport/fullscreen transitions. Use controlled cached snapshots to verify unchanged refresh-owner counts and request eligibility; do not treat overlay hiding as cancellation of an already submitted integration mutation.
+- Update existing browser tests that locate visibility controls in Time/Weather/Calendar to use a small General/profile toggle helper. Keep the original mobile-independence, geometry, global-settings, dirty-draft, and calendar eligibility scenarios; do not remove them merely because controls moved.
+- Run focused suites first with explicit deadlines. During implementation run `npm run check`, individually syntax-check changed/new JavaScript, run the bounded full Node suite, and run the full browser suite with an available `PLAYWRIGHT_PORT` if necessary. Use temporary databases and loopback/stubbed providers, not a real account, live NFS mount, external Wake target, or unrelated process cleanup. Record results and environment-specific exclusions in `4-implemented.md`.
+
+### 6. Document and complete the requested workflow
+
+- Update `docs/dashboard.md` to describe the centralized checkbox groups, profile breakpoint/defaults, collapsed layouts, image-info exception, background-only fullscreen controls, persistence/conflicts, and deliberately unchanged integration refresh policy. Correct the directly related outdated bookmark grouping/mobile-control descriptions while linking to `docs/linkwarden.md` for catalog behavior.
+- Update `docs/linkwarden.md` for normal visibility combined with fullscreen hiding, and `docs/testing.md` for new visibility/layout coverage. Keep README brief; do not add an all-purpose guide or unrelated release documentation.
+- Implementation starts on a new branch named exactly `44-background-display-options`, records results in `4-implemented.md`, bumps the patch version according to the existing release convention, and commits. This plan stage creates no branch, runtime process, implementation change, or version update.
+
+## Acceptance Criteria
+
+- Settings → General has one Display on background group with Desktop and Mobile subgroups and all six named native checkbox choices. Time/Weather/Calendar values are reused, with no duplicate preference inputs or lost per-profile values.
+- Confirmed choices control only their corresponding overlays, persist across reload/restart, synchronize across browsers, and honor the existing revision/conflict/draft model. New flags default to true for old installations without read-time writes.
+- Hidden overlays and empty wrappers reserve no dedicated layout tracks or device rows. Mixed/one/all-hidden layouts fit desktop/mobile widths and short windows without inaccessible controls or horizontal overflow.
+- Fullscreen applies bookmark hiding in addition to ordinary visibility; exiting it never restores a disabled section. When no dashboard sections remain visible, Settings and Exit fullscreen stay reachable, including caption-only and bookmark-only/fullscreen-hidden cases.
+- Visibility changes retain image/background behavior, connections, credentials, selections, cached content, and in-flight actions. No duplicate refresh owner, photo reset, implicit mutation, or destructive preference migration is introduced.
+- Relevant focused/full verification and environment limitations are recorded during implementation; no implementation or user data is changed by this planning step.
+
+## Risks And Decisions
+
+- Two explicit profile groups preserve the existing independent desktop/mobile model. A single checkbox that silently rewrites both profiles would violate saved user intent. The 600px profile and 1000px stacking thresholds remain distinct.
+- New visibility flags are booleans, not copies of selection arrays or connection state. Hiding Bookmarks/Home Assistant does not clear selected records; hiding Wake-on-LAN does not disable or delete devices.
+- CSS `hidden` alone cannot remove fixed grid tracks. Wrapper and track policy must share one projected visibility source, with all-visible geometry preserved as the baseline.
+- The optional photo filename is not one of the six sections. Caption updates affect wrapper geometry, but no-visible-section fullscreen controls must not depend on whether a filename happens to be present.
+- Changing presentation is not authorization to change polling semantics or provider scheduling. Document-visible refresh owners remain the same; introducing demand-based suspension for hidden integrations is outside this task unless separately requested.
+- Shared preference schema expansion must support old stored records and caches without accepting destructive partial live writes. Already-loaded old clients must reload before saving the new schema.
+- The background-only fullscreen exception is a usability requirement for touch devices, not a global removal of immersive fullscreen behavior.
+- Archived task 42 shutdown warnings and task 43 Settings membership/disclosure findings remain outside scope. Do not fold those fixes into visibility work or claim them resolved.
+
+## Planning Result
+
+Created this plan from the current goal and read-only inspection of the presentation, preference, layout, and controller boundaries. Only `tasks/44-background-display-options/2-plan.md` is added and committed. No implementation code, dependencies, version, persisted user settings, runtime server, or `todo.md` is modified.
