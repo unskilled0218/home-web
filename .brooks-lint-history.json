@@ -207,5 +207,16 @@
       "suggestion": 1
     },
     "scope": "Plan review: tasks/42-safe-server-shutdown/2-plan.md"
+  },
+  {
+    "date": "2026-10-14",
+    "mode": "PR Review",
+    "score": 90,
+    "findings": {
+      "critical": 0,
+      "warning": 2,
+      "suggestion": 0
+    },
+    "scope": "Branch review: 42-safe-server-shutdown vs main (0cb6de9...417238a)"
   }
 ]
