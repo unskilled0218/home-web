@@ -13,20 +13,23 @@
     <p id="page-status" role="status"></p>
     <section id="layout-toolbar" aria-label="Edit dashboard layout" hidden>
       <form id="layout-form" novalidate>
-        <header><button id="layout-save" type="submit" aria-label="Save layout">Save</button><button id="layout-cancel" type="button">Cancel</button></header>
-        <p><strong>Editing dashboard — actions blocked</strong></p>
-        <div class="layout-actions"><button id="layout-reload" type="button">Reload shared layout (discard edits)</button><button id="layout-fullscreen" type="button">Toggle fullscreen</button></div>
-        <div class="layout-fields">
-          <label>Layout profile<select id="layout-profile"><option value="desktop">Desktop</option><option value="mobile">Mobile</option></select></label>
-          <label>Layout arrangement<select id="layout-arrangement"><option value="automatic">Automatic</option><option value="custom">Custom</option></select></label>
-          <label>Select widget<select id="layout-widget"></select></label>
-          <label>X from left (reference pixels)<input id="layout-x" type="number" min="0" step="1"></label>
-          <label>Y from bottom (reference pixels)<input id="layout-y" type="number" min="0" step="1"></label>
-          <label>Width (reference pixels)<input id="layout-w" type="number" min="100" step="1"></label>
-          <label>Height (reference pixels)<input id="layout-h" type="number" min="100" step="1"></label>
-        </div>
-        <div class="layout-actions"><button type="button" data-layer="forward">Bring forward</button><button type="button" data-layer="backward">Send backward</button><button type="button" data-layer="front">Bring to front</button><button type="button" data-layer="back">Send to back</button><button id="layout-reset" type="button">Reset selected profile</button></div>
+        <header><button id="layout-save" type="submit" aria-label="Save layout">Save</button><button id="layout-toggle" type="button" aria-expanded="false" aria-controls="layout-details">Toolbar</button><button id="layout-cancel" type="button">Cancel</button></header>
         <p id="layout-status" role="status" aria-live="polite"></p>
+        <section id="layout-details" aria-label="Layout editing controls" tabindex="-1" hidden>
+          <header><strong>Editing dashboard — actions blocked</strong><button id="layout-close" type="button">Close toolbar</button></header>
+          <div class="layout-actions"><button id="layout-reload" type="button">Reload shared layout (discard edits)</button><button id="layout-fullscreen" type="button">Toggle fullscreen</button></div>
+          <div class="layout-fields">
+            <label>Layout profile<select id="layout-profile"><option value="desktop">Desktop</option><option value="mobile">Mobile</option></select></label>
+            <label>Layout arrangement<select id="layout-arrangement"><option value="automatic">Automatic</option><option value="custom">Custom</option></select></label>
+            <label>Select widget<select id="layout-widget"></select></label>
+            <label>X from left (reference pixels)<input id="layout-x" type="number" min="0" step="1"></label>
+            <label>Y from bottom (reference pixels)<input id="layout-y" type="number" min="0" step="1"></label>
+            <label>Width (reference pixels)<input id="layout-w" type="number" min="100" step="1"></label>
+            <label>Height (reference pixels)<input id="layout-h" type="number" min="100" step="1"></label>
+          </div>
+          <div class="layout-actions"><button type="button" data-layer="forward">Bring forward</button><button type="button" data-layer="backward">Send backward</button><button type="button" data-layer="front">Bring to front</button><button type="button" data-layer="back">Send to back</button><button id="layout-reset" type="button">Reset selected profile</button></div>
+          <div id="layout-layers" role="group" aria-label="Layers for all widgets"></div>
+        </section>
       </form>
     </section>
     <div id="layout-frames" aria-label="Widget editing handles" hidden></div>

@@ -12,7 +12,7 @@ export function measureLayoutSurface(document, window) {
   const viewport = window.visualViewport;
   const width = Math.max(0, Math.floor((viewport?.width ?? window.innerWidth) - margin * 2 - safe('left') - safe('right')));
   const height = viewport?.height ?? window.innerHeight;
-  const top = Math.ceil(Math.max(margin + safe('top'), ...['page-status', 'page-tools', 'layout-toolbar'].map(id => {
+  const top = Math.ceil(Math.max(margin + safe('top'), ...['page-status', 'page-tools'].map(id => {
     const node = id === 'page-tools' ? document.querySelector('.page-tools') : document.getElementById(id);
     return node?.getBoundingClientRect().bottom || 0;
   })) + LAYOUT_GAP_PIXELS);
@@ -102,7 +102,7 @@ export function createDashboardLayoutView({ document, window, onMeasure = () => 
   function orientationChanged() { refreshContext(true); schedule(); }
   function resumed(event) { if (event.persisted) { refreshContext(); if (document.fullscreenElement) beginConfirmation(); schedule(); } }
   const observer = new window.ResizeObserver(schedule);
-  for (const node of [document.querySelector('.page-tools'), document.getElementById('page-status'), caption, document.getElementById('layout-toolbar')]) if (node) observer.observe(node);
+  for (const node of [document.querySelector('.page-tools'), document.getElementById('page-status'), caption]) if (node) observer.observe(node);
   window.addEventListener('resize', schedule); window.visualViewport?.addEventListener('resize', schedule); window.visualViewport?.addEventListener('scroll', schedule);
   document.addEventListener('fullscreenchange', fullscreenChanged); window.screen?.orientation?.addEventListener?.('change', orientationChanged); window.addEventListener('orientationchange', orientationChanged); window.addEventListener('pageshow', resumed);
   if (confirmation) schedule();

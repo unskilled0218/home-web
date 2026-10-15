@@ -134,7 +134,10 @@ test('Settings associates all preferences with one form and keeps service forms 
   assert.doesNotMatch(html, /id="widget-layout-editor"|id="layout-preview"/);
   assert.match(html, /id="layout-toolbar"/);
   assert.match(html, /id="edit-layout"/);
-  for (const id of ['layout-toolbar', 'layout-form', 'layout-frames', 'layout-profile', 'layout-widget', 'layout-x', 'layout-save']) assert.equal([...html.matchAll(new RegExp(`id="${id}"`, 'g'))].length, 1, `${id} is unique`);
+  for (const id of ['layout-toolbar', 'layout-form', 'layout-frames', 'layout-profile', 'layout-widget', 'layout-x', 'layout-save', 'layout-toggle', 'layout-details', 'layout-close', 'layout-layers']) assert.equal([...html.matchAll(new RegExp(`id="${id}"`, 'g'))].length, 1, `${id} is unique`);
+  assert.match(html, /id="layout-toggle" type="button" aria-expanded="false" aria-controls="layout-details"/);
+  assert.match(html, /id="layout-details"[^>]*aria-label="Layout editing controls"[^>]*hidden/);
+  assert.match(html, /id="layout-close" type="button"/);
   const layoutForm = html.match(/<form id="layout-form"[\s\S]*?<\/form>/)?.[0];
   assert.ok(layoutForm); assert.doesNotMatch(layoutForm, /form="preferences"/); assert.match(layoutForm, /id="layout-save" type="submit"/);
   assert.match(html, /id="bookmark-link-picker"/);

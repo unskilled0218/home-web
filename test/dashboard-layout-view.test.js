@@ -52,6 +52,15 @@ test('layout measurement stays independent of hidden content and reserves bounde
   assert.equal(measureLayoutSurface(f.document, f.window).height, 0);
 });
 
+test('edit root and panel visibility or dimensions never reserve space or own a view observer', () => {
+  const f = fixture(); const chrome = { hidden: false, getBoundingClientRect: () => ({ bottom: 500 }) };
+  f.nodes.set('layout-toolbar', chrome); f.nodes.set('layout-details', chrome);
+  const view = createDashboardLayoutView(f); const before = view.frame('desktop');
+  assert.equal(view.destination().y, 78); assert.ok(!f.observers[0].nodes.includes(chrome));
+  for (const hidden of [true, false]) { chrome.hidden = hidden; chrome.getBoundingClientRect = () => ({ bottom: 1000 }); assert.deepEqual(view.frame('desktop'), before); }
+  f.nodes.get('tools').rect.bottom = 90; assert.equal(view.destination().y, 98); view.dispose();
+});
+
 test('custom projection retains widget identity, restores automatic groups/order, and never mutates layout', () => {
   const f = fixture(); let measurements = 0;
   const view = createDashboardLayoutView({ ...f, onMeasure() { measurements++; } });

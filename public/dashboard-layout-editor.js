@@ -4,12 +4,19 @@ import { createLayoutSession } from './dashboard-layout-session.js';
 export function createDashboardLayoutEditor({ document, window, view, getState, save, canEnter, activeProfile, toggleFullscreen, activationBlocked = () => false }) {
   const get = id => document.getElementById(`layout-${id}`);
   const toolbar = get('toolbar'); const frames = get('frames'); const status = get('status');
+  const panel = get('details'); const toggle = get('toggle'); const close = get('close');
   const profile = get('profile'); const selected = get('widget'); const arrangement = get('arrangement');
   const inputs = Object.fromEntries(['x', 'y', 'w', 'h'].map(key => [key, get(key)]));
   const nodes = Object.fromEntries(Object.entries(WIDGET_ELEMENTS).map(([id, element]) => [id, document.getElementById(element)]));
   const session = createLayoutSession(); const raw = new Set(); const boxes = new Map(); const inert = new Map();
   const events = new AbortController(); const options = { signal: events.signal };
-  let active = false; let pending = false; let disposed = false; let painting = false; let gesture; let generation = 0; let origin; let message = '';
+  let active = false; let pending = false; let disposed = false; let painting = false; let gesture; let generation = 0; let panelEpoch = 0; let origin; let message = '';
+  function layerPair(parent, id) {
+    for (const [action, label] of [['forward', 'Up'], ['backward', 'Down']]) {
+      const button = document.createElement('button'); button.type = 'button'; button.dataset.layer = action; button.dataset.layerWidget = id;
+      button.textContent = label; button.setAttribute('aria-label', `Move ${DASHBOARD_WIDGETS[id]} ${label.toLowerCase()} one layer`); parent.append(button);
+    }
+  }
   for (const [id, label] of Object.entries(DASHBOARD_WIDGETS)) {
     const option = document.createElement('option'); option.value = id; option.textContent = label; selected.append(option);
     const box = document.createElement('div'); box.className = 'layout-edit-frame'; box.dataset.widget = id;
@@ -17,16 +24,30 @@ export function createDashboardLayoutEditor({ document, window, view, getState, 
       const button = document.createElement('button'); button.type = 'button'; button.dataset.action = action;
       button.setAttribute('aria-label', `${action === 'move' ? 'Move' : 'Resize'} ${label}`); button.textContent = action === 'move' ? label : 'Resize'; box.append(button);
     }
+    const pair = document.createElement('div'); pair.className = 'layout-frame-layers'; layerPair(pair, id); box.append(pair);
+    const row = document.createElement('div'); row.dataset.layerRow = id; row.append(document.createElement('span')); layerPair(row, id); get('layers').append(row);
     frames.append(box); boxes.set(id, box);
   }
   const currentFrame = () => view.frame(session.mode);
   const unsaved = () => active && (session.changed() || raw.size > 0);
+  function setPanel(open, { focus = true } = {}) {
+    if (!active || pending || getState().pending || panel.hidden === !open) return;
+    const focusedInside = panel.contains(document.activeElement); panelEpoch++;
+    panel.hidden = !open; toggle.setAttribute('aria-expanded', String(open));
+    if (focus && !gesture) { if (open) panel.focus({ preventScroll: true }); else if (focusedInside) toggle.focus({ preventScroll: true }); }
+  }
+  function placeChrome() {
+    const viewport = window.visualViewport;
+    const values = { top: viewport?.offsetTop || 0, right: Math.max(0, window.innerWidth - (viewport?.offsetLeft || 0) - (viewport?.width ?? window.innerWidth)), width: viewport?.width ?? window.innerWidth, height: viewport?.height ?? window.innerHeight };
+    for (const [key, value] of Object.entries(values)) toolbar.style.setProperty(`--layout-chrome-${key}`, `${value}px`);
+  }
   function announce() {
     if (!active) return;
     const state = getState(); const { reference, fit } = currentFrame();
     const rect = projectWidget(session.effective().items.find(item => item.id === session.selected), reference);
-    status.textContent = message || (!fit ? 'Window area unavailable. Enlarge the window; Cancel remains available.' : session.revision === null ? 'Offline preview. Reload shared layout after the server connects before saving.' : state.snapshot.revision !== session.revision ? 'Preferences changed in another browser. Save reports a conflict; Reload shared layout discards edits.' : !session.draft[session.mode] ? 'Automatic profile: temporary template shown. Moving or resizing creates Custom; no-op Save keeps Automatic.' : `${DASHBOARD_WIDGETS[session.selected]}: ${rect.w} × ${rect.h} reference pixels, X ${rect.x}, Y ${rect.y}, layer ${session.effective().items.findIndex(item => item.id === session.selected) + 1} of 6. Actions are blocked until Save or Cancel.`);
-    if (session.mode !== activeProfile()) status.textContent += ' Editing inactive profile geometry only.';
+    let text = message || (!fit ? 'Window area unavailable. Enlarge the window; Cancel remains available.' : session.revision === null ? 'Offline preview. Reload shared layout after the server connects before saving.' : state.snapshot.revision !== session.revision ? 'Preferences changed in another browser. Save reports a conflict; Reload shared layout discards edits.' : !session.draft[session.mode] ? 'Automatic profile: temporary template shown. Moving or resizing creates Custom; no-op Save keeps Automatic.' : `${DASHBOARD_WIDGETS[session.selected]}: ${rect.w} × ${rect.h} reference pixels, X ${rect.x}, Y ${rect.y}, layer ${session.effective().items.findIndex(item => item.id === session.selected) + 1} of 6. Actions are blocked until Save or Cancel.`);
+    if (session.mode !== activeProfile()) text += ' Editing inactive profile geometry only.';
+    if (status.textContent !== text) status.textContent = text;
   }
   function controls() {
     if (!active) return;
@@ -34,12 +55,17 @@ export function createDashboardLayoutEditor({ document, window, view, getState, 
     for (const input of Object.values(inputs)) input.disabled = busy || !fit || Boolean(gesture);
     profile.disabled = busy; selected.disabled = busy; arrangement.disabled = busy || Boolean(gesture);
     const index = session.effective().items.findIndex(item => item.id === session.selected);
-    for (const button of toolbar.querySelectorAll('[data-layer]')) button.disabled = busy || Boolean(gesture) || (['front', 'forward'].includes(button.dataset.layer) ? index === 5 : index === 0);
+    for (const root of [toolbar, frames]) for (const button of root.querySelectorAll('[data-layer]')) {
+      const targetIndex = button.dataset.layerWidget ? session.effective().items.findIndex(item => item.id === button.dataset.layerWidget) : index;
+      button.disabled = busy || Boolean(gesture) || (['front', 'forward'].includes(button.dataset.layer) ? targetIndex === 5 : targetIndex === 0);
+    }
+    toggle.disabled = busy; close.disabled = busy;
     get('save').disabled = busy || !state.confirmed || session.revision === null || Boolean(gesture);
     get('cancel').disabled = busy; get('reload').disabled = busy || !state.confirmed || Boolean(gesture); get('reset').disabled = busy || Boolean(gesture) || !session.draft[session.mode]; get('fullscreen').disabled = busy || !document.fullscreenEnabled;
   }
   function render(preserveRaw = true) {
     if (!active || disposed) return;
+    placeChrome();
     const { reference, fit } = currentFrame(); const effective = session.effective();
     profile.value = session.mode; selected.value = session.selected; arrangement.value = session.draft[session.mode] ? 'custom' : 'automatic';
     frames.hidden = !fit;
@@ -49,8 +75,10 @@ export function createDashboardLayoutEditor({ document, window, view, getState, 
       box.style.zIndex = String(index + 1);
       if (rect && fit) for (const [key, value] of Object.entries({ left: fit.x + rect.x * fit.scale, top: fit.y + (reference.height - rect.y - rect.h) * fit.scale, width: rect.w * fit.scale, height: rect.h * fit.scale })) box.style[key] = `${value}px`;
       const move = box.querySelector('[data-action=move]'); move.textContent = `${DASHBOARD_WIDGETS[item.id]}${nodes[item.id].hidden ? ' (hidden)' : ''}`;
-      for (const button of box.querySelectorAll('button')) button.disabled = pending || getState().pending || !fit || rect.w * fit.scale < 24 || rect.h * fit.scale < 24;
+      for (const button of box.querySelectorAll('[data-action]')) button.disabled = pending || getState().pending || !fit || rect.w * fit.scale < 24 || rect.h * fit.scale < 24;
       box.querySelector('[data-action=resize]').hidden = item.id !== session.selected;
+      box.querySelector('.layout-frame-layers').hidden = !fit || rect.w * fit.scale < 150 || rect.h * fit.scale < 80;
+      get('layers').querySelector(`[data-layer-row="${item.id}"] span`).textContent = `${DASHBOARD_WIDGETS[item.id]}${nodes[item.id].hidden ? ' (hidden)' : ''} — layer ${index + 1} of 6`;
     }
     const rect = projectWidget(effective.items.find(item => item.id === session.selected), reference);
     for (const [key, input] of Object.entries(inputs)) {
@@ -68,9 +96,9 @@ export function createDashboardLayoutEditor({ document, window, view, getState, 
     render();
   }
   function change() { message = ''; project(); announce(); }
-  function commit(key) {
+  function commit(key, report = true) {
     const input = inputs[key]; input.setCustomValidity('');
-    if (!Number.isFinite(input.valueAsNumber) || !input.checkValidity()) { input.setCustomValidity('Enter valid reference pixel values.'); input.focus(); input.reportValidity(); return false; }
+    if (!Number.isFinite(input.valueAsNumber) || !input.checkValidity()) { input.setCustomValidity('Enter valid reference pixel values.'); if (report) { setPanel(true, { focus: false }); input.focus(); input.reportValidity(); } return false; }
     session.edit({ [key]: input.valueAsNumber }, view.reference(session.mode)); raw.delete(key); return true;
   }
   function commitRaw() { for (const key of [...raw]) if (!commit(key)) return false; return true; }
@@ -90,7 +118,7 @@ export function createDashboardLayoutEditor({ document, window, view, getState, 
   function exit({ focus = true } = {}) {
     if (!active || pending) return;
     cancelGesture(); active = false; generation++; raw.clear();
-    toolbar.hidden = true; frames.hidden = true; document.body.classList.remove('dashboard-layout-editing');
+    toolbar.hidden = true; frames.hidden = true; panel.hidden = true; panelEpoch++; toggle.setAttribute('aria-expanded', 'false'); document.body.classList.remove('dashboard-layout-editing');
     for (const [node, previous] of inert) node.inert = previous; inert.clear();
     view.setOverride(null); view.releaseReference();
     document.getElementById('open-settings').disabled = false; document.getElementById('edit-layout').disabled = false;
@@ -98,15 +126,15 @@ export function createDashboardLayoutEditor({ document, window, view, getState, 
   }
   function enter(id = 'time', target = document.activeElement) {
     if (disposed || !Object.hasOwn(nodes, id)) return false;
-    if (active) { if (!pending && commitRaw()) { cancelGesture(); session.selected = id; change(); selected.focus(); } return true; }
+    if (active) { if (!pending && commitRaw()) { cancelGesture(); session.selected = id; change(); (panel.hidden ? toggle : selected).focus({ preventScroll: true }); } return true; }
     if (!canEnter()) return false;
     origin = target; generation++; message = ''; raw.clear(); view.lockReference();
     session.load(getState(), activeProfile(), id); active = true;
-    toolbar.hidden = false; frames.hidden = false; document.body.classList.add('dashboard-layout-editing');
-    selected.focus({ preventScroll: true });
+    toolbar.hidden = false; frames.hidden = false; panel.hidden = true; panelEpoch++; toggle.setAttribute('aria-expanded', 'false'); document.body.classList.add('dashboard-layout-editing');
+    toggle.focus({ preventScroll: true });
     for (const node of Object.values(nodes)) { inert.set(node, node.inert); node.inert = true; }
     document.getElementById('open-settings').disabled = true; document.getElementById('edit-layout').disabled = true;
-    change(); selected.focus({ preventScroll: true }); return true;
+    change(); toggle.focus({ preventScroll: true }); return true;
   }
   async function submit(event) {
     event.preventDefault(); if (!active || pending || gesture || !commitRaw()) return;
@@ -118,13 +146,23 @@ export function createDashboardLayoutEditor({ document, window, view, getState, 
     finally { pending = false; if (!disposed && active && owner === generation) { render(); announce(); } }
   }
   get('form').addEventListener('submit', submit, options);
+  for (const button of [toggle, close]) button.addEventListener('pointerdown', event => {
+    // Keep a focused numeric field from committing on the native focus change before dismissal's click.
+    if (event.button === 0 && event.isPrimary !== false) event.preventDefault();
+  }, options);
+  toggle.addEventListener('click', () => setPanel(panel.hidden), options);
+  close.addEventListener('click', () => setPanel(false), options);
   get('cancel').addEventListener('click', () => { if (!pending) exit(); }, options);
   get('reload').addEventListener('click', () => { if (!active || pending || !getState().confirmed) return; cancelGesture(); raw.clear(); session.load(getState(), session.mode); message = 'Shared layout reloaded; both profile drafts discarded.'; project(); announce(); }, options);
   get('reset').addEventListener('click', () => { if (active && !pending) { cancelGesture(); raw.clear(); session.arrange('automatic'); change(); } }, options);
   get('fullscreen').addEventListener('click', () => { if (!pending) void toggleFullscreen(); }, options);
   for (const [key, input] of Object.entries(inputs)) {
     input.addEventListener('input', () => { input.setCustomValidity(''); raw.add(key); }, options);
-    input.addEventListener('change', () => { if (active && !pending && commit(key)) change(); }, options);
+    input.addEventListener('change', () => {
+      const epoch = panelEpoch;
+      // Reject deferred field changes from a panel visibility transition or a dismissed session.
+      queueMicrotask(() => { if (active && !pending && epoch === panelEpoch && !panel.hidden && ![toggle, close].includes(document.activeElement) && commit(key, false)) change(); });
+    }, options);
   }
   for (const control of [profile, selected, arrangement]) control.addEventListener('change', () => {
     if (!active || pending) return;
@@ -135,7 +173,17 @@ export function createDashboardLayoutEditor({ document, window, view, getState, 
     else session.arrange(value);
     change();
   }, options);
-  for (const button of toolbar.querySelectorAll('[data-layer]')) button.addEventListener('click', () => { if (active && !pending && !button.disabled && commitRaw()) { session.layer(button.dataset.layer); change(); } }, options);
+  function layerClick(event) {
+    const button = event.target.closest('button[data-layer]');
+    if (!active || pending || getState().pending || gesture || !button || button.disabled || !commitRaw()) return;
+    const widget = button.dataset.layerWidget || session.selected;
+    const focused = document.activeElement === button;
+    session.layer(button.dataset.layer, widget); session.selected = widget; change();
+    if (button.disabled && focused) {
+      const alternative = button.parentElement.querySelector('button[data-layer]:not(:disabled)'); (alternative || toggle).focus({ preventScroll: true });
+    }
+  }
+  toolbar.addEventListener('click', layerClick, options); frames.addEventListener('click', layerClick, options);
   frames.addEventListener('pointerdown', event => {
     const target = event.target.closest('button[data-action]');
     if (!active || pending || !target || target.disabled || gesture || activationBlocked() || event.button !== 0 || event.isPrimary === false || !commitRaw()) return;
@@ -154,7 +202,11 @@ export function createDashboardLayoutEditor({ document, window, view, getState, 
   frames.addEventListener('lostpointercapture', event => { if (gesture?.pointer === event.pointerId) cancelGesture(); }, options);
   function guard(event) { if (active && Object.values(nodes).some(node => node.contains(event.target))) { event.preventDefault(); event.stopImmediatePropagation(); } }
   for (const name of ['click', 'auxclick', 'dblclick', 'contextmenu', 'keydown', 'submit']) document.addEventListener(name, guard, { ...options, capture: true });
-  document.addEventListener('keydown', event => { if (active && event.key === 'Escape' && cancelGesture()) { event.preventDefault(); event.stopPropagation(); } }, options);
+  document.addEventListener('keydown', event => {
+    if (!active || event.key !== 'Escape') return;
+    if (cancelGesture()) { event.preventDefault(); event.stopPropagation(); }
+    else if (!panel.hidden && !pending && !getState().pending) { setPanel(false); event.preventDefault(); event.stopPropagation(); }
+  }, options);
   function interrupt() { cancelGesture(); }
   for (const name of ['blur', 'resize', 'orientationchange', 'pagehide']) window.addEventListener(name, interrupt, options);
   document.addEventListener('fullscreenchange', interrupt, options);
@@ -163,7 +215,7 @@ export function createDashboardLayoutEditor({ document, window, view, getState, 
   return {
     enter, get active() { return active; }, cancelGesture,
     observe() { if (active) { controls(); announce(); } },
-    refreshSurface() { if (!active || painting || disposed) return; if (gesture && JSON.stringify(currentFrame()) !== gesture.frame) cancelGesture(); render(); },
-    dispose() { if (disposed) return; pending = false; exit({ focus: false }); disposed = true; generation++; events.abort(); frames.replaceChildren(); }
+    refreshSurface() { if (!active || painting || disposed) return; if (gesture && JSON.stringify(currentFrame()) !== gesture.frame) cancelGesture(); render(); announce(); },
+    dispose() { if (disposed) return; pending = false; exit({ focus: false }); disposed = true; generation++; events.abort(); frames.replaceChildren(); get('layers').replaceChildren(); }
   };
 }

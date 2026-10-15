@@ -12,7 +12,7 @@ export function createLayoutSession() {
     effective() { return draft[mode] || initialWidgetProfile(mode, baseline.position); },
     changed() { return !equal(draft, baseline.widgetLayout); },
     edit(pixels, reference, original = this.effective()) { const next = editWidget(original, selected, pixels, reference); if (!equal(next, original)) draft[mode] = next; },
-    layer(action) { const original = this.effective(); const next = changeWidgetLayer(original, selected, action); if (next !== original) draft[mode] = next; },
+    layer(action, widget = selected) { const original = this.effective(); const next = changeWidgetLayer(original, widget, action); if (next !== original) draft[mode] = next; },
     arrange(value) { draft[mode] = value === 'custom' ? this.effective() : null; },
     restore(profile) { draft[mode] = profile; },
     payload() { return { preferences: { ...structuredClone(baseline), widgetLayout: normalizeWidgetLayout(draft) }, revision }; }

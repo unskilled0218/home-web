@@ -36,3 +36,18 @@ test('offline cache cannot capture a writable revision until explicit confirmed 
   cached.confirmed = true; cached.snapshot.revision = 10; assert.equal(session.payload().revision, null);
   session.load(cached, 'desktop'); assert.equal(session.revision, 10); assert.equal(session.changed(), false);
 });
+
+test('explicit widget layer targets preserve selection, canonical rectangles and the other profile', () => {
+  const session = createLayoutSession(); session.load(state(), 'desktop', 'time'); session.arrange('custom');
+  const before = structuredClone(session.draft); const order = before.desktop.items.map(item => item.id); const target = order[0];
+  session.layer('forward', target); assert.equal(session.selected, 'time'); assert.deepEqual(session.draft.desktop.items.map(item => item.id), [order[1], order[0], ...order.slice(2)]);
+  const byId = items => [...items].sort((a, b) => a.id.localeCompare(b.id));
+  assert.deepEqual(byId(session.draft.desktop.items), byId(before.desktop.items)); assert.deepEqual(session.draft.mobile, before.mobile); assert.equal(session.revision, 7);
+});
+
+test('explicit layer boundaries keep Automatic null, while a genuine targeted step creates only that profile', () => {
+  const session = createLayoutSession(); session.load(state(), 'mobile'); const template = session.effective();
+  session.layer('backward', template.items[0].id); session.layer('forward', template.items.at(-1).id); assert.equal(session.changed(), false); assert.equal(session.draft.mobile, null);
+  session.layer('forward', template.items[0].id); assert.equal(session.changed(), true); assert.equal(session.draft.desktop, null);
+  assert.deepEqual(session.draft.mobile.items, [template.items[1], template.items[0], ...template.items.slice(2)]);
+});
