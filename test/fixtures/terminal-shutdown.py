@@ -19,9 +19,10 @@ if pid == 0:
 output = bytearray()
 sent = False
 status = None
-deadline = time.monotonic() + 45
+drained = False
+deadline = time.monotonic() + settings.get("timeoutMs", 45000) / 1000
 while time.monotonic() < deadline:
-  readable, _, _ = select.select([descriptor], [], [], 0.1)
+  readable, _, _ = select.select([] if drained else [descriptor], [], [], 0.05)
   if readable:
     try:
       chunk = os.read(descriptor, 65536)
@@ -31,12 +32,35 @@ while time.monotonic() < deadline:
       chunk = b""
     if chunk:
       output.extend(chunk)
-      if not sent and b"dashboard listening at" in output:
+      if settings.get("sendCtrlC", True) and not sent and b"dashboard listening at" in output:
         os.write(descriptor, b"\x03")
         sent = True
+    else:
+      drained = True
+  if status is None:
+    waited, value = os.waitpid(pid, os.WNOHANG)
+    if waited:
+      status = value
+  if status is not None and drained:
+    break
+timed_out = status is None or not drained
+os.close(descriptor)
+# Only wait for this invocation's cooperative child; never signal a process group.
+cleanup_deadline = time.monotonic() + 5
+while status is None and time.monotonic() < cleanup_deadline:
   waited, value = os.waitpid(pid, os.WNOHANG)
   if waited:
     status = value
-    break
-os.close(descriptor)
-print(json.dumps({"sentCtrlC": sent, "code": os.waitstatus_to_exitcode(status) if status is not None else None, "output": output.decode("utf-8", errors="replace")}))
+  else:
+    time.sleep(0.01)
+print(json.dumps({
+  "pid": pid,
+  "sentCtrlC": sent,
+  "code": os.waitstatus_to_exitcode(status) if status is not None else None,
+  "exitCode": os.WEXITSTATUS(status) if status is not None and os.WIFEXITED(status) else None,
+  "signal": os.WTERMSIG(status) if status is not None and os.WIFSIGNALED(status) else None,
+  "timedOut": timed_out,
+  "drained": drained,
+  "reaped": status is not None,
+  "output": output.decode("utf-8", errors="replace")
+}))

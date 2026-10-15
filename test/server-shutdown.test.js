@@ -9,16 +9,24 @@ import https from 'node:https';
 import path from 'node:path';
 import { rootCertificates } from 'node:tls';
 import { deferred } from './fixtures/lifecycle.js';
+import { assertTerminalOutcome } from './fixtures/terminal-outcome.js';
 
 const project = path.resolve(import.meta.dirname, '..'); const execute = promisify(execFile);
 async function until(check, message, timeout = 5000) { const end = Date.now() + timeout; while (Date.now() < end) { if (await check()) return; await new Promise((resolve) => setTimeout(resolve, 25)); } throw new Error(message); }
 async function reservePort() { const server = net.createServer(); server.listen(0, '127.0.0.1'); await once(server, 'listening'); const port = server.address().port; await new Promise((resolve) => server.close(resolve)); return port; }
 async function fixture(t) {
-  const root = await mkdtemp('/tmp/opencode/shutdown-process-'); t.after(() => rm(root, { recursive: true, force: true }));
+  const root = await mkdtemp('/tmp/opencode/shutdown-process-');
+  t.after(async () => {
+    const records = await terminalRecords(root);
+    for (const record of records) {
+      await until(async () => { try { await stat(`/proc/${record.pid}`); return false; } catch (error) { if (error.code === 'ENOENT') return true; throw error; } }, `Owned PID ${record.pid} still exists; retained ${root}.`, 15000);
+    }
+    await rm(root, { recursive: true, force: true });
+  });
   for (const directory of ['src', 'public', 'scripts']) await cp(path.join(project, directory), path.join(root, directory), { recursive: true });
   await symlink(path.join(project, 'node_modules'), path.join(root, 'node_modules'), 'dir');
   await cp(path.join(project, 'package.json'), path.join(root, 'package.json')); const port = await reservePort();
-  const environment = { ...process.env }; for (const name of ['HOST', 'PORT', 'DATABASE_PATH', 'NFS_SOURCE', 'NFS_MOUNT_MODE', 'NFS_MOUNT_PATH', 'NODE_EXTRA_CA_CERTS', 'LINKWARDEN_CONFIG_ENCRYPTION_KEY_FILE']) delete environment[name];
+  const environment = { ...process.env }; for (const name of ['HOST', 'PORT', 'DATABASE_PATH', 'NFS_SOURCE', 'NFS_MOUNT_MODE', 'NFS_MOUNT_PATH', 'NODE_EXTRA_CA_CERTS', 'LINKWARDEN_CONFIG_ENCRYPTION_KEY_FILE', 'HOME_ASSISTANT_CA_FILE', 'LINKWARDEN_CA_FILE', 'CALDAV_CA_FILE', 'TERMINAL_EVIDENCE_DIR']) delete environment[name];
   environment.LINKWARDEN_CONFIG_ENCRYPTION_KEY = Buffer.alloc(32, 4).toString('base64');
   const marker = path.join(root, 'process-marker.mjs'); await writeFile(marker, `console.log('fixture-pid:' + process.pid); const timer = setTimeout(() => { if (!process.emit('SIGTERM')) process.exit(0); }, 12000); process.on('exit', () => clearTimeout(timer));`);
   environment.NODE_OPTIONS = `${environment.NODE_OPTIONS ?? ''} --import=${marker}`.trim();
@@ -44,6 +52,11 @@ async function assertPortFree(port) { const server = net.createServer(); server.
 async function assertPidsGone(output) {
   const pids = [...output.matchAll(/fixture-pid:(\d+)/g)].map((match) => Number(match[1]));
   for (const pid of pids) await until(async () => { try { await stat(`/proc/${pid}`); return false; } catch (error) { if (error.code === 'ENOENT') return true; throw error; } }, `owned process ${pid} still exists`);
+}
+
+async function terminalRecords(root) {
+  const names = await readdir(root);
+  return Promise.all(names.filter(name => /^\d+\.json$/.test(name)).map(async name => JSON.parse(await readFile(path.join(root, name), 'utf8'))));
 }
 
 for (const dev of [false, true]) test(`${dev ? 'development' : 'normal'} launch shuts down through IPC with no owned process or occupied port`, async (t) => {
@@ -101,13 +114,34 @@ for (const signal of ['SIGINT', 'SIGTERM']) test(`real ${signal} delivery is exp
   const f = await fixture(t); const run = await launch(t, f); await until(() => run.output.includes('dashboard listening at'), 'No ready output'); assert.equal(run.child.kill(signal), true); await assertStopped(f, run);
 });
 
-for (const mode of ['normal', 'development', 'npm']) test(`terminal Ctrl+C stops the ${mode} launch without native watch teardown`, { timeout: 60000 }, async (t) => {
+for (const { mode, failCleanup } of [{ mode: 'development' }, { mode: 'npm' }, { mode: 'npm', failCleanup: true }]) test(failCleanup ? 'npm terminal interruption cannot hide a real application cleanup failure' : `terminal Ctrl+C stops the ${mode} launch without native watch teardown`, { timeout: 75000 }, async (t) => {
   try { await execute('python3', ['-c', 'import pty']); } catch { t.skip('Terminal verification requires an installed Python 3 with pty support.'); return; }
-  const f = await fixture(t); const command = mode === 'npm' ? ['npm', 'run', 'dev'] : [process.execPath, ...(mode === 'normal' ? ['--env-file-if-exists=.env', 'src/server.js'] : ['scripts/dev.js'])];
-  const { stdout } = await execute('python3', [path.join(project, 'test/fixtures/terminal-shutdown.py'), JSON.stringify({ cwd: f.root, environment: f.environment, command })], { timeout: 50000, maxBuffer: 1024 * 1024 });
+  const f = await fixture(t); const command = mode === 'npm' ? ['npm', 'run', 'dev'] : [process.execPath, 'scripts/dev.js'];
+  await cp(path.join(project, 'test/fixtures/terminal-marker.mjs'), path.join(f.root, 'process-marker.mjs'));
+  f.environment.TERMINAL_EVIDENCE_DIR = f.root;
+  if (failCleanup) {
+    const file = path.join(f.root, 'src/server.js');
+    const source = await readFile(file, 'utf8');
+    await writeFile(file, source.replace('weather.start();', "const closeStore = store.close; store.close = () => { closeStore(); throw new Error('fixture cleanup failure'); }; weather.start();"));
+  }
+  const { stdout } = await execute('python3', [path.join(project, 'test/fixtures/terminal-shutdown.py'), JSON.stringify({ cwd: f.root, environment: f.environment, command })], { timeout: 55000, maxBuffer: 1024 * 1024 });
   const result = JSON.parse(stdout); if (result.unsupported) { t.skip(`PTY unavailable: ${result.unsupported}`); return; }
-  assert.equal(result.sentCtrlC, true, result.output); assert.doesNotMatch(result.output, /Assertion failed|Segmentation fault|core dumped/); await assertPortFree(f.port); await assertPidsGone(result.output);
+  const records = await terminalRecords(f.root);
+  let outcome;
+  if (failCleanup) {
+    assert.equal(result.sentCtrlC, true); assert.equal(result.drained, true); assert.equal(result.timedOut, false);
+    assert.equal(records.find(record => record.role === 'dev.js')?.exitCode, 1, stdout);
+    const server = records.find(record => record.role === 'server.js');
+    assert.equal(server?.exitCode, 1, stdout);
+    assert.deepEqual(server.stopped, { code: 1, cleanupSafe: false, forced: false, failure: 'cleanup' });
+    assert.ok(records.every(record => !record.fallback), stdout);
+    assert.throws(() => assertTerminalOutcome(mode, result, records), /AssertionError/);
+    outcome = 'rejected-application-failure';
+  } else outcome = assertTerminalOutcome(mode, result, records);
+  const ownedPids = records.map(record => record.pid);
+  if (mode === 'npm') ownedPids.push(records.find(record => record.role === 'dev.js').parent);
+  await assertPortFree(f.port); await assertPidsGone(ownedPids.map(pid => `fixture-pid:${pid}`).join('\n'));
   assert.equal((await readdir(f.root)).some((name) => /^core(?:\.|$)/.test(name)), false);
-  if (mode === 'npm' && result.output.includes('EACCES')) { assert.notEqual(result.code, 0); t.diagnostic('npm forwarding still reports EACCES under the container policy. Use the verified direct development launcher.'); }
-  else assert.equal(result.code, 0, result.output);
+  t.diagnostic(JSON.stringify({ outcome, code: result.code, signal: result.signal, records }));
+  if (outcome === 'permission-limited') t.diagnostic('npm kill EACCES is an environment limitation, not silent npm success. Use node scripts/dev.js.');
 });
