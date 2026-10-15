@@ -155,8 +155,8 @@ test('dashboard styles preserve transparent, wrapping forecasts and calendar pre
   const base = await staticServer(context);
   const dashboardCss = await (await fetch(`${base}/dashboard.css`)).text(); assert.match(dashboardCss, /#weather \{[^}]*background: transparent;[^}]*border-radius: 0;/); assert.doesNotMatch(dashboardCss, /#weather \{[^}]*#08101bcc/);
   assert.match(dashboardCss, /#information \{[^}]*width: calc\(100% - 2rem\);[^}]*max-width: none;/); assert.doesNotMatch(dashboardCss, /max-width: min\(55rem/);
-  assert.match(dashboardCss, /:fullscreen \.page-tools \{ display: flex; \}/);
-  assert.match(dashboardCss, /:fullscreen body:not\(\.background-only\) \.page-tools > :not\(#edit-layout\) \{ display: none; \}/);
+  assert.match(dashboardCss, /:fullscreen \.page-tools \{ display: none; \}/);
+  assert.match(dashboardCss, /:fullscreen #edit-layout \{ display: none; \}/);
   assert.match(dashboardCss, /#hourly li, #daily li \{[^}]*background: transparent;/);
   assert.match(dashboardCss, /#hourly, #daily \{[^}]*flex-wrap: wrap;[^}]*max-width: 70%;/); assert.doesNotMatch(dashboardCss, /#hourly, #daily \{[^}]*overflow-[xy]:\s*auto/);
   assert.match(dashboardCss, /#hourly li, #daily li \{[^}]*flex: 1 1 6\.25em;[^}]*min-width: min\(6\.25em, 100%\);/); assert.doesNotMatch(dashboardCss, /flex: 0 0 8em/);

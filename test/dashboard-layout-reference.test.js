@@ -5,11 +5,11 @@ import { fitLayoutCanvas } from '../public/dashboard-layout.js';
 
 const snapshot = (overrides = {}) => ({ screen: { width: 1600, height: 1000, orientation: 'landscape-primary:0' }, viewport: { width: 1200, height: 800 }, safe: { top: 2, bottom: 3, left: 4, right: 5 }, ...overrides });
 
-test('screen estimates use CSS dimensions, fixed reservations, and independent profile margins', () => {
+test('screen estimates use the full safe-area canvas without control or caption reservations', () => {
   const owner = createLayoutReference(); const value = snapshot(); const before = structuredClone(value); owner.refresh(value);
   assert.deepEqual(layoutDimensions({ width: 1600.9, height: 1000.1 }), { width: 1600, height: 1000 });
-  assert.deepEqual([owner.get('desktop').width, owner.get('desktop').height], [1559, 875]);
-  assert.deepEqual([owner.get('mobile').width, owner.get('mobile').height], [1575, 891]);
+  assert.deepEqual([owner.get('desktop').width, owner.get('desktop').height], [1591, 995]);
+  assert.deepEqual([owner.get('mobile').width, owner.get('mobile').height], [1591, 995]);
   assert.equal(owner.get('desktop').source, 'estimated');
   const original = owner.get('desktop'); owner.refresh(snapshot({ viewport: { width: 600, height: 400 }, safe: {} }));
   assert.equal(owner.get('desktop'), original, 'ordinary resize and destination insets cannot rebase reference');
@@ -19,8 +19,8 @@ test('screen estimates use CSS dimensions, fixed reservations, and independent p
 test('invalid screen dimensions use one stable viewport fallback or safely defer', () => {
   for (const screen of [undefined, { width: 0, height: 2 }, { width: NaN, height: 2 }, { width: Infinity, height: 2 }, { width: 1e20, height: 2 }, { width: '1600', height: 1000 }]) {
     const owner = createLayoutReference(); owner.refresh(snapshot({ screen }));
-    assert.equal(owner.get('desktop').source, 'fallback'); assert.equal(owner.get('desktop').width, 1159);
-    owner.refresh(snapshot({ screen, viewport: { width: 400, height: 300 } })); assert.equal(owner.get('desktop').width, 1159);
+    assert.equal(owner.get('desktop').source, 'fallback'); assert.equal(owner.get('desktop').width, 1191);
+    owner.refresh(snapshot({ screen, viewport: { width: 400, height: 300 } })); assert.equal(owner.get('desktop').width, 1191);
   }
   const owner = createLayoutReference(); owner.refresh({}); assert.equal(owner.get('desktop').width, 0);
   owner.refresh(snapshot()); assert.equal(owner.get('desktop').source, 'estimated');
@@ -29,19 +29,19 @@ test('invalid screen dimensions use one stable viewport fallback or safely defer
 test('fullscreen confirmation persists through exit and corrects an estimate without cumulative drift', () => {
   const owner = createLayoutReference(); owner.refresh(snapshot());
   const confirmed = snapshot({ viewport: { width: 1500, height: 900 } }); owner.confirm(confirmed);
-  const reference = owner.get('desktop'); assert.equal(reference.width, 1459); assert.equal(reference.source, 'confirmed');
+  const reference = owner.get('desktop'); assert.equal(reference.width, 1491); assert.equal(reference.source, 'confirmed');
   owner.refresh(snapshot()); assert.equal(owner.get('desktop'), reference);
   for (let i = 0; i < 10; i++) owner.confirm(confirmed);
   assert.deepEqual(owner.get('desktop'), reference);
   owner.confirm(snapshot({ viewport: { width: 0, height: 0 } })); assert.deepEqual(owner.get('desktop'), reference);
 });
 
-test('Settings locks both entries while the latest context and confirmation wait for release', () => {
+test('editing locks both entries while the latest context and confirmation wait for release', () => {
   const owner = createLayoutReference(); owner.refresh(snapshot()); const old = owner.get('desktop'); const mobile = owner.get('mobile'); owner.lock();
   const changed = snapshot({ screen: { width: 1000, height: 1600, orientation: 'portrait-primary:90' }, viewport: { width: 950, height: 1500 } });
   owner.refresh(changed); owner.confirm(changed); owner.refresh(changed);
   assert.equal(owner.get('desktop'), old); assert.equal(owner.get('mobile'), mobile);
-  owner.release(); assert.equal(owner.get('desktop').width, 909); assert.equal(owner.get('desktop').source, 'confirmed');
+  owner.release(); assert.equal(owner.get('desktop').width, 941); assert.equal(owner.get('desktop').source, 'confirmed');
   const accepted = owner.get('desktop'); owner.release(); assert.equal(owner.get('desktop'), accepted);
   owner.refresh(snapshot()); assert.equal(owner.get('desktop').source, 'estimated');
 });
@@ -49,7 +49,7 @@ test('Settings locks both entries while the latest context and confirmation wait
 test('explicit orientation changes invalidate an unavailable-screen fallback, not ordinary resize', () => {
   const owner = createLayoutReference(); const value = snapshot({ screen: null }); owner.refresh(value);
   owner.refresh({ ...value, viewport: { width: 800, height: 1200 } }, { orientationChanged: true });
-  assert.equal(owner.get('desktop').width, 759);
+  assert.equal(owner.get('desktop').width, 791);
 });
 
 test('uniform fitting anchors bottom-left, caps enlargement, and rejects unavailable space', () => {

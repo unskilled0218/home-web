@@ -43,22 +43,30 @@ function fixture() {
   return { document, window, nodes, frames, listeners, observers };
 }
 
-test('layout measurement stays independent of hidden content and reserves bounded caption/tool space', () => {
+test('layout measurement ignores content, tools, status and captions and uses the full viewport', () => {
   const f = fixture(); f.nodes.get('dashboard-content').hidden = true;
-  assert.deepEqual(measureLayoutSurface(f.document, f.window), { x: 16, y: 78, width: 1168, height: 706 });
+  assert.deepEqual(measureLayoutSurface(f.document, f.window), { x: 0, y: 0, width: 1200, height: 800 });
   f.nodes.get('photo-caption').textContent = 'A long filename';
-  assert.equal(measureLayoutSurface(f.document, f.window).height, 658);
+  assert.equal(measureLayoutSurface(f.document, f.window).height, 800);
   f.window.innerWidth = 80; f.window.innerHeight = 50;
-  assert.equal(measureLayoutSurface(f.document, f.window).height, 0);
+  assert.equal(measureLayoutSurface(f.document, f.window).height, 50);
+  f.window.innerHeight = 0; assert.equal(measureLayoutSurface(f.document, f.window).height, 0);
+});
+
+test('only safe insets and visual viewport offsets constrain the canvas edges', () => {
+  const f = fixture(); const safe = { top: 10, bottom: 20, left: 30, right: 40 };
+  f.window.getComputedStyle = () => ({ getPropertyValue: key => String(safe[key.replace('--layout-safe-', '')]) });
+  f.window.visualViewport = { width: 500, height: 300, offsetLeft: 5, offsetTop: 7 };
+  assert.deepEqual(measureLayoutSurface(f.document, f.window), { x: 35, y: 17, width: 430, height: 270 });
 });
 
 test('edit root and panel visibility or dimensions never reserve space or own a view observer', () => {
   const f = fixture(); const chrome = { hidden: false, getBoundingClientRect: () => ({ bottom: 500 }) };
   f.nodes.set('layout-toolbar', chrome); f.nodes.set('layout-details', chrome);
   const view = createDashboardLayoutView(f); const before = view.frame('desktop');
-  assert.equal(view.destination().y, 78); assert.ok(!f.observers[0].nodes.includes(chrome));
+  assert.equal(view.destination().y, 0); assert.ok(!f.observers[0].nodes.includes(chrome));
   for (const hidden of [true, false]) { chrome.hidden = hidden; chrome.getBoundingClientRect = () => ({ bottom: 1000 }); assert.deepEqual(view.frame('desktop'), before); }
-  f.nodes.get('tools').rect.bottom = 90; assert.equal(view.destination().y, 98); view.dispose();
+  f.nodes.get('tools').rect.bottom = 900; assert.equal(view.destination().y, 0); view.dispose();
 });
 
 test('custom projection retains widget identity, restores automatic groups/order, and never mutates layout', () => {
@@ -97,12 +105,12 @@ test('destination fitting never rebases reference geometry and Automatic clears 
   const f = fixture(); const view = createDashboardLayoutView(f);
   const state = { layout: { ...defaultWidgetLayout(), desktop: initialWidgetProfile('desktop') }, mobile: false, scale: 1, display: { content: true } };
   view.update(state); const reference = view.reference('desktop'); const width = f.nodes.get('clock').style.width;
-  assert.equal(reference.width, 1568); assert.equal(reference.height, 880);
+  assert.equal(reference.width, 1600); assert.equal(reference.height, 1000);
   f.window.innerWidth = 800; f.window.innerHeight = 400; view.update(state);
   assert.equal(view.reference('desktop'), reference); assert.equal(f.nodes.get('clock').style.width, width);
   const stage = f.nodes.get('widget-surface');
-  assert.equal(stage.style.width, '1568px'); assert.equal(stage.style.transform, `scale(${306 / 880})`);
-  assert.equal(stage.style.top, '-496px'); assert.equal(stage.style.transformOrigin, 'left bottom');
+  assert.equal(stage.style.width, '1600px'); assert.equal(stage.style.transform, 'scale(0.4)');
+  assert.equal(stage.style.top, '-600px'); assert.equal(stage.style.transformOrigin, 'left bottom');
   view.update({ ...state, layout: defaultWidgetLayout() });
   assert.equal(stage.style.transform, undefined); assert.equal(stage.style.transformOrigin, undefined); view.dispose();
 });
@@ -115,12 +123,12 @@ test('fullscreen confirmation is bounded, ignores exit callbacks, and queues beh
   f.window.innerWidth = 1500; f.window.innerHeight = 900;
   for (let i = 0; i < 15; i++) flush();
   assert.equal(f.frames.size, 0); assert.equal(view.reference('desktop'), original);
-  view.releaseReference(); assert.equal(view.reference('desktop').width, 1468); assert.equal(view.reference('desktop').source, 'confirmed');
+  view.releaseReference(); assert.equal(view.reference('desktop').width, 1500); assert.equal(view.reference('desktop').source, 'confirmed');
   f.document.fullscreenElement = null; f.listeners.get('document:fullscreenchange')(); flush();
-  f.window.innerWidth = 800; f.listeners.get('resize')(); flush(); assert.equal(view.reference('desktop').width, 1468);
+  f.window.innerWidth = 800; f.listeners.get('resize')(); flush(); assert.equal(view.reference('desktop').width, 1500);
   f.document.fullscreenElement = f.document.documentElement; f.listeners.get('document:fullscreenchange')();
   const late = [...f.frames.values()][0]; view.dispose(); late();
-  assert.equal(view.reference('desktop').width, 1468); assert.equal(f.frames.size, 0); assert.equal(f.listeners.size, 0);
+  assert.equal(view.reference('desktop').width, 1500); assert.equal(f.frames.size, 0); assert.equal(f.listeners.size, 0);
 });
 
 test('local override stays isolated from remote updates, pins its profile, and clears to latest confirmed state', () => {
@@ -133,7 +141,7 @@ test('local override stays isolated from remote updates, pins its profile, and c
   view.update({ ...state, layout: { ...defaultWidgetLayout(), desktop: initialWidgetProfile('desktop', 'right') } });
   assert.equal(f.nodes.get('clock').style.width, width); assert.equal(state.layout.desktop, null);
   const frame = view.frame('mobile'); assert.equal(frame.reference, reference); assert.ok(frame.fit.scale > 0);
-  view.setOverride(null); view.releaseReference(); assert.equal(f.nodes.get('clock').style.left, '1061px'); view.dispose();
+  view.setOverride(null); view.releaseReference(); assert.equal(f.nodes.get('clock').style.left, '1083px'); view.dispose();
 });
 
 test('rapid fullscreen exit invalidates a provisional sample before it can confirm', () => {

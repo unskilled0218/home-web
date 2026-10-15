@@ -1,5 +1,5 @@
 import { projectWidget, fitLayoutCanvas, WIDGET_ELEMENTS } from './dashboard-layout.js';
-import { createLayoutReference, layoutMargin, LAYOUT_GAP_PIXELS, CAPTION_PIXELS } from './dashboard-layout-reference.js';
+import { createLayoutReference } from './dashboard-layout-reference.js';
 
 function readSafeInsets(document, window) {
   const style = window.getComputedStyle(document.documentElement);
@@ -7,17 +7,10 @@ function readSafeInsets(document, window) {
 }
 
 export function measureLayoutSurface(document, window) {
-  const margin = layoutMargin(window.innerWidth <= 600);
   const insets = readSafeInsets(document, window); const safe = edge => insets[edge];
   const viewport = window.visualViewport;
-  const width = Math.max(0, Math.floor((viewport?.width ?? window.innerWidth) - margin * 2 - safe('left') - safe('right')));
-  const height = viewport?.height ?? window.innerHeight;
-  const top = Math.ceil(Math.max(margin + safe('top'), ...['page-status', 'page-tools'].map(id => {
-    const node = id === 'page-tools' ? document.querySelector('.page-tools') : document.getElementById(id);
-    return node?.getBoundingClientRect().bottom || 0;
-  })) + LAYOUT_GAP_PIXELS);
-  const caption = document.getElementById('photo-caption').textContent ? CAPTION_PIXELS : 0;
-  return { x: margin + safe('left') + (viewport?.offsetLeft || 0), y: top + (viewport?.offsetTop || 0), width, height: Math.max(0, Math.floor(height - top - margin - safe('bottom') - caption)) };
+  // Controls, status and captions overlay the canvas; only device safe areas constrain it.
+  return { x: safe('left') + (viewport?.offsetLeft || 0), y: safe('top') + (viewport?.offsetTop || 0), width: Math.max(0, Math.floor((viewport?.width ?? window.innerWidth) - safe('left') - safe('right'))), height: Math.max(0, Math.floor((viewport?.height ?? window.innerHeight) - safe('top') - safe('bottom'))) };
 }
 
 export function createDashboardLayoutView({ document, window, onMeasure = () => {} }) {

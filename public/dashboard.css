@@ -8,7 +8,7 @@ button:hover, .page-tools a:hover { background: #30475c; }
 [hidden] { display: none !important; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 .page-tools { position: relative; z-index: 2; display: flex; justify-content: flex-end; flex-wrap: wrap; gap: .5rem; padding: 1rem; }
-:fullscreen .page-tools { display: flex; }
+:fullscreen .page-tools { display: none; }
 :fullscreen .background-only .page-tools { display: flex; }
 #page-status { position: relative; z-index: 2; margin: 0 1rem; text-align: right; }
 #photos, .photo-layer, .photo-layer img { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; }
@@ -216,8 +216,10 @@ input[type=color] { min-height: 2.5rem; }
 #widget-surface :is(.calendar-event-date, .calendar-event-title, .calendar-event-time, .calendar-event-location) { grid-column: 1; grid-row: auto; }
 #widget-surface .weather-icon { max-width: 100%; }
 .custom-widget-layout .page-tools, .custom-widget-layout #page-status { z-index: 20; }
+.custom-widget-layout .page-tools { position: fixed; top: 0; left: 0; right: 0; z-index: 21; }
+.custom-widget-layout #page-status { position: fixed; top: 4.5rem; left: 1rem; right: 1rem; max-height: 3em; overflow: auto; }
 .custom-widget-layout #photo-caption { position: fixed; z-index: 2; left: calc(1rem + env(safe-area-inset-left, 0px)); right: calc(1rem + env(safe-area-inset-right, 0px)); bottom: calc(.5rem + env(safe-area-inset-bottom, 0px)); margin: 0; max-height: 40px; overflow: auto; font-size: 14px; }
-:fullscreen body:not(.background-only) .page-tools > :not(#edit-layout) { display: none; }
+:fullscreen #edit-layout { display: none; }
 .dashboard-layout-editing .page-tools { visibility: hidden; }
 .layout-hold-pending { -webkit-touch-callout: none; user-select: none; }
 #layout-toolbar { position: fixed; z-index: 40; top: calc(.5rem + var(--layout-safe-top) + var(--layout-chrome-top, 0px)); right: calc(.5rem + var(--layout-safe-right) + var(--layout-chrome-right, 0px)); width: min(30rem, calc(var(--layout-chrome-width, 100vw) - 1rem - var(--layout-safe-left) - var(--layout-safe-right))); max-height: calc(var(--layout-chrome-height, 100dvh) - 1rem - var(--layout-safe-top) - var(--layout-safe-bottom)); font-size: 14px; pointer-events: none; }

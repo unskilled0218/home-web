@@ -1,8 +1,3 @@
-export const REFERENCE_STATUS_PIXELS = 32;
-export const LAYOUT_GAP_PIXELS = 8;
-export const CAPTION_PIXELS = 48;
-export const layoutMargin = mobile => mobile ? 8 : 16;
-
 export function layoutDimensions(value) {
   if (!Number.isFinite(value?.width) || !Number.isFinite(value?.height)) return null;
   const width = Math.floor(value?.width); const height = Math.floor(value?.height);
@@ -21,8 +16,7 @@ export function createLayoutReference() {
     if (!candidate?.raw) { accepted = undefined; return; }
     const { raw, safe, source, context } = candidate;
     accepted = Object.freeze(Object.fromEntries(['desktop', 'mobile'].map(mode => {
-      const margin = layoutMargin(mode === 'mobile');
-      return [mode, Object.freeze({ x: 0, y: 0, width: Math.max(0, Math.floor(raw.width - margin * 2 - safe.left - safe.right)), height: Math.max(0, Math.floor(raw.height - margin * 2 - safe.top - safe.bottom - REFERENCE_STATUS_PIXELS - LAYOUT_GAP_PIXELS - CAPTION_PIXELS)), source, context })];
+      return [mode, Object.freeze({ x: 0, y: 0, width: Math.max(0, Math.floor(raw.width - safe.left - safe.right)), height: Math.max(0, Math.floor(raw.height - safe.top - safe.bottom)), source, context })];
     })));
   }
   function refresh(snapshot, { orientationChanged = false } = {}) {

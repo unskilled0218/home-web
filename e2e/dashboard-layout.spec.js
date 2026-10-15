@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { createStore } from '../src/db.js';
 import { createDashboardServer } from '../src/app.js';
 import { normalizeDashboardPreferences } from '../public/dashboard-helpers.js';
-import { initialWidgetProfile, defaultWidgetLayout } from '../public/dashboard-layout.js';
+import { initialWidgetProfile, defaultWidgetLayout, projectWidget } from '../public/dashboard-layout.js';
 import { encryptApiKey } from '../src/linkwarden-crypto.js';
 
 async function environment(preferences = {}, services = {}) {
@@ -53,9 +53,8 @@ function assertCanvasFit(state) {
 async function usableSurface(page, width, height) {
   const measured = await page.evaluate(async ({ width, height }) => {
     const { measureLayoutSurface } = await import('/dashboard-layout-view.js');
-    const margin = innerWidth <= 600 ? 8 : 16;
-    const top = measureLayoutSurface(document, window).y;
-    Object.assign(visualViewport, { width: width + margin * 2, height: height + top + margin });
+    const style = getComputedStyle(document.documentElement); const safe = edge => Number.parseFloat(style.getPropertyValue(`--layout-safe-${edge}`)) || 0;
+    Object.assign(visualViewport, { width: width + safe('left') + safe('right'), height: height + safe('top') + safe('bottom') });
     visualViewport.dispatchEvent(new Event('resize'));
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     return measureLayoutSurface(document, window);
@@ -106,6 +105,31 @@ async function drag(page, action, id, dx, dy, cancel = false) {
   await page.mouse.up();
 }
 
+test('widgets reach the fullscreen top edge beneath clickable Save, Toolbar and Cancel overlays', async ({ page }) => {
+  const widgetLayout = layout(); const time = widgetLayout.desktop.items.splice(widgetLayout.desktop.items.findIndex(item => item.id === 'time'), 1)[0]; time.x = 100000; time.y = 100000; widgetLayout.desktop.items.push(time);
+  const env = await environment({ widgetLayout, imageInfo: true }); const writes = [];
+  try {
+    await ready(page, env); await page.evaluate(() => document.documentElement.requestFullscreen()); await settleFrames(page);
+    await page.evaluate(() => { document.getElementById('page-status').textContent = 'Status overlay'; document.getElementById('photo-caption').textContent = 'Caption overlay'; }); await settleFrames(page);
+    const viewport = await page.evaluate(() => ({ width: innerWidth, height: innerHeight })); const canvas = await canvasState(page);
+    expect(canvas.actual).toEqual({ x: 0, y: 0, ...viewport }); expect(canvas.actualScale).toBe(1); await expect(page.locator('#edit-layout')).toBeHidden();
+    const original = env.store.getDashboardPreferences(); page.on('request', request => { if (request.method() === 'PUT') writes.push(request.postDataJSON()); });
+    const point = await backgroundPoint(page); await page.mouse.move(point.x, point.y); await page.mouse.down(); try { await expect(page.locator('#layout-toolbar')).toBeVisible(); } finally { await page.mouse.up(); }
+    const handle = page.locator('[data-widget=time] [data-action=move]'); const start = await handle.boundingBox();
+    await page.mouse.move(start.x + 4, start.y + 4); await page.mouse.down(); await page.mouse.move(viewport.width - 1, 0, { steps: 5 }); await page.mouse.up();
+    const card = await page.locator('#clock').boundingBox(); const frame = await page.locator('[data-widget=time]').boundingBox(); expect(card.y).toBe(0); expect(card.x + card.width).toBe(viewport.width); expect(frame).toEqual(card);
+    for (const id of ['save', 'toggle', 'cancel']) {
+      const control = page.locator(`#layout-${id}`); const box = await control.boundingBox(); expect(box.x).toBeGreaterThanOrEqual(card.x); expect(box.y).toBeGreaterThanOrEqual(card.y);
+      expect(await control.evaluate(node => { const box = node.getBoundingClientRect(); return document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2) === node; })).toBe(true);
+    }
+    expect(writes).toEqual([]); expect(env.store.getDashboardPreferences()).toEqual(original);
+    await details(page); await page.locator('#layout-close').click(); await save(page);
+    expect(writes).toHaveLength(1); const saved = storedLayout(env).desktop.items.at(-1); const projected = projectWidget(saved, viewport); expect(projected.y + projected.h).toBe(viewport.height); expect(projected.x + projected.w).toBe(viewport.width); expect(saved.w).toBe(time.w); expect(saved.h).toBe(time.h); expect(storedLayout(env).mobile).toEqual(original.preferences.widgetLayout.mobile);
+    expect(storedLayout(env).desktop.items.slice(0, -1)).toEqual(original.preferences.widgetLayout.desktop.items.slice(0, -1));
+    await expect(page.locator('#clock')).not.toHaveAttribute('inert'); expect((await page.locator('#clock').boundingBox()).y).toBe(0);
+  } finally { await page.goto('about:blank'); await env.close(); }
+});
+
 test('unchanged Custom editing retains normal canvas, widget and text dimensions', async ({ page }) => {
   const env = await environment({ widgetLayout: layout() });
   try {
@@ -117,7 +141,14 @@ test('unchanged Custom editing retains normal canvas, widget and text dimensions
       await page.setViewportSize({ width, height }); if (fullscreen) await page.evaluate(() => document.documentElement.requestFullscreen());
       if (safe) await page.evaluate(() => { for (const [edge, value] of Object.entries({ left: 10, right: 12, top: 4, bottom: 8 })) document.documentElement.style.setProperty(`--layout-safe-${edge}`, `${value}px`); });
       await page.evaluate(() => { document.getElementById('photo-caption').textContent = 'Fixture caption'; window.dispatchEvent(new Event('resize')); }); await settleFrames(page);
-      const before = await sample(); await enter(page); await settleFrames(page); expect(await sample()).toEqual(before);
+      const before = await sample();
+      if (fullscreen) {
+        await expect(page.locator('#edit-layout')).toBeHidden(); const point = await backgroundPoint(page);
+        await page.mouse.move(point.x, point.y); await page.mouse.down();
+        try { await expect(page.locator('#layout-toolbar')).toBeVisible(); } finally { await page.mouse.up(); }
+        await expect(page.locator('#layout-details')).toBeHidden();
+      } else await enter(page);
+      await settleFrames(page); expect(await sample()).toEqual(before);
       const actions = await page.locator('#layout-form > header').boundingBox(); const vp = await page.evaluate(() => ({ width: visualViewport?.width ?? innerWidth, x: visualViewport?.offsetLeft || 0, y: visualViewport?.offsetTop || 0 })); expect(Math.abs(actions.x + actions.width - vp.x - vp.width + 8 + (safe ? 12 : 0))).toBeLessThanOrEqual(.1); expect(actions.y).toBe(vp.y + 8 + (safe ? 4 : 0));
       await details(page); await settleFrames(page); expect(await sample()).toEqual(before);
       await page.locator('#layout-toggle').click(); await settleFrames(page); expect(await sample()).toEqual(before);
@@ -205,11 +236,13 @@ test('hidden, fully covered and zero-canvas widgets retain independent panel lay
   try {
     await ready(page, env); await open(page); const before = env.store.getDashboardPreferences();
     await expect(page.locator('[data-layer-row=time]')).toContainText('hidden'); await page.locator('[data-layer-row=time] [data-layer=forward]').click(); await expect(page.locator('#layout-widget')).toHaveValue('time'); await expect(page.locator('#clock')).toBeHidden();
-    await page.locator('#layout-toggle').click(); await page.evaluate(() => { document.getElementById('page-status').textContent = 'Long status '.repeat(3000); }); await settleFrames(page);
-    await expect(page.locator('#layout-frames')).toBeHidden(); await expect(page.locator('#widget-surface')).toBeHidden(); await details(page); await expect(page.locator('#layout-w')).toBeDisabled();
+    await page.locator('#layout-cancel').click();
+    const screenSize = await page.evaluate(() => ({ width: screen.width, height: screen.height }));
+    await page.evaluate(() => { document.documentElement.style.setProperty('--layout-safe-left', '2px'); Object.defineProperty(screen, 'width', { configurable: true, value: 1 }); Object.defineProperty(screen, 'height', { configurable: true, value: 2 }); window.dispatchEvent(new Event('resize')); }); await settleFrames(page);
+    await open(page); await expect(page.locator('#layout-frames')).toBeHidden(); await expect(page.locator('#widget-surface')).toBeHidden(); await expect(page.locator('#layout-w')).toBeDisabled();
     await page.locator('[data-layer-row=calendar] [data-layer=forward]').click(); await expect(page.locator('#layout-widget')).toHaveValue('calendar'); await expect(page.locator('#layout-cancel')).toBeInViewport();
     await page.locator('#layout-cancel').click(); expect(env.store.getDashboardPreferences()).toEqual(before);
-    await page.evaluate(() => { document.getElementById('page-status').textContent = ''; }); await settleFrames(page); await expect(page.locator('#widget-surface')).toBeVisible();
+    await page.evaluate(size => { document.documentElement.style.removeProperty('--layout-safe-left'); for (const [key, value] of Object.entries(size)) Object.defineProperty(screen, key, { configurable: true, value }); window.dispatchEvent(new Event('resize')); }, screenSize); await settleFrames(page); await expect(page.locator('#widget-surface')).toBeVisible();
   } finally { await page.goto('about:blank'); await env.close(); }
 });
 
@@ -333,7 +366,7 @@ test('keyboard/fullscreen entry, hidden placeholders, inactive profile and break
     await details(page); await page.locator('#layout-profile').selectOption('mobile'); await expect(page.locator('#layout-status')).toContainText('inactive profile'); await pixel(page, 'w', 156);
     await page.setViewportSize({ width: 590, height: 800 }); await expect(page.locator('#layout-profile')).toHaveValue('mobile'); await expect(page.locator('#layout-w')).toHaveValue('156');
     await page.locator('#layout-cancel').click(); await expect(page.locator('#edit-layout')).toBeFocused(); expect(env.store.getDashboardPreferences()).toEqual(original);
-    await page.evaluate(() => document.documentElement.requestFullscreen()); await expect(page.locator('#edit-layout')).toBeVisible(); await open(page); await expect(page.locator('#layout-cancel')).toBeInViewport(); await page.locator('#layout-fullscreen').click(); await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(false); await page.locator('#layout-cancel').click();
+    await open(page); await page.evaluate(() => document.documentElement.requestFullscreen()); await expect(page.locator('#edit-layout')).toBeHidden(); await expect(page.locator('#layout-cancel')).toBeInViewport(); await page.locator('#layout-fullscreen').click(); await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(false); await page.locator('#layout-cancel').click(); await expect(page.locator('#edit-layout')).toBeVisible();
   } finally { await page.goto('about:blank'); await env.close(); }
 });
 
@@ -468,7 +501,7 @@ test('minimum-clamped pointer moves and canceled/no-op edits retain canonical si
   const widgetLayout = layout(); widgetLayout.desktop.items = widgetLayout.desktop.items.map(item => item.id === 'time' ? { ...item, x: 100000, y: 100000, w: 100000, h: 100000 } : item); widgetLayout.desktop.items.push(widgetLayout.desktop.items.splice(widgetLayout.desktop.items.findIndex(item => item.id === 'time'), 1)[0]);
   const env = await environment({ widgetLayout }); const small = await browser.newPage({ viewport: { width: 832, height: 800 } }); const large = await browser.newPage({ viewport: { width: 1632, height: 1000 } });
   try {
-    await controlledViewport(small, { width: 832, height: 800 }); await controlledViewport(large, { width: 1632, height: 1000 });
+    await controlledViewport(small, { width: 800, height: 800 }); await controlledViewport(large, { width: 1600, height: 1000 });
     await ready(small, env); await ready(large, env); await open(small); await small.locator('#layout-widget').selectOption('time');
     const original = structuredClone(storedLayout(env)); const rect = await large.locator('#clock').boundingBox(); expect(rect.width).toBe(160);
     expect(await small.locator('#clock').evaluate(node => node.style.width)).toBe('100px');
@@ -505,7 +538,7 @@ test('custom cards stay within each viewport without resize writes, including ti
     for (const name of ['time', 'weather', 'calendar', 'bookmarks', 'homeAssistant', 'wol']) await page.locator(`[name="${name}Visible"]`).uncheck();
     await page.locator('#save-preferences').click(); await expect(page.locator('#settings-status')).toHaveText('Preferences saved for all browsers.'); await page.locator('#close-settings').click(); await expect(page.locator('#widget-surface')).toBeHidden();
     await open(page); await expect(page.locator('#layout-w')).toBeEnabled(); await expect(page.locator('#layout-frames')).toBeVisible();
-    await page.locator('#layout-cancel').click(); await page.locator('#fullscreen').click(); await expect(page.locator('#open-settings')).toBeVisible(); await page.locator('#fullscreen').click();
+    await page.locator('#layout-cancel').click(); await page.locator('#fullscreen').click(); await expect(page.locator('#open-settings')).toBeVisible(); await expect(page.locator('#edit-layout')).toBeHidden(); await page.locator('#fullscreen').click();
   } finally { await page.goto('about:blank'); await env.close(); }
 });
 
@@ -789,7 +822,7 @@ test('fullscreen reference uniformly fits different windows and confirms once wi
     await page.setViewportSize({ width: 1200, height: 800 }); await controlledViewport(page); await ready(page, env);
     page.on('request', request => { if (request.url().endsWith('/api/dashboard/settings') && request.method() === 'PUT') writes++; });
     const original = env.store.getDashboardPreferences();
-    const initial = await canvasState(page); expect(initial.reference).toEqual({ width: 1568, height: 880 }); expect(initial.source).toBe('estimated');
+    const initial = await canvasState(page); expect(initial.reference).toEqual({ width: 1600, height: 1000 }); expect(initial.source).toBe('estimated');
     for (const [width, height] of [[1000, 400], [400, 1000], [10, 200], [800, 500]]) {
       await usableSurface(page, width, height); const state = await canvasState(page); assertCanvasFit(state);
       expect(state.reference).toEqual(initial.reference);
@@ -797,7 +830,7 @@ test('fullscreen reference uniformly fits different windows and confirms once wi
       await assertProjectedBoxes(page, widgetLayout, 'desktop');
     }
     await page.evaluate(() => document.documentElement.requestFullscreen()); await settleFrames(page);
-    const confirmedSize = await page.evaluate(() => ({ width: innerWidth - 32, height: innerHeight - 120 }));
+    const confirmedSize = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
     const confirmed = await canvasState(page); expect(confirmed.source).toBe('confirmed'); expect(confirmed.reference).toEqual(confirmedSize); assertCanvasFit(confirmed);
     await page.evaluate(() => document.exitFullscreen()); await settleFrames(page);
     expect((await canvasState(page)).reference).toEqual(confirmed.reference);
@@ -822,7 +855,7 @@ test('direct editing holds reference pixels across display changes and fullscree
     expect((await canvasState(page)).reference).toEqual(old); await expect(page.locator('#layout-w')).toHaveValue(draftWidth);
     await page.evaluate(() => document.documentElement.requestFullscreen()); await settleFrames(page);
     expect((await canvasState(page)).reference).toEqual(old); await expect(page.locator('#layout-w')).toHaveValue(draftWidth);
-    const confirmedSize = await page.evaluate(() => ({ width: innerWidth - 32, height: innerHeight - 120 }));
+    const confirmedSize = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
     await page.evaluate(() => document.exitFullscreen()); await settleFrames(page);
     await page.locator('#layout-cancel').click();
     const confirmed = (await canvasState(page)).reference; expect(confirmed).toEqual(confirmedSize);
@@ -835,7 +868,7 @@ test('invalid screen data falls back once and destination reservations never red
   const env = await environment({ widgetLayout: edgeLayout() });
   try {
     await page.setViewportSize({ width: 1200, height: 800 }); await controlledViewport(page, { width: 0, height: 0 }); await ready(page, env);
-    const initial = await canvasState(page); expect(initial.reference).toEqual({ width: 1168, height: 680 }); expect(initial.source).toBe('fallback');
+    const initial = await canvasState(page); expect(initial.reference).toEqual({ width: 1200, height: 800 }); expect(initial.source).toBe('fallback');
     await page.setViewportSize({ width: 900, height: 600 }); await usableSurface(page, 400, 300);
     await page.evaluate(() => { document.documentElement.style.setProperty('--layout-safe-left', '10px'); document.getElementById('page-status').textContent = 'A longer status message '.repeat(30); document.getElementById('photo-caption').textContent = 'Fixture caption'; window.dispatchEvent(new Event('resize')); });
     await settleFrames(page); const changed = await canvasState(page); expect(changed.reference).toEqual(initial.reference); assertCanvasFit(changed);
@@ -846,7 +879,7 @@ test('invalid screen data falls back once and destination reservations never red
 test('direct tiny references retain borderless subpixel previews and bounded live padding', async ({ browser }) => {
   const widgetLayout = edgeLayout(); const env = await environment({ widgetLayout });
   try {
-    for (const size of [{ width: 33, height: 320 }, { width: 232, height: 121 }, { width: 33, height: 1120 }]) {
+    for (const size of [{ width: 1, height: 200 }, { width: 200, height: 1 }, { width: 1, height: 1000 }]) {
       const page = await browser.newPage({ viewport: { width: 1200, height: 800 } });
       try {
         await controlledViewport(page, size); await ready(page, env); await open(page);
