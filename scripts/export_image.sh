@@ -30,6 +30,8 @@ if [ -n "$(git -C "$project_root" status --porcelain --untracked-files=all -- . 
   exit 1
 fi
 
+node "$project_root/scripts/check-build-platforms.js"
+
 dist_dir="$project_root/dist"
 mkdir -p "$dist_dir"
 commit_file="$dist_dir/home-web-$release_tag.commit"

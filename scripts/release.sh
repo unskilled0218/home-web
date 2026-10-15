@@ -46,14 +46,6 @@ if [ -n "$(git -C "$project_root" status --porcelain --untracked-files=all -- . 
   exit 1
 fi
 
-head_commit=$(git -C "$project_root" rev-parse HEAD)
-git -C "$project_root" fetch --tags origin
-tag_commit=$(git -C "$project_root" rev-parse -q --verify "refs/tags/$release_tag^{commit}" 2>/dev/null || true)
-if [ -n "$tag_commit" ] && [ "$tag_commit" != "$head_commit" ]; then
-  echo "Release tag $release_tag already identifies a different commit" >&2
-  exit 1
-fi
-
 for command in curl docker gzip npm sha256sum; do
   if ! command -v "$command" >/dev/null 2>&1; then
     echo "Required command is not installed: $command" >&2
@@ -92,8 +84,15 @@ if ! docker buildx version >/dev/null 2>&1; then
   echo "Docker Buildx is not available" >&2
   exit 1
 fi
-if ! docker buildx inspect --bootstrap >/dev/null 2>&1; then
-  echo "Docker Buildx builder could not start" >&2
+if ! node "$project_root/scripts/check-build-platforms.js"; then
+  exit 1
+fi
+
+head_commit=$(git -C "$project_root" rev-parse HEAD)
+git -C "$project_root" fetch --tags origin
+tag_commit=$(git -C "$project_root" rev-parse -q --verify "refs/tags/$release_tag^{commit}" 2>/dev/null || true)
+if [ -n "$tag_commit" ] && [ "$tag_commit" != "$head_commit" ]; then
+  echo "Release tag $release_tag already identifies a different commit" >&2
   exit 1
 fi
 
