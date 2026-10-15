@@ -17,11 +17,13 @@ The current request in `~/workdir/command.md` is:
 >   - right click widget to editing toolbar
 >   - or `toolbar` button next to `save` button
 
+User clarification: keep move/resize editing as the current behavior. The on-demand toolbar changes access to detailed controls, not direct manipulation.
+
 ## Goal
 
 Keep dashboard widgets at their normal displayed size while editing. Replace the always-expanded layout toolbar with compact top-right Save, Cancel, and Toolbar controls. In edit mode, right-clicking a widget selects it and opens the editing toolbar; the Toolbar button provides an equivalent keyboard- and touch-accessible route. Opening or closing editing controls must not shrink, move, or rescale the dashboard canvas merely to make room for chrome.
 
-Retain direct move/resize editing and all existing layout capabilities in the on-demand toolbar. Keep local drafts, explicit Save/Cancel, shared revision protection, and dashboard action blocking unchanged. This task refines task 52's editing experience rather than creating another editor or restoring layout controls in Settings.
+Keep the current direct move/resize behavior on dashboard editing frames: drag the labeled frame to move and its selected upper-right handle to resize. These affordances remain available with the detailed toolbar closed; neither right-click nor opening the toolbar is required to move or resize. Move the existing detailed controls into the on-demand toolbar without replacing or redesigning direct manipulation. Keep local drafts, explicit Save/Cancel, shared revision protection, and dashboard action blocking unchanged. This task refines task 52's editing experience rather than creating another editor or restoring layout controls in Settings.
 
 ## Current Behavior
 
@@ -35,6 +37,7 @@ Retain direct move/resize editing and all existing layout capabilities in the on
 - For an unchanged Custom layout, entering and leaving editing preserves the normal dashboard's canvas fit, widget border boxes, and content scale at the same viewport and reference. The editing chrome itself does not consume additional canvas space. Legitimate geometry edits, viewport changes, and accepted reference updates remain distinguishable from chrome-induced changes.
 - Save and Cancel remain clearly visible at the viewport's top right during editing, with a Toolbar button next to Save. Controls remain reachable within safe areas, in fullscreen, and on narrow/short windows without a large permanently expanded panel.
 - The detailed editing toolbar is not permanently expanded on entry. Toggling it open or closed does not change the dashboard's canvas size, fit scale, or canonical draft. It overlays the dashboard with bounded placement/scrolling rather than pushing widgets away.
+- Preserve the current primary-pointer move and upper-right resize gestures, selection outlines, pointer capture, scale-correct deltas, and cancellation behavior. Move/resize handles remain usable while the detailed toolbar is closed. Right-click is an additional route to detailed controls, not a replacement gesture or prerequisite for direct editing.
 - In edit mode, right-clicking a widget's editing frame selects that widget and opens the toolbar for it. Consume only that editing context-menu action; do not navigate bookmarks, dispatch device actions, start a competing gesture, or save implicitly. Ordinary right-click behavior outside editing, especially links and controls, remains unchanged.
 - The Toolbar button works without right-click and supports keyboard and touch users. It exposes the current selection and a selector for covered or hidden widgets. Provide accessible names, visible focus, sensible focus restoration when closing the toolbar, and a clear way to dismiss it without discarding the draft.
 - Keep profile and Automatic/Custom selection, numeric X/Y/width/height, all layer controls, Automatic reset, explicit Reload/discard, fullscreen access, and actionable save/conflict/offline status available. Closing the detailed toolbar must not act as Cancel or destroy focused raw inputs; reopening shows the same session draft and selection.
