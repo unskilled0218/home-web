@@ -103,6 +103,22 @@ test('projection is bounded, non-mutating, and handles tiny and unavailable surf
   assert.throws(() => editWidget(profile, 'calendar', { x: Infinity }, surface));
 });
 
+test('one-pixel axes fit independently and expansion recovers the exact original projection', () => {
+  const profile = sample(); const before = structuredClone(profile);
+  const normal = profile.items.map(item => projectWidget(item, surface));
+  for (const [width, height] of [[1, 200], [10, 200], [200, 1], [200, 10], [1, 1], [10, 10]]) {
+    for (const item of profile.items) {
+      const rect = projectWidget(item, { width, height });
+      assert.ok(rect.x >= 0 && rect.y >= 0 && rect.x + rect.w <= width && rect.y + rect.h <= height, `${item.id} fits ${width}×${height}`);
+      assert.ok(rect.w >= Math.min(100, width) && rect.h >= Math.min(100, height));
+      if (width < 100) assert.equal(rect.w, width);
+      if (height < 100) assert.equal(rect.h, height);
+    }
+  }
+  assert.deepEqual(profile, before);
+  assert.deepEqual(profile.items.map(item => projectWidget(item, surface)), normal);
+});
+
 test('pixel edits round-trip within one pixel and do not alter the other axis', () => {
   const profile = sample();
   for (const width of [101, 137, 250, 799]) {

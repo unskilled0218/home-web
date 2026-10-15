@@ -10,7 +10,7 @@ function fixture() {
     constructor(id) {
       this.id = id; this.children = []; this.textContent = ''; this.hidden = false; this.rect = { bottom: 0 };
       const properties = new Map(); this.classList = { toggle: (key, value) => properties.set(key, value), contains: key => Boolean(properties.get(key)) };
-      this.style = { setProperty(key, value) { this[key] = value; }, removeProperty(key) { delete this[key.replace(/-([a-z])/g, (_, value) => value.toUpperCase())]; } };
+      this.style = { setProperty(key, value) { this[key] = value; }, removeProperty(key) { delete this[key.startsWith('--') ? key : key.replace(/-([a-z])/g, (_, value) => value.toUpperCase())]; } };
       if (id) nodes.set(id, this);
     }
     insert(index, children) {
@@ -82,4 +82,25 @@ test('resize observation coalesces one DOM-only frame and disposal removes all o
   f.listeners.get('resize')(); assert.equal(f.frames.size, 1);
   view.dispose(); assert.equal(f.frames.size, 0); assert.equal(f.listeners.size, 0); assert.equal(f.observers[0].nodes.length, 0);
   fn(); assert.equal(measurements, 2, 'late frame cannot update a disposed view');
+});
+
+test('projected padding dimensions update on resize and never leak into Automatic mode', () => {
+  const f = fixture(); const view = createDashboardLayoutView(f);
+  const layout = { ...defaultWidgetLayout(), desktop: initialWidgetProfile('desktop') }; const before = structuredClone(layout);
+  const state = { layout, mobile: false, scale: 1, display: { content: true } };
+  for (const [width, height] of [[1200, 800], [33, 95], [1200, 800]]) {
+    f.window.innerWidth = width; f.window.innerHeight = height; view.update(state);
+    for (const id of Object.values(WIDGET_ELEMENTS)) {
+      const node = f.nodes.get(id);
+      assert.equal(node.style['--widget-width'], node.style.width, `${id} padding uses projected width`);
+      assert.equal(node.style['--widget-height'], node.style.height, `${id} padding uses projected height`);
+    }
+  }
+  view.update({ ...state, layout: defaultWidgetLayout() });
+  for (const id of Object.values(WIDGET_ELEMENTS)) {
+    const node = f.nodes.get(id);
+    assert.equal(node.style['--widget-width'], undefined, `${id} Automatic width is clean`);
+    assert.equal(node.style['--widget-height'], undefined, `${id} Automatic height is clean`);
+  }
+  assert.deepEqual(layout, before); view.dispose();
 });

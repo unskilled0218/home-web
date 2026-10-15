@@ -29,7 +29,7 @@ export function createDashboardLayoutView({ document, window, onMeasure = () => 
     const focused = document.activeElement;
     const profile = state.layout[state.mobile ? 'mobile' : 'desktop'];
     if (profile && !custom) { stage.append(...Object.values(nodes)); stage.after(caption); }
-    if (!profile && custom) for (const [node, anchor] of anchors) { anchor.after(node); for (const property of ['left', 'top', 'bottom', 'width', 'height', 'z-index']) node.style.removeProperty(property); }
+    if (!profile && custom) for (const [node, anchor] of anchors) { anchor.after(node); for (const property of ['left', 'top', 'bottom', 'width', 'height', 'z-index', '--widget-width', '--widget-height']) node.style.removeProperty(property); }
     const changedMode = custom !== Boolean(profile);
     custom = Boolean(profile);
     document.body.classList.toggle('custom-widget-layout', custom);
@@ -46,6 +46,7 @@ export function createDashboardLayoutView({ document, window, onMeasure = () => 
         const rect = projectWidget(item, area); if (!rect) continue;
         const node = nodes[item.id];
         for (const [key, value] of Object.entries({ left: rect.x, bottom: rect.y, width: rect.w, height: rect.h })) node.style[key] = `${value}px`;
+        node.style.setProperty('--widget-width', `${rect.w}px`); node.style.setProperty('--widget-height', `${rect.h}px`);
         node.style.zIndex = String(index + 1);
       }
     }

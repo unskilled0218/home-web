@@ -22,6 +22,56 @@ async function open(page) { await page.locator('#open-settings').click(); await 
 async function save(page) { await page.locator('#save-preferences').click(); await expect(page.locator('#settings-status')).toHaveText('Preferences saved for all browsers.'); }
 async function pixel(page, key, value) { await page.locator(`#layout-${key}`).fill(String(value)); await page.locator(`#layout-${key}`).press('Tab'); }
 const storedLayout = env => env.store.getDashboardPreferences().preferences.widgetLayout;
+// Only viewport measurement is controlled; CSS, DOM, observers, and the app remain real.
+async function controlledViewport(page) {
+  await page.addInitScript(() => {
+    const viewport = new EventTarget();
+    Object.assign(viewport, { width: innerWidth, height: innerHeight, offsetLeft: 0, offsetTop: 0 });
+    Object.defineProperty(window, 'visualViewport', { value: viewport, configurable: true });
+  });
+}
+async function usableSurface(page, width, height) {
+  const measured = await page.evaluate(async ({ width, height }) => {
+    const { measureLayoutSurface } = await import('/dashboard-layout-view.js');
+    const margin = innerWidth <= 600 ? 8 : 16;
+    const top = measureLayoutSurface(document, window).y;
+    Object.assign(visualViewport, { width: width + margin * 2, height: height + top + margin });
+    visualViewport.dispatchEvent(new Event('resize'));
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    return measureLayoutSurface(document, window);
+  }, { width, height });
+  expect({ width: measured.width, height: measured.height }, 'controlled usable surface').toEqual({ width, height });
+}
+function edgeLayout() {
+  const widgetLayout = layout();
+  for (const mode of ['desktop', 'mobile']) widgetLayout[mode].items = widgetLayout[mode].items.map((item, index) => ({ ...item, x: index % 2 ? 800000 : 0, y: index % 3 ? 800000 : 0, w: 200000, h: 200000 }));
+  return widgetLayout;
+}
+async function assertProjectedBoxes(page, widgetLayout, mode, preview = false) {
+  const boxes = await page.evaluate(async ({ widgetLayout, mode, preview }) => {
+    const { projectWidget, WIDGET_ELEMENTS } = await import('/dashboard-layout.js');
+    const { measureLayoutSurface } = await import('/dashboard-layout-view.js');
+    const surface = measureLayoutSurface(document, window);
+    const parent = document.getElementById(preview ? 'layout-preview' : 'widget-surface');
+    const area = parent.getBoundingClientRect();
+    const scale = preview ? Number.parseFloat(parent.style.width) / surface.width : 1;
+    return widgetLayout[mode].items.map((item, index) => {
+      const node = preview ? parent.querySelector(`[data-widget="${item.id}"]`) : document.getElementById(WIDGET_ELEMENTS[item.id]);
+      const rect = projectWidget(item, surface); const box = node.getBoundingClientRect();
+      return { id: item.id, actual: { x: box.x, y: box.y, width: box.width, height: box.height }, expected: { x: area.x + rect.x * scale, y: area.bottom - (rect.y + rect.h) * scale, width: rect.w * scale, height: rect.h * scale }, area: area.toJSON(), layer: node.style.zIndex, expectedLayer: String(index + 1) };
+    });
+  }, { widgetLayout, mode, preview });
+  for (const box of boxes) {
+    const context = JSON.stringify({ preview, mode, ...box });
+    for (const key of ['x', 'y', 'width', 'height']) expect(Math.abs(box.actual[key] - box.expected[key]), `${key}: ${context}`).toBeLessThanOrEqual(.1);
+    expect(box.actual.x, context).toBeGreaterThanOrEqual(box.area.x - .1);
+    expect(box.actual.y, context).toBeGreaterThanOrEqual(box.area.y - .1);
+    expect(box.actual.x + box.actual.width, context).toBeLessThanOrEqual(box.area.right + .1);
+    expect(box.actual.y + box.actual.height, context).toBeLessThanOrEqual(box.area.bottom + .1);
+    expect(box.layer, context).toBe(box.expectedLayer);
+  }
+  return boxes;
+}
 async function drag(page, action, id, dx, dy, cancel = false) {
   const button = page.locator(`[data-widget="${id}"] [data-action="${action}"]`);
   await button.scrollIntoViewIfNeeded(); const box = await button.boundingBox();
@@ -287,5 +337,66 @@ test('bottom-left coordinates move upward and resize upward while preserving the
     await pixel(page, 'y', 0); await save(page); await page.locator('#close-settings').click(); const canonical = storedLayout(env);
     for (const height of [600, 1000]) { await page.setViewportSize({ width: 1200, height }); await expect.poll(async () => { const a = await page.locator('#widget-surface').boundingBox(); const b = await page.locator('#clock').boundingBox(); return b.y + b.height - a.y - a.height; }).toBe(0); }
     expect(storedLayout(env)).toEqual(canonical);
+  } finally { await page.goto('about:blank'); await env.close(); }
+});
+
+test('tiny live border boxes match projection independently on each axis', async ({ page }) => {
+  const widgetLayout = edgeLayout(); const env = await environment({ widgetLayout });
+  try {
+    await controlledViewport(page); await ready(page, env);
+    for (const mode of ['desktop', 'mobile']) {
+      await page.setViewportSize({ width: mode === 'desktop' ? 1200 : 600, height: 800 });
+      for (const fontSize of [16, 24]) {
+        await page.evaluate(size => { document.documentElement.style.fontSize = `${size}px`; }, fontSize);
+        for (const [width, height] of [[1, 200], [10, 200], [200, 1], [200, 10], [1, 1], [10, 10], [800, 500]]) {
+          await usableSurface(page, width, height); await assertProjectedBoxes(page, widgetLayout, mode);
+        }
+        for (const id of ['clock', 'weather', 'calendar', 'bookmarks', 'dashboard-ha', 'dashboard-wol']) await expect(page.locator(`#${id}`)).toHaveCSS('padding', `${fontSize / 2}px`);
+      }
+    }
+  } finally { await page.goto('about:blank'); await env.close(); }
+});
+
+test('tiny preview decoration never enlarges scaled widget border boxes', async ({ page }) => {
+  const widgetLayout = edgeLayout(); const env = await environment({ widgetLayout });
+  try {
+    await page.setViewportSize({ width: 1200, height: 800 }); await controlledViewport(page); await ready(page, env); await open(page);
+    for (const mode of ['desktop', 'mobile']) {
+      await page.locator('#layout-profile').selectOption(mode);
+      for (const [width, height] of [[1, 200], [200, 1], [1, 1], [10, 10], [1, 1000], [800, 500]]) {
+        await usableSurface(page, width, height); const boxes = await assertProjectedBoxes(page, widgetLayout, mode, true);
+        if (width === 1 || height === 1) expect(boxes.some(box => box.expected.width < 2 || box.expected.height < 2)).toBe(true);
+      }
+    }
+  } finally { await page.goto('about:blank'); await env.close(); }
+});
+
+test('tiny and zero surfaces recover without draft changes or preference writes', async ({ page }) => {
+  const widgetLayout = edgeLayout(); const env = await environment({ widgetLayout }); const writes = [];
+  try {
+    await page.setViewportSize({ width: 1200, height: 800 }); await controlledViewport(page); await ready(page, env); await open(page);
+    page.on('request', request => { if (request.url().endsWith('/api/dashboard/settings') && request.method() === 'PUT') writes.push(request.postDataJSON()); });
+    const original = env.store.getDashboardPreferences();
+    await usableSurface(page, 800, 500); const before = await assertProjectedBoxes(page, widgetLayout, 'desktop');
+    for (const [width, height] of [[10, 200], [200, 10], [1, 1], [0, 200], [200, 0]]) {
+      await usableSurface(page, width, height);
+      if (!width || !height) {
+        await expect(page.locator('#widget-surface')).toBeHidden(); await expect(page.locator('#layout-preview')).toBeHidden();
+        for (const key of ['x', 'y', 'w', 'h']) await expect(page.locator(`#layout-${key}`)).toBeDisabled();
+      } else { await assertProjectedBoxes(page, widgetLayout, 'desktop'); await assertProjectedBoxes(page, widgetLayout, 'desktop', true); }
+    }
+    await usableSurface(page, 800, 500);
+    await expect(page.locator('#layout-w')).toBeEnabled(); await expect(page.locator('#layout-preview')).toBeVisible();
+    expect(await assertProjectedBoxes(page, widgetLayout, 'desktop')).toEqual(before);
+    expect(writes).toEqual([]); expect(env.store.getDashboardPreferences()).toEqual(original);
+    // An explicit no-op save proves the recovered editor still contains exact canonical data.
+    await save(page); expect(writes).toHaveLength(1); expect(writes[0].preferences).toEqual(original.preferences);
+    expect(env.store.getDashboardPreferences()).toEqual(original);
+    await page.locator('#layout-arrangement').selectOption('automatic'); await save(page);
+    for (const id of ['clock', 'weather', 'calendar', 'bookmarks', 'dashboard-ha', 'dashboard-wol']) {
+      expect(await page.locator(`#${id}`).evaluate(node => [node.style.getPropertyValue('--widget-width'), node.style.getPropertyValue('--widget-height')])).toEqual(['', '']);
+    }
+    await page.locator('#layout-arrangement').selectOption('custom'); await save(page);
+    await assertProjectedBoxes(page, storedLayout(env), 'desktop');
   } finally { await page.goto('about:blank'); await env.close(); }
 });

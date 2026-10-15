@@ -10,6 +10,8 @@ The origin is **bottom-left of the usable dashboard area**. X increases rightwar
 
 Each widget normally has a minimum displayed size of 100 × 100 pixels. The maximum is the usable current window, excluding page tools, status, safe-area margins, and a filename strip when shown. If that area is smaller than 100 pixels, widgets temporarily fit the available space. When no space is available, enlarge the window before editing. Small widgets scroll internally so their content and actions remain reachable.
 
+On extremely small surfaces, decorative padding contracts independently on each axis so it cannot enlarge a widget beyond its rectangle. Ordinary widgets retain their normal spacing. Preview outlines do not add to the scaled rectangle size. A one-pixel rectangle preserves containment, not readable content; enlarge the window to use its contents.
+
 Saved positions and sizes are proportional to the usable window. Other browsers fit the same arrangement to their own windows. Resizing, rotating, entering fullscreen, and changing captions do not save or overwrite an arrangement. A minimum-clamped widget keeps its original saved size when moved; changing width or height explicitly is a separate operation. Existing font scales still apply inside widgets; the old Position option controls Automatic layout rather than custom positions.
 
 ## Overlap and layers

@@ -199,7 +199,8 @@ input[type=color] { min-height: 2.5rem; }
 #widget-surface > #clock { font-size: calc(1rem * var(--scale, 1) * var(--time-scale, 1)); }
 #widget-surface > #weather { font-size: calc(1rem * var(--scale, 1) * var(--weather-scale, 1)); }
 #widget-surface > #calendar { font-size: calc(1rem * var(--scale, 1) * var(--calendar-scale, 1)); }
-#widget-surface > :is(section, aside) { position: absolute; box-sizing: border-box; min-width: 0; min-height: 0; max-width: none; max-height: none; margin: 0; padding: .5rem; overflow: auto; overflow-wrap: anywhere; display: block; container-type: inline-size; }
+/* Padding must fit each projected axis, even when the usable surface is one pixel. */
+#widget-surface > :is(section, aside) { position: absolute; box-sizing: border-box; min-width: 0; min-height: 0; max-width: none; max-height: none; margin: 0; border: 0; padding: min(.5rem, calc(var(--widget-height) / 4)) min(.5rem, calc(var(--widget-width) / 4)); overflow: auto; overflow-wrap: anywhere; display: block; container-type: inline-size; }
 #widget-surface > :is(section, aside):focus-visible { outline-offset: -3px; }
 #widget-surface :is(h2, #date) { margin: 0 0 .3rem; font-size: 1em; }
 #widget-surface :is([role=status], time:not(#time)) { font-size: .8em; }
@@ -216,8 +217,8 @@ input[type=color] { min-height: 2.5rem; }
 .custom-widget-layout #photo-caption { position: fixed; z-index: 2; left: calc(1rem + env(safe-area-inset-left, 0px)); right: calc(1rem + env(safe-area-inset-right, 0px)); bottom: calc(.5rem + env(safe-area-inset-bottom, 0px)); margin: 0; max-height: 40px; overflow: auto; font-size: 14px; }
 #widget-layout-editor { display: block; }
 #widget-layout-editor > label { margin: .75rem 0; }
-#layout-preview { position: relative; isolation: isolate; overflow: hidden; background: #080d15; border: 1px solid #62758a; margin: 1rem 0; max-width: 100%; }
-.layout-preview-widget { position: absolute; overflow: hidden; border: 1px solid #718aab; background: #20334bed; box-sizing: border-box; }
+#layout-preview { position: relative; isolation: isolate; overflow: hidden; background: #080d15; box-shadow: inset 0 0 0 1px #62758a; margin: 1rem 0; max-width: 100%; }
+.layout-preview-widget { position: absolute; overflow: hidden; box-shadow: inset 0 0 0 1px #718aab; background: #20334bed; box-sizing: border-box; }
 .layout-preview-widget.selected { outline: 2px solid #b4d2ff; outline-offset: -3px; }
 #settings-dialog .layout-preview-widget button { border: 0; border-radius: 0; padding: 2px; font-size: 11px; background: transparent; touch-action: none; }
 .layout-preview-widget [data-action=move] { display: block; width: 100%; height: 100%; cursor: move; overflow-wrap: anywhere; }
