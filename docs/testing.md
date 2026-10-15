@@ -1,5 +1,10 @@
 # Checks
 
+## Table of Contents
+
+- [Checks](#checks)
+- [Direct layout editing](#direct-layout-editing)
+
 ```sh
 npm test
 npm run check
@@ -34,10 +39,16 @@ Custom widget layout tests cover the bounded unit schema, strict nested writes, 
 
 Tiny-widget regressions use test-only controlled screen/visual viewport dimensions while retaining real markup, CSS, observers, and application initialization. They assert all six actual border boxes against reference projection followed by one uniform fit on one-pixel, independent-axis, and normal destinations. Direct tiny-reference cases retain padding-floor and subpixel-preview coverage. Tests retain both profiles, different root font sizes, native viewport coverage, 100-reference-pixel scrolling, Automatic cleanup, zero-surface deferral, and shrink/expand recovery with unchanged canonical preferences, zero resize PUTs, and stable revisions. Controlled measurement is not a claim of physical-device viewport testing.
 
-Fullscreen-reference tests cover pure estimate/fallback/confirmation state, fixed reservations, locked Settings coordinates, delayed entry sampling, disposal, and bottom-left fitting with a scale cap. Browser tests check actual card and child/text dimensions, different aspect ratios, repeated real fullscreen entry/exit, queued display/confirmation updates, invalid screen fallback, and caption/status/safe-area destination changes without reference rebasing. Weather regressions keep forecast lines and value flex stable while fullscreen hides bookmarks; no card-only scale assertion substitutes for content-layout checks. Normalized version-2 preferences and the existing save/revision owner remain unchanged.
+Fullscreen-reference tests cover pure estimate/fallback/confirmation state, fixed reservations, locked editing coordinates, delayed entry sampling, disposal, and bottom-left fitting with a scale cap. Browser tests check actual card and child/text dimensions, different aspect ratios, repeated real fullscreen entry/exit, queued display/confirmation updates, invalid screen fallback, and caption/status/safe-area destination changes without reference rebasing. Weather regressions keep forecast lines and value flex stable while fullscreen hides bookmarks; no card-only scale assertion substitutes for content-layout checks. Normalized version-2 preferences and the existing save/revision owner remain unchanged.
 
 Automatic-key checks cover pure no-write configuration, database-relative defaults, restricted parent/file creation, atomic winner races, partial-write/publication cleanup, explicit-secret precedence, restart credential continuity, and lost-key refusal. Home Assistant TLS checks use `HOME_ASSISTANT_CA_FILE` for real loopback registry/service sessions, hostname verification, unrelated HTTPS trust isolation, and actual development-child trust changes. No live account, key, database, mount, or user `.env` is used.
 
 Run `node scripts/check-production.js` for the opt-in packaging smoke. It copies only runtime/manifests into `/tmp/opencode`, installs locked production dependencies there, verifies local Undici resolution and absence of Playwright, then checks actual readiness/HTTP/automatic key/IPC shutdown with isolated storage and disabled NFS. It never replaces the working dependency tree. Registry/tooling failures are reported; a passing production-tree smoke is not built-image verification. Compose configuration parsing and actual image build/runtime checks remain separately recorded.
+
+## Direct layout editing
+
+Activation unit tests inject timers and realistic pointer inputs for threshold, screen-space movement, lifecycle/scroll/second-pointer cancellation, eligibility/hit rechecks, context-menu scope, release/click suppression, stale callbacks, and cleanup. Pure session tests verify Automatic no-op templates, exact cancellation, profile independence, immutable complete baselines, revision capture, and explicit offline reload. View tests retain the separate confirmed snapshot while projecting a local pinned-profile override, then restore the latest confirmation.
+
+The existing 22 layout browser scenarios now use direct controls or retain view-only assertions rather than the removed Settings preview. Additional real-browser tests use trusted mouse and CDP touch input, controlled clock time, real-server SQLite revisions, request payload counters, and actual popup/action fixtures. They cover long press, native touch scrolling, click-through safety, keyboard/fullscreen access, hidden/inactive profiles, polling-safe raw fields and gestures, pending writes, conflicts/failures, no-op saves, and unrelated Settings layout preservation. A stubbed Wake starts before editing and completes under inert roots; synthetic stale clicks cannot dispatch another action. No real Wake packet, provider account, or mount is used. Desktop browser touch emulation does not verify physical pen hardware, mobile Safari, or OS touch callouts.
 
 [Back to README](../README.md)

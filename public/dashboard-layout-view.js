@@ -12,7 +12,7 @@ export function measureLayoutSurface(document, window) {
   const viewport = window.visualViewport;
   const width = Math.max(0, Math.floor((viewport?.width ?? window.innerWidth) - margin * 2 - safe('left') - safe('right')));
   const height = viewport?.height ?? window.innerHeight;
-  const top = Math.ceil(Math.max(margin + safe('top'), ...['page-status', 'page-tools'].map(id => {
+  const top = Math.ceil(Math.max(margin + safe('top'), ...['page-status', 'page-tools', 'layout-toolbar'].map(id => {
     const node = id === 'page-tools' ? document.querySelector('.page-tools') : document.getElementById(id);
     return node?.getBoundingClientRect().bottom || 0;
   })) + LAYOUT_GAP_PIXELS);
@@ -27,7 +27,7 @@ export function createDashboardLayoutView({ document, window, onMeasure = () => 
   const nodes = Object.fromEntries(Object.entries(WIDGET_ELEMENTS).map(([id, element]) => [id, document.getElementById(element)]));
   const anchors = new Map();
   for (const node of [...Object.values(nodes), caption]) { const anchor = document.createComment('Automatic layout position'); node.before(anchor); anchors.set(node, anchor); }
-  let state; let custom = false; let automaticMode; let frame; let disposed = false; let confirmation; let observedContext;
+  let state; let override; let custom = false; let automaticMode; let frame; let disposed = false; let confirmation; let observedContext;
   const references = createLayoutReference();
   const destination = () => measureLayoutSurface(document, window);
   function snapshot() {
@@ -61,7 +61,8 @@ export function createDashboardLayoutView({ document, window, onMeasure = () => 
   function render() {
     if (!state || disposed) return;
     const focused = document.activeElement;
-    const profile = state.layout[state.mobile ? 'mobile' : 'desktop'];
+    const mode = override?.mode || (state.mobile ? 'mobile' : 'desktop');
+    const profile = override?.profile || state.layout[mode];
     if (profile && !custom) { stage.append(...Object.values(nodes)); stage.after(caption); }
     if (!profile && custom) for (const [node, anchor] of anchors) { anchor.after(node); for (const property of ['left', 'top', 'bottom', 'width', 'height', 'z-index', '--widget-width', '--widget-height']) node.style.removeProperty(property); }
     const changedMode = custom !== Boolean(profile);
@@ -73,7 +74,7 @@ export function createDashboardLayoutView({ document, window, onMeasure = () => 
       if (changedMode || automaticMode !== state.mobile) caption.before(...(state.mobile ? ['time', 'weather', 'calendar'] : ['calendar', 'time', 'weather']).map(id => nodes[id]));
       automaticMode = state.mobile;
     } else {
-      const area = destination(); const reference = references.get(state.mobile ? 'mobile' : 'desktop');
+      const area = destination(); const reference = references.get(mode);
       const fit = fitLayoutCanvas(reference, area);
       content.hidden = true; stage.hidden = !state.display.content || !fit;
       stage.style.left = `${area.x}px`; stage.style.top = `${area.y + area.height - reference.height}px`; stage.style.width = `${reference.width}px`; stage.style.height = `${reference.height}px`;
@@ -101,13 +102,15 @@ export function createDashboardLayoutView({ document, window, onMeasure = () => 
   function orientationChanged() { refreshContext(true); schedule(); }
   function resumed(event) { if (event.persisted) { refreshContext(); if (document.fullscreenElement) beginConfirmation(); schedule(); } }
   const observer = new window.ResizeObserver(schedule);
-  for (const node of [document.querySelector('.page-tools'), document.getElementById('page-status'), caption]) observer.observe(node);
+  for (const node of [document.querySelector('.page-tools'), document.getElementById('page-status'), caption, document.getElementById('layout-toolbar')]) if (node) observer.observe(node);
   window.addEventListener('resize', schedule); window.visualViewport?.addEventListener('resize', schedule); window.visualViewport?.addEventListener('scroll', schedule);
   document.addEventListener('fullscreenchange', fullscreenChanged); window.screen?.orientation?.addEventListener?.('change', orientationChanged); window.addEventListener('orientationchange', orientationChanged); window.addEventListener('pageshow', resumed);
   if (confirmation) schedule();
   return {
     destination,
     reference: mode => references.get(mode),
+    frame(mode) { const reference = references.get(mode); return { reference, fit: fitLayoutCanvas(reference, destination()) }; },
+    setOverride(value) { override = value; render(); },
     lockReference() { refreshContext(); references.lock(); },
     releaseReference() { references.release(); render(); },
     update(next) { state = next; refreshContext(); render(); },

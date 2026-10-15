@@ -98,7 +98,7 @@ test('destination fitting never rebases reference geometry and Automatic clears 
   assert.equal(stage.style.transform, undefined); assert.equal(stage.style.transformOrigin, undefined); view.dispose();
 });
 
-test('fullscreen confirmation is bounded, ignores exit callbacks, and queues behind Settings lock', () => {
+test('fullscreen confirmation is bounded, ignores exit callbacks, and queues behind edit lock', () => {
   const f = fixture(); const view = createDashboardLayoutView(f); const original = view.reference('desktop');
   const flush = () => { const pending = [...f.frames.values()]; f.frames.clear(); for (const fn of pending) fn(); };
   view.lockReference(); f.document.fullscreenElement = f.document.documentElement;
@@ -112,6 +112,19 @@ test('fullscreen confirmation is bounded, ignores exit callbacks, and queues beh
   f.document.fullscreenElement = f.document.documentElement; f.listeners.get('document:fullscreenchange')();
   const late = [...f.frames.values()][0]; view.dispose(); late();
   assert.equal(view.reference('desktop').width, 1468); assert.equal(f.frames.size, 0); assert.equal(f.listeners.size, 0);
+});
+
+test('local override stays isolated from remote updates, pins its profile, and clears to latest confirmed state', () => {
+  const f = fixture(); const view = createDashboardLayoutView(f);
+  const state = { layout: defaultWidgetLayout(), mobile: false, scale: 1, display: { content: true } };
+  view.update(state); view.lockReference(); const reference = view.reference('mobile');
+  const profile = initialWidgetProfile('mobile'); view.setOverride({ mode: 'mobile', profile });
+  assert.equal(f.nodes.get('widget-surface').style.width, `${reference.width}px`);
+  const width = f.nodes.get('clock').style.width;
+  view.update({ ...state, layout: { ...defaultWidgetLayout(), desktop: initialWidgetProfile('desktop', 'right') } });
+  assert.equal(f.nodes.get('clock').style.width, width); assert.equal(state.layout.desktop, null);
+  const frame = view.frame('mobile'); assert.equal(frame.reference, reference); assert.ok(frame.fit.scale > 0);
+  view.setOverride(null); view.releaseReference(); assert.equal(f.nodes.get('clock').style.left, '1061px'); view.dispose();
 });
 
 test('rapid fullscreen exit invalidates a provisional sample before it can confirm', () => {

@@ -1,42 +1,61 @@
 # Arrange dashboard widgets
 
-Open **Settings → General → Widget layout**. Select **Desktop** or **Mobile**, then choose **Custom**. Mobile applies up to and including 600px; either profile can be edited on any screen. Until you save a custom profile, the existing **Automatic** arrangement stays unchanged.
+## Table of Contents
+
+- [Enter editing](#enter-editing)
+- [Position and size](#position-and-size)
+- [Fullscreen reference sizing](#fullscreen-reference-sizing)
+- [Overlap and profiles](#overlap-and-profiles)
+- [Save, cancel, and recovery](#save-cancel-and-recovery)
+- [Stored layouts](#stored-layouts)
+
+## Enter editing
+
+Hold a visible widget's non-interactive background for 600ms, or choose **Edit layout** with mouse or keyboard. Long press selects that widget; button entry selects Time. Moving at least 8 screen pixels, releasing early, scrolling, a second pointer, hiding the page, or changing windows cancels the hold. Links, buttons, inputs, editable content, and other interactive descendants keep their ordinary behavior. Existing text selections are not taken over. Browser touch callouts vary; use Edit layout if your browser intercepts a hold.
+
+Editing happens directly on the dashboard. A persistent toolbar shows Save layout, Cancel, profile/widget selectors, geometry, layers, and recovery controls. Real widgets are inert: bookmarks cannot navigate and device actions cannot run by pointer or keyboard. An already pending Wake may finish normally. The editing frames contain only labels and handles, never copied actions or private content. Settings and direct editing cannot overlap; Save or Cancel before opening Settings. No layout editor remains in Settings.
+
+An **Automatic** profile shows a temporary deterministic editing template. Entry, selection, a no-op gesture, or no-op Save does not turn it into Custom. Moving/resizing or changing layers creates a local Custom draft only if geometry/order actually changes. Explicitly selecting **Custom** also creates a draft. The live dashboard previews unsaved changes locally; other browsers do not see them until a successful Save.
 
 ## Position and size
 
-Choose a widget from **Select widget**, including one hidden behind another widget. Drag its labeled box in the preview to move it, or drag the upper-right corner to resize it. Use the labeled X, Y, width, and height fields for exact reference-pixel changes or keyboard editing. Reference pixels are CSS pixels on the fullscreen-oriented canvas, not physical display pixels or the fitted window size. The preview contains labels, not live links, device actions, or private content.
+Choose any widget from **Select widget**, including a covered or hidden one. Drag its labeled frame to move it; drag the selected frame's upper-right Resize handle to resize. Use Tab and the labeled numeric X, Y, width, and height fields for exact keyboard editing. Numeric arrow keys change reference pixels; Enter submits Save layout, not unrelated preferences. Invalid fields stay focused until corrected. Escape during a drag cancels only that gesture. Lost capture, window blur, page hiding, fullscreen/viewport changes, or changed fitting also cancel the active gesture without discarding earlier completed edits.
 
-The origin is **bottom-left of the reference canvas**. X increases rightward; Y increases upward. X = 0 and Y = 0 place a widget against that canvas's lower-left corner. Increasing height grows the widget upward and normally preserves its bottom offset. Increasing Y lifts the entire widget. Bounds may adjust the offset when a larger widget would otherwise extend beyond the reference.
+The origin is **bottom-left of the reference canvas**. X increases rightward; Y increases upward. X = 0 and Y = 0 place the widget against its lower-left corner. Height grows upward while normally retaining the bottom offset. Bounds can adjust offsets when enlarging a widget would exceed the reference. Reference pixels are CSS pixels on the fullscreen-oriented canvas, not physical display pixels or fitted-window pixels.
 
-Each widget normally has a minimum size of 100 × 100 reference pixels and a maximum of the reference canvas. If the reference itself is smaller, the minimum temporarily fits that axis. The complete canvas, including text, padding, and controls, uniformly shrinks into the actual usable window without upscaling above 1. The fitted canvas stays bottom-left; unused space remains above or to its right when aspect ratios differ. Windowed widgets and control targets can be smaller than 100px, so enlarge the window or use fullscreen for readability. Card content scrolls internally. Zero reference/destination space hides the canvas and disables direct geometry editing safely.
+Widgets normally have a minimum of 100 × 100 reference pixels. A smaller reference temporarily bounds that axis's minimum. The entire canvas, including text and padding, shrinks uniformly into the usable destination without upscaling above 1. Unused space stays above or right. Card content scrolls internally outside editing. Small windows may make cards smaller than 100 screen pixels; enlarge the window or use fullscreen for readability. Tiny editing frames disable pointer handles in favor of numeric controls. Zero destination space hides frames/content and disables geometry while keeping Cancel and recovery available.
 
-On extremely small surfaces, decorative padding contracts independently on each axis so it cannot enlarge a widget beyond its rectangle. Ordinary widgets retain their normal spacing. Preview outlines do not add to the scaled rectangle size. A one-pixel rectangle preserves containment, not readable content; enlarge the window to use its contents.
-
-Saved positions and sizes remain normalized proportions. Other browsers project them into their own screen-local reference and fit that whole canvas uniformly, so identical physical pixel sizes across screens are not promised. Resizing, rotating, entering fullscreen, and changing captions do not save or overwrite an arrangement. A minimum-clamped widget keeps its original saved size when moved; changing width or height explicitly is a separate operation. Existing font scales still apply inside widgets; the old Position option controls Automatic layout rather than custom positions.
+Decorative padding contracts independently per axis so it cannot enlarge tiny widgets. Frame outlines add no size to the canonical rectangle. Saved proportions, not fitted pixels, remain authoritative; a minimum-clamped move does not rewrite a widget's saved width or height. Existing font preferences still apply. Settings Position controls Automatic flow, not Custom coordinates.
 
 ## Fullscreen reference sizing
 
-Before fullscreen entry, `screen.width` and `screen.height` estimate the display in CSS pixels; available-workspace dimensions and device pixel ratio are not used. Browsers do not guarantee the future fullscreen viewport beforehand. Invalid screen data falls back to the first valid layout viewport, held stable across ordinary resizes. Missing dimensions defer measurement. The first fullscreen entry confirms the reference using settled layout viewport dimensions and may correct the estimate once; exiting retains that confirmation. Confirmation is local memory, not a preference/cache write, so reload starts an estimate again.
+Before fullscreen entry, `screen.width` and `screen.height` estimate the display in CSS pixels; available workspace and device pixel ratio are not used. Invalid screen data falls back to the first valid layout viewport. The first settled fullscreen entry confirms the reference once; exiting retains it. Reload begins another local estimate. No reference confirmation writes preferences or cache.
 
-Both profiles use the same raw screen context with margins of 16px for desktop and 8px for mobile. References always reserve their captured safe insets, a 32px status band plus an 8px gap, and a 48px caption band, even when empty. Actual tools, status wrapping, safe insets, and visible caption reduce the destination instead; they change fitting scale, not accepted reference geometry. This can leave unused space in fullscreen. Bookmark hiding does not change custom weather flex or forecast wrapping.
+Both profiles share the raw screen context, with desktop/mobile margins of 16px/8px. Accepted references reserve captured safe insets, a 32px status band, an 8px gap, and a 48px caption band. Actual tools, wrapped status, safe insets, caption, and editing toolbar reduce the destination instead. Their measurements change fitting, not accepted reference coordinates. The toolbar scrolls internally on short screens, with Save/Cancel at its top. **Edit layout** remains reachable in fullscreen; its toolbar includes a fullscreen toggle. Other page tools retain immersive hiding unless all dashboard sections are hidden.
 
-Settings freezes both accepted profile references before loading its draft. Display/orientation changes and fullscreen confirmation queue until Settings closes, so pixel controls and preview gestures keep one coordinate system. Closing applies the latest queued reference without saving. A changed reported screen size/orientation starts a new estimate; an ordinary window resize does not. Identical-sized monitors without distinguishing metadata may be indistinguishable; no additional screen permission is requested. Crossing 600px may intentionally select the other saved profile, whose arrangement can differ.
+Direct editing freezes both profile references until exit. Screen/orientation changes and fullscreen confirmation queue behind that lock. Exiting applies the latest queued reference without saving. Settings no longer owns this lock. Ordinary window resizing never rebases reference dimensions. Identical-sized monitors may be indistinguishable without metadata; no extra screen permission is requested. Fullscreen bookmark hiding does not alter Custom weather wrapping or flex.
 
-Existing version-2 records need no migration: bottom-left normalized coordinates and layers are unchanged. Their presentation now uses fullscreen reference projection rather than separate current-window axis scaling, so displayed pixels can change after upgrade. This does not rewrite saved layouts or their revisions. Reload older open pages to use the new editor pixel contract consistently.
+## Overlap and profiles
 
-## Overlap and layers
+Widgets can overlap without moving neighbors. Use **Bring forward**, **Send backward**, **Bring to front**, or **Send to back**; layer 6 is front. The selector reaches fully covered widgets. The unscaled toolbar stays above all widget layers.
 
-Widgets may overlap; moving one does not push another out of the way. Use **Bring forward**, **Send backward**, **Bring to front**, and **Send to back** to choose the visible order. Layer 6 is the front. The widget selector remains available even when a preview box is completely covered. Settings and page tools cannot be covered by widget layers. Existing visibility checkboxes and fullscreen bookmark hiding still apply without deleting a widget's saved geometry.
+Mobile applies up to and including 600px. Entry selects the actual viewport profile, then pins it until you change the selector, even across viewport breakpoints. Both profiles can be edited on any screen; inactive-profile status is explicit. Geometry selection does not enable hidden content or provider requests. Hidden widgets have labeled placeholders; confirmed visibility, content selections, and font preferences remain independent.
 
-## Save, cancel, and reset
+## Save, cancel, and recovery
 
-- **Save preferences** saves the arrangement together with other display preferences for all browsers. The live dashboard uses the last confirmed arrangement until that save succeeds.
-- Escape during a drag cancels only that gesture. A canceled or zero-movement gesture does not change saved geometry.
-- **Cancel layout edits** restores both layout profiles to the baseline loaded into the editor, leaving unrelated preference edits intact.
-- **Reset selected layout** changes only that profile to Automatic. Save preferences to confirm the reset.
-- Closing Settings discards unsaved edits. A failed save keeps the draft and does not present it as shared state.
-- If another browser changed settings, the stale save reports a conflict. **Reload shared preferences** deliberately replaces preference/layout drafts with the newest server values before you reapply edits; integration credential drafts stay separate.
+- **Save layout** publishes a changed canonical layout through the existing shared preference transaction with the complete entry preferences and captured revision. No-op Save exits without a request. No autosave occurs on entry, gestures, resizing, fullscreen, or exit.
+- While a write is pending, editing, Save, Cancel, Reload, and competing entry are disabled until it settles. An uncertain request cannot safely be treated as uncommitted merely because a client aborted it.
+- A successful Save exits. A failed or stale save retains the local draft and action blocking. Remote polls do not reset raw numeric input, cancel held gestures, or silently advance the captured revision.
+- **Cancel** discards both local profile drafts and restores the latest confirmed layout, including updates accepted from other browsers during editing. Focus returns to the original visible focusable entry/target, otherwise Edit layout. Non-focusable widget anchors are removed immediately; focus uses Edit layout because engines can drop focus after anchor removal.
+- **Reset selected profile**, or selecting Automatic, changes only that draft profile to Automatic. Save to publish the reset.
+- **Reload shared layout (discard edits)** explicitly discards both profile drafts and raw inputs, adopting the newest complete confirmed preferences and revision. It does not publish anything. After conflict, reapply changes to that baseline rather than silently merging unrelated preferences.
+- Offline cached layouts remain locally editable but cannot supply a writable server revision. After confirmation returns, explicit Reload is required before saving; background confirmation alone never rebases your draft.
+- Unsaved changed drafts use the browser's supported unload warning. Persisted-page suspension retains completed local edits and blocking; it never autosaves. Browser/OS navigation policies cannot guarantee recovery after closing a tab.
 
-Reload already-open pages after upgrading to the expanded settings schema. Previous saved preferences and confirmed caches gain Automatic profiles without a database write on read. Version-1 custom layouts used a top origin; they decode once into version-2 bottom offsets (`newY = 1,000,000 - oldY - height`) without rewriting SQLite or changing the revision on read. This preserves normalized placement and layers; minimum-size clamping now keeps the bottom anchor. An older page cannot save top-origin coordinates against the new contract and must reload. Integration credentials, selections, backgrounds, and the retired home-widget settings record are not migrated or replaced.
+Unrelated Settings saves retain the complete layout from their own matching baseline and revision. Dirty Settings sessions conflict rather than overwriting newer layouts. Integration credential drafts and providers remain separately owned.
+
+## Stored layouts
+
+Version-2 bottom-left normalized records and layer order remain unchanged; no schema or read-time rewrite is needed. Old records/caches without layout gain Automatic profiles. Version-1 top-origin coordinates decode as `newY = 1,000,000 - oldY - height` without changing SQLite revisions on read. Older pages must reload before saving against the current coordinate contract. Retained legacy home-widget settings, integration credentials, backgrounds, and content selections are not replaced.
 
 [Back to dashboard](dashboard.md)

@@ -16,6 +16,7 @@ import { createDashboardDeviceView } from './dashboard-device-view.js';
 import { dashboardDisplay, applyDashboardDisplay } from './dashboard-display.js';
 import { createDashboardLayoutView } from './dashboard-layout-view.js';
 import { createDashboardLayoutEditor } from './dashboard-layout-editor.js';
+import { createLayoutActivation } from './dashboard-layout-activation.js';
 
 const $ = (id) => document.getElementById(id);
 const currentWeatherSubValues = document.createElement('div');
@@ -29,12 +30,15 @@ let clockTimer; let searchController; let searchGeneration = 0; let weatherState
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 const mobileViewport = matchMedia(MOBILE_MEDIA_QUERY);
 let draftBaseline; let settingsSession = 0; let layoutEditor;
+let layoutActivation;
 const preferences = $('preferences');
 const dialog = $('settings-dialog');
 const layoutView = createDashboardLayoutView({ document, window, onMeasure: () => layoutEditor?.refreshSurface() });
-layoutEditor = createDashboardLayoutEditor({ document, window, reference: layoutView.reference, destination: layoutView.destination, position: () => preferences.elements.namedItem('position').value, onChange: () => updateDraftDirty() });
+layoutEditor = createDashboardLayoutEditor({ document, window, view: layoutView, getState: () => settingsSync.getState(), save: (value, revision) => settingsSync.save(value, revision), canEnter: () => !dialog.open && !settingsSync.getState().pending, activeProfile: () => mobileViewport.matches ? 'mobile' : 'desktop', toggleFullscreen: () => toggleFullscreen(), activationBlocked: () => layoutActivation?.blocked() });
+layoutActivation = createLayoutActivation({ document, window, canEnter: () => !layoutEditor.active && !dialog.open && !settingsSync.getState().pending, activate: (id, node) => layoutEditor.enter(id, node) });
+$('edit-layout').addEventListener('click', () => layoutEditor.enter());
 const settingsTabs = createSettingsTabs(dialog, { onSelect: (id) => { deviceIntegrations.setPickerOpen(dialog.open && id === 'settings-tab-home-assistant'); bookmarks.setPickerOpen(dialog.open && id === 'settings-tab-bookmarks'); } });
-const deviceView = createDashboardDeviceView({ document, wake: (id) => deviceIntegrations.wake(id) });
+const deviceView = createDashboardDeviceView({ document, wake: (id) => { if (!layoutEditor.active) return deviceIntegrations.wake(id); } });
 const deviceSelection = createDeviceSelection({ document, root: $('home-assistant-device-picker'), status: $('home-assistant-selection-status'), onChange: () => { draftDirty = true; } });
 const deviceIntegrations = createDashboardDevices({ onChange: (state) => { deviceView.render(state); deviceSelection.update(state); } });
 const integrationSettings = createIntegrationSettings({ document, homeAssistant: deviceIntegrations.homeAssistant, wol: deviceIntegrations.wol });
@@ -57,7 +61,6 @@ function fillForm() {
   }
   deviceSelection.setDraft(settings.homeAssistantDeviceSelections);
   bookmarkSelection.setDraft(settings.bookmarkLinkSelections);
-  layoutEditor.setDraft(settings.widgetLayout);
   draftBaseline = normalizeDashboardPreferences(settings);
 }
 
@@ -69,17 +72,8 @@ function readPreferenceDraft() {
   }
   next.homeAssistantDeviceSelections = deviceSelection.getDraft();
   next.bookmarkLinkSelections = bookmarkSelection.getDraft();
-  next.widgetLayout = layoutEditor.getDraft();
+  next.widgetLayout = draftBaseline.widgetLayout;
   return normalizeDashboardPreferences(next);
-}
-function updateDraftDirty() {
-  for (const control of preferences.elements) {
-    if (!PREFERENCE_KEYS.includes(control.name)) continue;
-    const value = control.type === 'checkbox' ? control.checked : control.type === 'number' ? control.valueAsNumber : control.value;
-    if (!preferencesEqual(value, draftBaseline?.[control.name])) { draftDirty = true; return; }
-  }
-  try { draftDirty = !preferencesEqual(readPreferenceDraft(), draftBaseline); }
-  catch { draftDirty = true; }
 }
 
 function updateClock() {
@@ -241,10 +235,12 @@ const settingsSync = createSettingsSync({ storage,
   },
   onState(state) {
     const saving = state.pending;
+    if (saving) layoutActivation.cancel();
     for (const control of preferences.elements) if (PREFERENCE_KEYS.includes(control.name)) control.disabled = saving;
     deviceSelection.setSaving(saving);
     bookmarkSelection.setSaving(saving);
-    layoutEditor.setSaving(saving);
+    layoutEditor.observe();
+    $('edit-layout').disabled = saving || layoutEditor.active || dialog.open;
     $('save-preferences').disabled = saving || !state.confirmed || (dialog.open && draftRevision === null);
     $('reload-shared-preferences').disabled = saving || !state.confirmed;
     $('settings-status').textContent = saving ? 'Saving shared preferences…' : state.error ? state.error : preferenceMessage || (state.confirmed ? 'Preferences are shared across all browsers.' : state.cache ? 'Using cached shared preferences while loading the server.' : 'Loading shared preferences…');
@@ -256,8 +252,6 @@ preferences.addEventListener('submit', async (event) => {
   event.preventDefault();
   const invalid = [...preferences.elements].find((control) => control.willValidate && !control.validity.valid);
   if (invalid) { settingsTabs.reveal(invalid); invalid.reportValidity(); return; }
-  const layoutInvalid = $('widget-layout-editor').querySelector('input:invalid:not(:disabled)');
-  if (layoutInvalid) { settingsTabs.reveal(layoutInvalid); layoutInvalid.reportValidity(); return; }
   const session = settingsSession;
   try {
     const next = readPreferenceDraft(); draftDirty = true;
@@ -287,19 +281,20 @@ function setCalendarMutationPending(pending) {
   $('disconnect-calendar').disabled = pending || (!calendar.getState().configured && !calendar.getState().needsReauthentication);
 }
 $('open-settings').addEventListener('click', () => {
-  layoutView.lockReference();
+  if (layoutEditor.active || settingsSync.getState().pending) return;
+  layoutActivation.cancel();
   settingsSession++;
   draftDirty = false; draftRevision = settingsSync.getState().confirmed ? settingsSync.getState().snapshot.revision : null;
   fillForm(); fillCalendarForm(); fillLinkwardenForm(); $('calendar-settings-status').textContent = '';
   settingsTabs.select('settings-tab-general');
   void settingsSync.refresh();
   dialog.showModal();
+  $('edit-layout').disabled = true;
   integrationSettings.open();
   $('settings-tab-general').focus();
 });
 $('close-settings').addEventListener('click', () => dialog.close());
-dialog.addEventListener('cancel', event => { if (layoutEditor.cancelGesture()) event.preventDefault(); });
-dialog.addEventListener('close', () => { settingsSession++; layoutEditor.cancelGesture(); layoutView.releaseReference(); draftDirty = false; integrationSettings.close(); deviceIntegrations.setPickerOpen(false); bookmarks.setPickerOpen(false); $('open-settings').focus(); });
+dialog.addEventListener('close', () => { settingsSession++; draftDirty = false; $('edit-layout').disabled = settingsSync.getState().pending; integrationSettings.close(); deviceIntegrations.setPickerOpen(false); bookmarks.setPickerOpen(false); $('open-settings').focus(); });
 function cancelSearch() { searchGeneration++; searchController?.abort(); }
 $('location-search').addEventListener('submit', async (event) => {
   event.preventDefault(); cancelSearch(); const request = searchGeneration;
@@ -372,15 +367,16 @@ $('disconnect-linkwarden').addEventListener('click', async () => {
 
 function fullscreenState() { $('fullscreen').textContent = document.fullscreenElement ? 'Exit fullscreen' : 'Enter fullscreen'; applyBookmarkPresentation(); }
 if (!document.fullscreenEnabled) { $('fullscreen').disabled = true; $('fullscreen').textContent = 'Fullscreen unavailable'; }
-$('fullscreen').addEventListener('click', async () => {
+async function toggleFullscreen() {
   try { if (document.fullscreenElement) await document.exitFullscreen(); else await document.documentElement.requestFullscreen(); $('page-status').textContent = ''; }
   catch { $('page-status').textContent = 'Fullscreen could not be enabled in this browser.'; }
-});
+}
+$('fullscreen').addEventListener('click', toggleFullscreen);
 document.addEventListener('fullscreenchange', fullscreenState);
 document.addEventListener('visibilitychange', () => { startClock(); photos.setVisible(!document.hidden); weather.setVisible(!document.hidden); calendar.setVisible(!document.hidden); bookmarks.setVisible(!document.hidden); settingsSync.setVisible(!document.hidden); deviceIntegrations.setVisible(!document.hidden); if (document.hidden) stopAnimations(); });
 reducedMotion.addEventListener('change', () => { stopAnimations(); photos.configure(settings); });
 mobileViewport.addEventListener('change', applyPresentation);
-window.addEventListener('pagehide', (event) => { clearInterval(clockTimer); cancelSearch(); layoutEditor.cancelGesture(); weather.dispose(); photos.dispose(); if (event.persisted) { bookmarks.setVisible(false); settingsSync.setVisible(false); deviceIntegrations.setVisible(false); integrationSettings.suspend(); } else { layoutEditor.dispose(); layoutView.dispose(); calendar.dispose(); bookmarks.dispose(); settingsSync.dispose(); integrationSettings.dispose(); deviceIntegrations.dispose(); } });
+window.addEventListener('pagehide', (event) => { clearInterval(clockTimer); cancelSearch(); layoutActivation.cancel(); layoutEditor.cancelGesture(); weather.dispose(); photos.dispose(); if (event.persisted) { bookmarks.setVisible(false); settingsSync.setVisible(false); deviceIntegrations.setVisible(false); integrationSettings.suspend(); } else { layoutActivation.dispose(); layoutEditor.dispose(); layoutView.dispose(); calendar.dispose(); bookmarks.dispose(); settingsSync.dispose(); integrationSettings.dispose(); deviceIntegrations.dispose(); } });
 window.addEventListener('pageshow', (event) => { if (event.persisted) { void photos.load(); applyPresentation(); weather.configure(settings); void weather.refresh(); void calendar.refresh(); bookmarks.setVisible(!document.hidden); settingsSync.setVisible(!document.hidden); deviceIntegrations.setVisible(!document.hidden); } });
 photos.setVisible(!document.hidden); weather.setVisible(!document.hidden); calendar.setVisible(!document.hidden);
 bookmarks.setVisible(!document.hidden);

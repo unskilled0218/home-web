@@ -131,7 +131,12 @@ test('Settings associates all preferences with one form and keeps service forms 
   const controls = [...html.matchAll(/<(?:input|select)\b[^>]*form="preferences"[^>]*>/g)];
   const names = controls.map((control) => /name="([^"]+)"/.exec(control[0])?.[1]);
   assert.deepEqual(names.sort(), Object.keys(normalizeSettings()).filter((name) => !['location', 'homeAssistantDeviceSelections', 'bookmarkLinkSelections', 'widgetLayout'].includes(name)).sort());
-  assert.match(html, /id="widget-layout-editor"/);
+  assert.doesNotMatch(html, /id="widget-layout-editor"|id="layout-preview"/);
+  assert.match(html, /id="layout-toolbar"/);
+  assert.match(html, /id="edit-layout"/);
+  for (const id of ['layout-toolbar', 'layout-form', 'layout-frames', 'layout-profile', 'layout-widget', 'layout-x', 'layout-save']) assert.equal([...html.matchAll(new RegExp(`id="${id}"`, 'g'))].length, 1, `${id} is unique`);
+  const layoutForm = html.match(/<form id="layout-form"[\s\S]*?<\/form>/)?.[0];
+  assert.ok(layoutForm); assert.doesNotMatch(layoutForm, /form="preferences"/); assert.match(layoutForm, /id="layout-save" type="submit"/);
   assert.match(html, /id="bookmark-link-picker"/);
   assert.match(html, /id="home-assistant-device-picker"/);
   assert.match(html, /<button[^>]*type="submit"[^>]*form="preferences"[^>]*>Save preferences<\/button>/);
@@ -147,7 +152,8 @@ test('dashboard styles preserve transparent, wrapping forecasts and calendar pre
   const base = await staticServer(context);
   const dashboardCss = await (await fetch(`${base}/dashboard.css`)).text(); assert.match(dashboardCss, /#weather \{[^}]*background: transparent;[^}]*border-radius: 0;/); assert.doesNotMatch(dashboardCss, /#weather \{[^}]*#08101bcc/);
   assert.match(dashboardCss, /#information \{[^}]*width: calc\(100% - 2rem\);[^}]*max-width: none;/); assert.doesNotMatch(dashboardCss, /max-width: min\(55rem/);
-  assert.match(dashboardCss, /:fullscreen \.page-tools \{ display: none; \}/);
+  assert.match(dashboardCss, /:fullscreen \.page-tools \{ display: flex; \}/);
+  assert.match(dashboardCss, /:fullscreen body:not\(\.background-only\) \.page-tools > :not\(#edit-layout\) \{ display: none; \}/);
   assert.match(dashboardCss, /#hourly li, #daily li \{[^}]*background: transparent;/);
   assert.match(dashboardCss, /#hourly, #daily \{[^}]*flex-wrap: wrap;[^}]*max-width: 70%;/); assert.doesNotMatch(dashboardCss, /#hourly, #daily \{[^}]*overflow-[xy]:\s*auto/);
   assert.match(dashboardCss, /#hourly li, #daily li \{[^}]*flex: 1 1 6\.25em;[^}]*min-width: min\(6\.25em, 100%\);/); assert.doesNotMatch(dashboardCss, /flex: 0 0 8em/);

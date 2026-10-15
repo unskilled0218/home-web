@@ -9,8 +9,27 @@
   </head>
   <body>
     <div id="photos" aria-hidden="true"></div>
-    <header class="page-tools"><button id="fullscreen" type="button">Enter fullscreen</button><button id="open-settings" type="button">Settings</button></header>
+    <header class="page-tools"><button id="fullscreen" type="button">Enter fullscreen</button><button id="open-settings" type="button">Settings</button><button id="edit-layout" type="button">Edit layout</button></header>
     <p id="page-status" role="status"></p>
+    <section id="layout-toolbar" aria-label="Edit dashboard layout" hidden>
+      <form id="layout-form" novalidate>
+        <header><button id="layout-save" type="submit" aria-label="Save layout">Save</button><button id="layout-cancel" type="button">Cancel</button></header>
+        <p><strong>Editing dashboard — actions blocked</strong></p>
+        <div class="layout-actions"><button id="layout-reload" type="button">Reload shared layout (discard edits)</button><button id="layout-fullscreen" type="button">Toggle fullscreen</button></div>
+        <div class="layout-fields">
+          <label>Layout profile<select id="layout-profile"><option value="desktop">Desktop</option><option value="mobile">Mobile</option></select></label>
+          <label>Layout arrangement<select id="layout-arrangement"><option value="automatic">Automatic</option><option value="custom">Custom</option></select></label>
+          <label>Select widget<select id="layout-widget"></select></label>
+          <label>X from left (reference pixels)<input id="layout-x" type="number" min="0" step="1"></label>
+          <label>Y from bottom (reference pixels)<input id="layout-y" type="number" min="0" step="1"></label>
+          <label>Width (reference pixels)<input id="layout-w" type="number" min="100" step="1"></label>
+          <label>Height (reference pixels)<input id="layout-h" type="number" min="100" step="1"></label>
+        </div>
+        <div class="layout-actions"><button type="button" data-layer="forward">Bring forward</button><button type="button" data-layer="backward">Send backward</button><button type="button" data-layer="front">Bring to front</button><button type="button" data-layer="back">Send to back</button><button id="layout-reset" type="button">Reset selected profile</button></div>
+        <p id="layout-status" role="status" aria-live="polite"></p>
+      </form>
+    </section>
+    <div id="layout-frames" aria-label="Widget editing handles" hidden></div>
     <div id="dashboard-content"><main id="information">
       <h1 class="sr-only">Photo dashboard</h1>
       <section id="calendar" aria-label="Calendar">
@@ -70,21 +89,6 @@
             <fieldset><legend>Information layout</legend>
               <label>Position<select name="position" form="preferences"><option value="left">Lower left</option><option value="right">Lower right</option></select></label>
               <label>Overall scale<input name="scale" form="preferences" type="number" min="0.5" max="2" step="0.1"></label>
-            </fieldset>
-            <fieldset id="widget-layout-editor"><legend>Widget layout</legend>
-              <p class="settings-description">Choose Custom to overlap and resize widgets on a fullscreen reference canvas. X measures rightward from its bottom-left; Y measures upward. Resize from the upper-right corner to grow upward. Fields use reference CSS pixels, normally at least 100 × 100, not the scaled window size. The whole canvas, including text, shrinks uniformly to fit; unused space stays above or right. Screen dimensions estimate the reference until fullscreen confirms it. Reference updates wait until Settings closes. Layers control the front widget. Changes apply only after Save preferences. Position controls Automatic; font scales still affect content.</p>
-              <label>Layout profile<select id="layout-profile"><option value="desktop">Desktop</option><option value="mobile">Mobile</option></select></label>
-              <label>Layout arrangement<select id="layout-arrangement"><option value="automatic">Automatic</option><option value="custom">Custom</option></select></label>
-              <label>Select widget<select id="layout-widget"></select></label>
-              <div id="layout-preview" aria-label="Widget layout preview"></div>
-              <div id="layout-geometry">
-                <label>Widget X from left (reference pixels)<input id="layout-x" type="number" min="0" step="1"></label>
-                <label>Widget Y from bottom (reference pixels)<input id="layout-y" type="number" min="0" step="1"></label>
-                <label>Widget width (reference pixels)<input id="layout-w" type="number" min="100" step="1"></label>
-                <label>Widget height (reference pixels)<input id="layout-h" type="number" min="100" step="1"></label>
-              </div>
-              <div class="layout-actions"><button type="button" data-layer="forward">Bring forward</button><button type="button" data-layer="backward">Send backward</button><button type="button" data-layer="front">Bring to front</button><button type="button" data-layer="back">Send to back</button><button id="layout-reset" type="button">Reset selected layout</button><button id="layout-cancel" type="button">Cancel layout edits</button></div>
-              <p id="layout-status" role="status" aria-live="polite"></p>
             </fieldset>
           </section>
           <section id="settings-panel-time" role="tabpanel" aria-labelledby="settings-tab-time" tabindex="0" hidden>

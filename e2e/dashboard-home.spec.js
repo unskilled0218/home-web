@@ -598,7 +598,9 @@ test('fullscreen enters and exits when the browser supports it', async ({ page }
   await button.click();
   await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(true);
   await expect(button).toHaveText('Exit fullscreen');
-  await expect(page.locator('.page-tools')).toBeHidden();
+  await expect(page.locator('#edit-layout')).toBeVisible();
+  await expect(page.locator('#open-settings')).toBeHidden();
+  await expect(button).toBeHidden();
   await page.evaluate(() => document.exitFullscreen());
   await expect(button).toBeVisible();
   await expect(button).toHaveText('Enter fullscreen');

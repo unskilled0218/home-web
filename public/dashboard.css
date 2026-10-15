@@ -8,7 +8,7 @@ button:hover, .page-tools a:hover { background: #30475c; }
 [hidden] { display: none !important; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 .page-tools { position: relative; z-index: 2; display: flex; justify-content: flex-end; flex-wrap: wrap; gap: .5rem; padding: 1rem; }
-:fullscreen .page-tools { display: none; }
+:fullscreen .page-tools { display: flex; }
 :fullscreen .background-only .page-tools { display: flex; }
 #page-status { position: relative; z-index: 2; margin: 0 1rem; text-align: right; }
 #photos, .photo-layer, .photo-layer img { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; }
@@ -217,13 +217,19 @@ input[type=color] { min-height: 2.5rem; }
 #widget-surface .weather-icon { max-width: 100%; }
 .custom-widget-layout .page-tools, .custom-widget-layout #page-status { z-index: 20; }
 .custom-widget-layout #photo-caption { position: fixed; z-index: 2; left: calc(1rem + env(safe-area-inset-left, 0px)); right: calc(1rem + env(safe-area-inset-right, 0px)); bottom: calc(.5rem + env(safe-area-inset-bottom, 0px)); margin: 0; max-height: 40px; overflow: auto; font-size: 14px; }
-#widget-layout-editor { display: block; }
-#widget-layout-editor > label { margin: .75rem 0; }
-#layout-preview { position: relative; isolation: isolate; overflow: hidden; background: #080d15; box-shadow: inset 0 0 0 1px #62758a; margin: 1rem 0; max-width: 100%; }
-.layout-preview-widget { position: absolute; overflow: hidden; box-shadow: inset 0 0 0 1px #718aab; background: #20334bed; box-sizing: border-box; }
-.layout-preview-widget.selected { outline: 2px solid #b4d2ff; outline-offset: -3px; }
-#settings-dialog .layout-preview-widget button { border: 0; border-radius: 0; padding: 2px; font-size: 11px; background: transparent; touch-action: none; }
-.layout-preview-widget [data-action=move] { display: block; width: 100%; height: 100%; cursor: move; overflow-wrap: anywhere; }
-.layout-preview-widget [data-action=resize] { position: absolute; right: 0; top: 0; width: 22px; height: 22px; cursor: nesw-resize; background: #304d71 !important; }
-#layout-geometry { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
+:fullscreen body:not(.background-only) .page-tools > :not(#edit-layout) { display: none; }
+.dashboard-layout-editing .page-tools { visibility: hidden; }
+.layout-hold-pending { -webkit-touch-callout: none; user-select: none; }
+#layout-toolbar { position: fixed; z-index: 40; inset: env(safe-area-inset-top, 0px) max(.5rem, env(safe-area-inset-right, 0px)) auto max(.5rem, env(safe-area-inset-left, 0px)); max-height: 48dvh; overflow: auto; scroll-padding-top: 3rem; padding: .6rem; border: 2px solid #9dc5ff; border-radius: .5rem; background: #101e30fa; font-size: 14px; }
+#layout-toolbar header { position: sticky; top: -.6rem; z-index: 1; display: flex; align-items: center; gap: .4rem; padding: .35rem 0; background: #101e30; }
+#layout-toolbar button { padding: .4rem .55rem; }
+.layout-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr)); gap: .4rem; }
+#layout-status { height: 2.5em; overflow: auto; margin-bottom: 0; }
+#layout-frames { position: fixed; inset: 0; z-index: 30; isolation: isolate; pointer-events: none; }
+.layout-edit-frame { position: fixed; box-shadow: inset 0 0 0 1px #9dc5ff; pointer-events: auto; }
+.layout-edit-frame.selected { outline: 2px solid #d4e8ff; outline-offset: -2px; }
+.layout-hidden-widget { background: #2d446dcc; }
+.layout-edit-frame button { border: 0; border-radius: 0; padding: 2px; font-size: 12px; touch-action: none; background: transparent; }
+.layout-edit-frame [data-action=move] { display: block; width: 100%; height: 100%; cursor: move; text-align: left; vertical-align: top; overflow: hidden; overflow-wrap: anywhere; }
+.layout-edit-frame [data-action=resize] { position: absolute; right: 0; top: 0; width: min(48px, 100%); height: min(32px, 100%); cursor: nesw-resize; background: #304d71; }
 .layout-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: 1rem; }

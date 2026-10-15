@@ -18,10 +18,11 @@ async function environment(preferences = {}, services = {}) {
 }
 const layout = () => ({ ...defaultWidgetLayout(), desktop: initialWidgetProfile('desktop'), mobile: initialWidgetProfile('mobile') });
 async function ready(page, env) { await page.goto(env.base); await expect(page.locator('#settings-status')).toHaveText('Preferences are shared across all browsers.'); }
-async function open(page) { await page.locator('#open-settings').click(); await page.locator('#widget-layout-editor').scrollIntoViewIfNeeded(); }
-async function save(page) { await page.locator('#save-preferences').click(); await expect(page.locator('#settings-status')).toHaveText('Preferences saved for all browsers.'); }
+async function open(page) { await page.locator('#edit-layout').click(); await expect(page.locator('#layout-toolbar')).toBeVisible(); }
+async function save(page) { await page.locator('#layout-save').click(); await expect(page.locator('#layout-toolbar')).toBeHidden(); }
 async function pixel(page, key, value) { await page.locator(`#layout-${key}`).fill(String(value)); await page.locator(`#layout-${key}`).press('Tab'); }
 const storedLayout = env => env.store.getDashboardPreferences().preferences.widgetLayout;
+async function backgroundPoint(page, id = 'clock') { return page.locator(`#${id}`).evaluate(node => { const box = node.getBoundingClientRect(); return { x: box.x + 3, y: box.y + 3 }; }); }
 // Only viewport measurement is controlled; CSS, DOM, observers, and the app remain real.
 async function controlledViewport(page, screenSize = { width: 1600, height: 1000 }) {
   await page.addInitScript(size => {
@@ -68,14 +69,14 @@ async function assertProjectedBoxes(page, widgetLayout, mode, preview = false) {
   const boxes = await page.evaluate(async ({ widgetLayout, mode, preview }) => {
     const { projectWidget, WIDGET_ELEMENTS } = await import('/dashboard-layout.js');
     const { measureLayoutSurface } = await import('/dashboard-layout-view.js');
-    const parent = document.getElementById(preview ? 'layout-preview' : 'widget-surface');
-    const surface = preview ? { width: Number(parent.dataset.width), height: Number(parent.dataset.height) } : { width: Number.parseFloat(parent.style.width), height: Number.parseFloat(parent.style.height) };
+    const parent = document.getElementById('widget-surface');
+    const surface = { width: Number.parseFloat(parent.style.width), height: Number.parseFloat(parent.style.height) };
     const area = parent.getBoundingClientRect();
-    const scale = preview ? Number.parseFloat(parent.style.width) / surface.width : new DOMMatrix(getComputedStyle(parent).transform).a;
+    const scale = new DOMMatrix(getComputedStyle(parent).transform).a;
     const destination = measureLayoutSurface(document, window);
     if (!preview && (area.x < destination.x - .1 || area.y < destination.y - .1 || area.right > destination.x + destination.width + .1 || area.bottom > destination.y + destination.height + .1)) throw new Error(`Canvas outside destination: ${JSON.stringify({ area: area.toJSON(), destination })}`);
     return widgetLayout[mode].items.map((item, index) => {
-      const node = preview ? parent.querySelector(`[data-widget="${item.id}"]`) : document.getElementById(WIDGET_ELEMENTS[item.id]);
+      const node = preview ? document.querySelector(`#layout-frames [data-widget="${item.id}"]`) : document.getElementById(WIDGET_ELEMENTS[item.id]);
       const rect = projectWidget(item, surface); const box = node.getBoundingClientRect();
       return { id: item.id, hidden: node.hidden, actual: { x: box.x, y: box.y, width: box.width, height: box.height }, expected: { x: area.x + rect.x * scale, y: area.bottom - (rect.y + rect.h) * scale, width: rect.w * scale, height: rect.h * scale }, area: area.toJSON(), layer: node.style.zIndex, expectedLayer: String(index + 1) };
     });
@@ -103,6 +104,211 @@ async function drag(page, action, id, dx, dy, cancel = false) {
   await page.mouse.up();
 }
 
+test('mouse hold enters Automatic editing only after threshold and consumes release without writes', async ({ page }) => {
+  const env = await environment(); const writes = [];
+  try {
+    await page.clock.install(); await ready(page, env); page.on('request', request => { if (request.method() === 'PUT') writes.push(request.url()); });
+    await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000));
+    const original = env.store.getDashboardPreferences(); const point = await backgroundPoint(page);
+    await page.mouse.move(point.x, point.y); await page.mouse.down(); await page.clock.runFor(599); await expect(page.locator('#layout-toolbar')).toBeHidden();
+    await page.clock.runFor(1); await expect(page.locator('#layout-toolbar')).toBeVisible(); await expect(page.locator('#settings-dialog')).not.toBeVisible();
+    await expect(page.locator('#layout-widget')).toHaveValue('time'); await expect(page.locator('#layout-arrangement')).toHaveValue('automatic'); await expect(page.locator('#layout-status')).toContainText('temporary template');
+    // Reposition Save under the held pointer: release must not click through new chrome.
+    await page.locator('#layout-save').evaluate((node, point) => { node.setAttribute('form', 'layout-form'); document.body.append(node); Object.assign(node.style, { position: 'fixed', zIndex: '100', left: `${point.x - 20}px`, top: `${point.y - 15}px` }); }, point);
+    expect(await page.evaluate(point => document.elementFromPoint(point.x, point.y)?.id, point)).toBe('layout-save');
+    await page.mouse.up(); await expect(page.locator('#layout-toolbar')).toBeVisible(); await expect(page.locator('#open-settings')).toBeDisabled();
+    await page.locator('#layout-save').evaluate(node => { document.querySelector('#layout-form header').prepend(node); node.removeAttribute('form'); node.removeAttribute('style'); });
+    await page.locator('#layout-profile').selectOption('mobile'); await page.locator('#layout-widget').selectOption('wol'); await save(page);
+    expect(writes).toEqual([]); expect(env.store.getDashboardPreferences()).toEqual(original);
+    await expect(page.locator('#clock')).not.toHaveAttribute('inert'); expect(await page.evaluate(() => ['clock', 'edit-layout'].includes(document.activeElement.id))).toBe(true); await expect(page.locator('#clock')).not.toHaveAttribute('tabindex');
+  } finally { await page.goto('about:blank'); await env.close(); }
+});
+
+test('trusted short clicks, moved holds, nested scrolling and interactive descendants do not enter editing', async ({ page }) => {
+  const env = await environment();
+  try {
+    await page.clock.install(); await ready(page, env);
+    await page.locator('#clock').evaluate(node => { const button = document.createElement('button'); button.textContent = 'Fixture action'; button.onclick = () => window.fixtureClicks = (window.fixtureClicks || 0) + 1; node.append(button); const link = document.createElement('a'); link.href = '#fixture'; link.textContent = 'Fixture link'; node.append(link); });
+    let point = await backgroundPoint(page); await page.mouse.move(point.x, point.y); await page.mouse.down(); await page.clock.runFor(400); await page.mouse.up(); await page.clock.runFor(300);
+    await expect(page.locator('#layout-toolbar')).toBeHidden();
+    await page.mouse.down(); await page.mouse.move(point.x + 8, point.y); await page.clock.runFor(700); await page.mouse.up(); await expect(page.locator('#layout-toolbar')).toBeHidden();
+    await page.mouse.move(point.x, point.y); await page.mouse.down(); await page.locator('#clock').dispatchEvent('scroll'); await page.clock.runFor(700); await page.mouse.up(); await expect(page.locator('#layout-toolbar')).toBeHidden();
+    for (const selector of ['#clock button', '#clock a']) { const box = await page.locator(selector).boundingBox(); await page.mouse.move(box.x + 3, box.y + 3); await page.mouse.down(); await page.clock.runFor(700); await page.mouse.up(); await expect(page.locator('#layout-toolbar')).toBeHidden(); }
+    expect(await page.evaluate(() => window.fixtureClicks)).toBe(1);
+    // An eligible hold suppresses only its own context menu.
+    await page.evaluate(() => getSelection().removeAllRanges()); point = await backgroundPoint(page); await page.locator('#clock').dispatchEvent('pointerdown', { button: 0, isPrimary: true, pointerId: 91, clientX: point.x, clientY: point.y });
+    expect(await page.locator('#clock').evaluate(node => !node.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })))).toBe(true);
+    expect(await page.locator('#clock a').evaluate(node => !node.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })))).toBe(false);
+    await page.locator('#clock').dispatchEvent('pointerup', { pointerId: 91 });
+  } finally { await page.goto('about:blank'); await env.close(); }
+});
+
+test('actual touch hold enters direct editing; native scrolling, early release and two touches cancel activation', async ({ browser }) => {
+  const env = await environment(); const context = await browser.newContext({ hasTouch: true, viewport: { width: 1100, height: 800 } }); const page = await context.newPage();
+  try {
+    await page.clock.install(); await ready(page, env); const cdp = await context.newCDPSession(page); const point = await backgroundPoint(page);
+    const touch = (type, touchPoints) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints });
+    await touch('touchStart', [point]); await page.clock.runFor(300); await touch('touchEnd', []); await page.clock.runFor(400); await expect(page.locator('#layout-toolbar')).toBeHidden();
+    await touch('touchStart', [point]); await touch('touchMove', [{ x: point.x + 20, y: point.y + 20 }]); await page.clock.runFor(700); await touch('touchEnd', []); await expect(page.locator('#layout-toolbar')).toBeHidden();
+    await touch('touchStart', [{ ...point, id: 1 }]); await touch('touchStart', [{ ...point, id: 1 }, { x: point.x + 30, y: point.y + 30, id: 2 }]); await page.clock.runFor(700); await touch('touchEnd', []); await expect(page.locator('#layout-toolbar')).toBeHidden();
+    await touch('touchStart', [point]); await page.clock.runFor(650); await expect(page.locator('#layout-toolbar')).toBeVisible(); await touch('touchEnd', []);
+    await expect(page.locator('#layout-widget')).toHaveValue('time'); await page.locator('#layout-cancel').click();
+    // Native touch scrolling is not disabled on ordinary widget content.
+    await page.locator('#clock').evaluate(node => { node.style.height = '130px'; node.style.overflow = 'auto'; const content = document.createElement('p'); content.textContent = 'Scrollable fixture '.repeat(150); node.append(content); });
+    const box = await page.locator('#clock').boundingBox(); const scrollPoint = { x: box.x + box.width / 2, y: box.y + 100 };
+    await touch('touchStart', [scrollPoint]); await touch('touchMove', [{ x: scrollPoint.x, y: scrollPoint.y - 70 }]); await touch('touchEnd', []); await page.clock.runFor(700);
+    await expect(page.locator('#layout-toolbar')).toBeHidden(); await expect.poll(() => page.locator('#clock').evaluate(node => node.scrollTop)).toBeGreaterThan(0);
+  } finally { await context.close(); await env.close(); }
+});
+
+test('polls preserve focused raw fields and captured gestures across unchanged, failed and remote snapshots', async ({ page }) => {
+  const env = await environment({ widgetLayout: layout() }); const writes = [];
+  try {
+    await page.clock.install(); await ready(page, env); await open(page); const base = env.store.getDashboardPreferences();
+    page.on('request', request => { if (request.method() === 'PUT') writes.push(request.postDataJSON()); });
+    await page.locator('#layout-w').fill('181'); await page.clock.fastForward(5000); await expect(page.locator('#layout-w')).toBeFocused(); await expect(page.locator('#layout-w')).toHaveValue('181');
+    await page.locator('#layout-w').fill(''); await page.clock.fastForward(5000); await expect(page.locator('#layout-w')).toHaveValue('');
+    await page.route('**/api/dashboard/settings', route => route.request().method() === 'GET' ? route.abort() : route.continue()); await page.clock.fastForward(5000); await expect(page.locator('#layout-w')).toHaveValue(''); await expect(page.locator('#layout-w')).toBeFocused();
+    await page.locator('#layout-save').click(); await expect(page.locator('#layout-w')).toBeFocused(); expect(writes).toEqual([]);
+    await page.unroute('**/api/dashboard/settings'); await pixel(page, 'w', 181);
+    const handle = page.locator('[data-widget="time"] [data-action="move"]'); const box = await handle.boundingBox(); const point = { x: box.x + 3, y: box.y + 3 };
+    await page.mouse.move(point.x, point.y); await page.mouse.down(); await page.mouse.move(point.x + 10, point.y);
+    await page.clock.fastForward(5000); await expect(page.locator('#layout-w')).toBeDisabled();
+    const remote = env.store.getDashboardPreferences(); env.store.saveDashboardPreferences({ ...remote.preferences, color: '#112233' }, remote.revision);
+    await page.clock.fastForward(5000); await expect(page.locator('#layout-w')).toBeDisabled(); await page.mouse.move(point.x + 20, point.y); await page.mouse.up();
+    await expect(page.locator('#layout-w')).toHaveValue('181'); await page.locator('#layout-save').click(); await expect(page.locator('#layout-status')).toContainText('changed in another browser');
+    expect(writes[0].revision).toBe(base.revision); expect(writes[0].preferences.color).toBe(base.preferences.color); expect(writes[0].preferences.widgetLayout.mobile).toEqual(base.preferences.widgetLayout.mobile);
+    await page.locator('#layout-cancel').click(); await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(17, 34, 51)');
+  } finally { await page.goto('about:blank'); await env.close(); }
+});
+
+test('pending layout write blocks every exit and mutation until confirmed success or retained failure', async ({ page }) => {
+  const env = await environment(); let release; const bodies = [];
+  try {
+    await ready(page, env); await open(page); await pixel(page, 'w', 177);
+    await page.route('**/api/dashboard/settings', async route => { if (route.request().method() !== 'PUT') return route.continue(); bodies.push(route.request().postDataJSON()); await new Promise(resolve => { release = resolve; }); return route.fulfill({ status: 503, json: { error: 'Fixture write failed.' } }); });
+    await page.locator('#layout-save').click(); await expect(page.locator('#layout-status')).toHaveText('Saving shared layout…');
+    for (const id of ['cancel', 'save', 'reload', 'reset', 'fullscreen', 'profile', 'widget', 'arrangement', 'w']) await expect(page.locator(`#layout-${id}`)).toBeDisabled();
+    await page.keyboard.press('Escape'); await page.locator('#open-settings').dispatchEvent('click'); await page.locator('#edit-layout').dispatchEvent('click'); await expect(page.locator('#layout-toolbar')).toBeVisible(); await expect(page.locator('#settings-dialog')).toBeHidden();
+    release(); await expect(page.locator('#layout-status')).toHaveText('Fixture write failed.'); await expect(page.locator('#layout-w')).toHaveValue('177'); await expect(page.locator('#clock')).toHaveAttribute('inert', '');
+    expect(bodies).toHaveLength(1); expect(env.store.getDashboardPreferences().revision).toBe(1);
+    await page.unroute('**/api/dashboard/settings'); await save(page); expect(env.store.getDashboardPreferences().revision).toBe(2);
+  } finally { release?.(); await page.goto('about:blank'); await env.close(); }
+});
+
+test('unrelated Settings clean refresh and dirty conflicts preserve complete remote layouts and credential drafts', async ({ page }) => {
+  const env = await environment({ widgetLayout: layout() }); const writes = [];
+  try {
+    await page.clock.install(); await ready(page, env); page.on('request', request => { if (request.method() === 'PUT') writes.push(request.postDataJSON()); });
+    await page.locator('#open-settings').click(); await expect(page.locator('#settings-dialog #layout-profile')).toHaveCount(0); await expect(page.locator('#settings-dialog [role=tab]')).toHaveCount(8);
+    const remote = env.store.getDashboardPreferences(); const changed = layout(); changed.desktop.items[0].x = 10000;
+    env.store.saveDashboardPreferences({ ...remote.preferences, widgetLayout: changed }, remote.revision); await page.clock.fastForward(5000);
+    // Opening Settings may still own an earlier GET; wait for the actual new confirmation before dirtying the form.
+    await expect.poll(async () => { await page.clock.runFor(500); return page.evaluate(() => JSON.parse(localStorage.getItem('dashboard.shared-settings.v1')).revision); }).toBe(2);
+    await page.getByLabel('Overall scale', { exact: true }).fill('1.1'); await page.locator('#save-preferences').click(); await expect(page.locator('#settings-status')).toHaveText('Preferences saved for all browsers.');
+    expect(writes[0].preferences.widgetLayout).toEqual(changed); expect(writes[0].revision).toBe(2);
+    await page.getByLabel('Overall scale', { exact: true }).fill('1.2'); await page.locator('#settings-tab-home-assistant').click(); await page.locator('#home-assistant-url').fill('https://unsaved.test');
+    const before = env.store.getDashboardPreferences(); const latest = layout(); latest.mobile = null; env.store.saveDashboardPreferences({ ...before.preferences, widgetLayout: latest }, before.revision); await page.clock.fastForward(5000);
+    await page.locator('#settings-tab-general').click(); await page.locator('#save-preferences').click(); await expect(page.locator('#settings-status')).toContainText('changed in another browser');
+    expect(writes[1].preferences.widgetLayout).toEqual(changed); expect(writes[1].revision).toBe(3); expect(storedLayout(env)).toEqual(latest);
+    await page.locator('#settings-tab-home-assistant').click(); await expect(page.locator('#home-assistant-url')).toHaveValue('https://unsaved.test'); await page.locator('#close-settings').click();
+  } finally { await page.goto('about:blank'); await env.close(); }
+});
+
+test('keyboard/fullscreen entry, hidden placeholders, inactive profile and breakpoint transitions retain ownership', async ({ page }) => {
+  const env = await environment({ timeVisible: false, widgetLayout: layout() });
+  try {
+    await ready(page, env); const original = env.store.getDashboardPreferences(); await page.locator('#edit-layout').focus(); await page.keyboard.press('Enter');
+    await expect(page.locator('#layout-widget')).toBeFocused(); await expect(page.locator('[data-widget=time] [data-action=move]')).toHaveText('Time (hidden)'); await expect(page.locator('#clock')).toBeHidden();
+    for (let i = 0; i < 30; i++) { await page.keyboard.press('Tab'); expect(await page.evaluate(() => Boolean(document.activeElement.closest('#layout-toolbar, #layout-frames')) || document.activeElement === document.body)).toBe(true); }
+    await page.locator('#layout-profile').selectOption('mobile'); await expect(page.locator('#layout-status')).toContainText('inactive profile'); await pixel(page, 'w', 156);
+    await page.setViewportSize({ width: 590, height: 800 }); await expect(page.locator('#layout-profile')).toHaveValue('mobile'); await expect(page.locator('#layout-w')).toHaveValue('156');
+    await page.locator('#layout-cancel').click(); await expect(page.locator('#edit-layout')).toBeFocused(); expect(env.store.getDashboardPreferences()).toEqual(original);
+    await page.evaluate(() => document.documentElement.requestFullscreen()); await expect(page.locator('#edit-layout')).toBeVisible(); await open(page); await expect(page.locator('#layout-cancel')).toBeInViewport(); await page.locator('#layout-fullscreen').click(); await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(false); await page.locator('#layout-cancel').click();
+  } finally { await page.goto('about:blank'); await env.close(); }
+});
+
+test('profile selection cancels a captured gesture and persisted-page suspension retains completed drafts without saves', async ({ page }) => {
+  const env = await environment({ widgetLayout: layout() }); const writes = [];
+  try {
+    await ready(page, env); await open(page); await pixel(page, 'w', 177); const before = env.store.getDashboardPreferences();
+    page.on('request', request => { if (request.method() === 'PUT') writes.push(request.postDataJSON()); });
+    const handle = page.locator('[data-widget=time] [data-action=move]'); let box = await handle.boundingBox();
+    await page.mouse.move(box.x + 3, box.y + 3); await page.mouse.down(); await page.mouse.move(box.x + 25, box.y + 3);
+    await page.locator('#layout-profile').selectOption('mobile'); await page.mouse.up(); await expect(page.locator('#layout-profile')).toHaveValue('mobile');
+    await page.locator('#layout-profile').selectOption('desktop'); await expect(page.locator('#layout-w')).toHaveValue('177');
+    const x = await page.locator('#layout-x').inputValue(); const reference = (await canvasState(page)).reference;
+    box = await handle.boundingBox(); await page.mouse.move(box.x + 3, box.y + 3); await page.mouse.down(); await page.mouse.move(box.x + 18, box.y + 3);
+    // Synthetic lifecycle exercises the persisted branch, not a claim that BFCache is guaranteed.
+    await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }))); await page.mouse.up();
+    await expect(page.locator('#layout-x')).toHaveValue(x); await expect(page.locator('#layout-toolbar')).toBeVisible(); await expect(page.locator('#clock')).toHaveAttribute('inert', '');
+    await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }))); await settleFrames(page);
+    await expect(page.locator('#layout-w')).toHaveValue('177'); expect((await canvasState(page)).reference).toEqual(reference); expect(writes).toEqual([]); expect(env.store.getDashboardPreferences()).toEqual(before);
+    await page.locator('#layout-cancel').click();
+  } finally { await page.goto('about:blank'); await env.close(); }
+});
+
+test('short native windows retain reachable Save and Cancel above a safely deferred editing canvas', async ({ page }) => {
+  const env = await environment();
+  try {
+    await ready(page, env); const before = env.store.getDashboardPreferences();
+    for (const [width, height] of [[320, 240], [160, 150]]) {
+      await page.setViewportSize({ width, height }); await open(page);
+      await expect(page.locator('#layout-save')).toBeInViewport(); await page.locator('#layout-cancel').scrollIntoViewIfNeeded(); await expect(page.locator('#layout-cancel')).toBeInViewport(); await page.locator('#layout-cancel').click();
+    }
+    expect(env.store.getDashboardPreferences()).toEqual(before);
+  } finally { await page.goto('about:blank'); await env.close(); }
+});
+
+test('editor DOM lifecycle restores prior inert state and one reference lock; late saves cannot reopen disposed chrome', async ({ page }) => {
+  const env = await environment();
+  try {
+    // Exercise the editor owner against real browser DOM without the application coordinator.
+    await page.route('**/dashboard.js', route => route.fulfill({ contentType: 'text/javascript', body: '' })); await page.goto(env.base);
+    await page.evaluate(async () => {
+      const { createDashboardLayoutEditor } = await import('/dashboard-layout-editor.js'); const { normalizeDashboardPreferences } = await import('/dashboard-helpers.js');
+      window.editorFixture = { state: { confirmed: true, snapshot: { preferences: normalizeDashboardPreferences(), revision: 3 } }, locks: 0, releases: 0, writes: [], override: null };
+      const f = window.editorFixture; document.getElementById('clock').inert = true;
+      f.editor = createDashboardLayoutEditor({ document, window, view: { reference: () => ({ width: 1000, height: 800 }), frame: () => ({ reference: { width: 1000, height: 800 }, fit: { x: 0, y: 400, scale: .5 } }), lockReference: () => f.locks++, releaseReference: () => f.releases++, setOverride: value => { f.override = value; } }, getState: () => f.state, activeProfile: () => 'desktop', canEnter: () => true, toggleFullscreen() {}, save: (preferences, revision) => { f.writes.push({ preferences, revision }); return new Promise(resolve => { f.resolve = resolve; }); } });
+      f.editor.enter(); f.editor.enter('weather');
+    });
+    await expect(page.locator('#layout-widget')).toHaveValue('weather'); await pixel(page, 'w', 177);
+    await page.evaluate(() => { const f = window.editorFixture; f.state.snapshot = { revision: 5, preferences: { ...f.state.snapshot.preferences, color: '#123456' } }; f.editor.observe(); f.editor.refreshSurface(); });
+    await expect(page.locator('#layout-w')).toHaveValue('177'); await page.locator('#layout-save').click();
+    expect(await page.evaluate(() => { const f = window.editorFixture; return { locks: f.locks, revision: f.writes[0].revision, color: f.writes[0].preferences.color }; })).toEqual({ locks: 1, revision: 3, color: '#000000' });
+    await page.evaluate(() => { const f = window.editorFixture; f.editor.dispose(); f.editor.dispose(); f.resolve(); });
+    await expect(page.locator('#layout-toolbar')).toBeHidden(); await expect(page.locator('#layout-frames')).toBeHidden(); await expect(page.locator('#clock')).toHaveAttribute('inert', ''); await expect(page.locator('#weather')).not.toHaveAttribute('inert');
+    expect(await page.evaluate(() => ({ releases: window.editorFixture.releases, override: window.editorFixture.override, active: window.editorFixture.editor.active, enter: window.editorFixture.editor.enter() }))).toEqual({ releases: 1, override: null, active: false, enter: false });
+  } finally { await page.goto('about:blank'); await env.close(); }
+});
+
+test('offline edit base stays nonwritable after confirmation until explicit reload discards both profiles', async ({ page }) => {
+  const env = await environment();
+  try {
+    await page.clock.install(); await ready(page, env); await page.route('**/api/dashboard/settings', route => route.abort()); await page.reload(); await expect(page.locator('#settings-status')).not.toHaveText('Loading shared preferences…'); await open(page);
+    await pixel(page, 'w', 177); await page.locator('#layout-profile').selectOption('mobile'); await pixel(page, 'w', 155); await expect(page.locator('#layout-save')).toBeDisabled();
+    await page.unroute('**/api/dashboard/settings'); await page.clock.fastForward(5000); await expect(page.locator('#layout-reload')).toBeEnabled(); await expect(page.locator('#layout-save')).toBeDisabled(); await expect(page.locator('#layout-w')).toHaveValue('155');
+    await page.locator('#layout-reload').click(); await expect(page.locator('#layout-arrangement')).toHaveValue('automatic'); await page.locator('#layout-profile').selectOption('desktop'); await expect(page.locator('#layout-arrangement')).toHaveValue('automatic'); await expect(page.locator('#layout-save')).toBeEnabled();
+    await save(page); expect(env.store.getDashboardPreferences().revision).toBe(1);
+  } finally { await page.goto('about:blank'); await env.close(); }
+});
+
+test('all actionable descendant selectors and composed shadow controls exclude long press in real DOM', async ({ page }) => {
+  const env = await environment();
+  try {
+    await page.clock.install(); await ready(page, env); await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000));
+    const result = await page.evaluate(async () => {
+      const { createLayoutActivation } = await import('/dashboard-layout-activation.js'); const timers = new Map(); let sequence = 0; let activations = 0;
+      const controller = createLayoutActivation({ document, window, canEnter: () => true, activate: () => { activations++; return true; }, schedule(fn) { timers.set(++sequence, fn); return sequence; }, cancel: id => timers.delete(id) });
+      const root = document.getElementById('clock'); const markup = ['<a href="#">link</a>', '<button>button</button>', '<input>', '<select></select>', '<textarea></textarea>', '<label>label</label>', '<summary>summary</summary>', '<iframe></iframe>', '<object></object>', '<embed>', '<audio></audio>', '<video></video>', '<span tabindex="-1">focus</span>', '<span draggable="true">drag</span>', '<span contenteditable="true">edit</span>', ...['button', 'link', 'checkbox', 'switch', 'menuitem', 'option', 'tab', 'treeitem', 'slider', 'spinbutton', 'combobox', 'listbox', 'textbox', 'searchbox', 'radio'].map(role => `<span role="${role}">${role}</span>`)];
+      for (const html of markup) { const wrapper = document.createElement('div'); wrapper.innerHTML = html; root.append(wrapper); wrapper.firstElementChild.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, composed: true, button: 0, isPrimary: true, pointerId: 41 })); wrapper.remove(); }
+      const host = document.createElement('div'); root.append(host); const shadow = host.attachShadow({ mode: 'open' }); shadow.innerHTML = '<button>Shadow control</button>'; shadow.firstElementChild.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, composed: true, button: 0, isPrimary: true, pointerId: 41 })); host.remove();
+      const remaining = timers.size; controller.dispose(); return { remaining, activations, checked: markup.length + 1 };
+    });
+    expect(result).toEqual({ remaining: 0, activations: 0, checked: 31 }); await expect(page.locator('#layout-toolbar')).toBeHidden();
+  } finally { await page.goto('about:blank'); await env.close(); }
+});
+
 test('custom arrangement saves geometry/layers and reset/cancel preserve independent drafts', async ({ page }) => {
   const env = await environment();
   try {
@@ -111,21 +317,22 @@ test('custom arrangement saves geometry/layers and reset/cancel preserve indepen
     await page.locator('#layout-arrangement').selectOption('custom'); await page.locator('#layout-widget').selectOption('time');
     await pixel(page, 'x', 20); await pixel(page, 'y', 30); await pixel(page, 'w', 210); await pixel(page, 'h', 130);
     await page.getByRole('button', { name: 'Bring to front', exact: true }).click();
-    await expect(page.locator('#widget-surface')).toBeHidden();
-    await save(page); await page.locator('#close-settings').click();
+    await expect(page.locator('#widget-surface')).toBeVisible();
+    await save(page);
     await expect(page.locator('#widget-surface')).toBeVisible(); await expect(page.locator('#clock')).toHaveCSS('z-index', '6');
     const first = structuredClone(storedLayout(env)); expect(first.mobile).toBeNull();
-    const clock = await page.locator('#clock').boundingBox(); expect(clock.width).toBe(210); expect(clock.height).toBe(130);
-    await open(page); await page.getByLabel('Overall scale', { exact: true }).fill('1.2');
+    const clock = await page.locator('#clock').evaluate(node => ({ width: node.style.width, height: node.style.height })); expect(clock).toEqual({ width: '210px', height: '130px' });
+    await page.locator('#open-settings').click(); await page.getByLabel('Overall scale', { exact: true }).fill('1.2');
+    await expect(page.locator('#edit-layout')).toBeDisabled(); await page.locator('#save-preferences').click(); await expect(page.locator('#settings-status')).toHaveText('Preferences saved for all browsers.'); await page.locator('#close-settings').click(); await open(page);
     await page.locator('#layout-reset').click(); await page.locator('#layout-cancel').click();
-    await expect(page.getByLabel('Overall scale', { exact: true })).toHaveValue('1.2'); await save(page);
+    await page.locator('#open-settings').click(); await expect(page.getByLabel('Overall scale', { exact: true })).toHaveValue('1.2'); await page.locator('#close-settings').click();
     expect(storedLayout(env)).toEqual(first);
     await expect(page.locator('#clock')).toHaveCSS('font-size', '19.2px'); await expect(page.locator('#bookmarks')).toHaveCSS('font-size', '16px');
-    await page.locator('#layout-profile').selectOption('mobile'); await page.locator('#layout-arrangement').selectOption('custom'); await save(page);
+    await open(page); await page.locator('#layout-profile').selectOption('mobile'); await page.locator('#layout-arrangement').selectOption('custom'); await save(page);
     expect(storedLayout(env).desktop).toEqual(first.desktop); expect(storedLayout(env).mobile).not.toBeNull();
-    await page.locator('#layout-profile').selectOption('desktop'); await page.locator('#layout-reset').click(); await save(page);
+    await open(page); await page.locator('#layout-profile').selectOption('desktop'); await page.locator('#layout-reset').click(); await save(page);
     expect(storedLayout(env).desktop).toBeNull(); expect(storedLayout(env).mobile).not.toBeNull();
-    await page.locator('#close-settings').click(); await expect(page.locator('#widget-surface')).toBeHidden();
+    await expect(page.locator('#widget-surface')).toBeHidden();
     await env.restart(); await ready(page, env); expect(storedLayout(env).mobile).not.toBeNull();
   } finally { await page.goto('about:blank'); await env.close(); }
 });
@@ -136,7 +343,7 @@ test('covered widgets are selectable and all six share one hit-tested stacking s
   try {
     await page.setViewportSize({ width: 1200, height: 800 }); await ready(page, env); await open(page);
     for (const id of ['time', 'weather', 'calendar', 'bookmarks', 'home-assistant', 'wol']) {
-      await page.locator('#layout-widget').selectOption(id); await page.getByRole('button', { name: 'Bring to front', exact: true }).click(); await save(page); await page.locator('#close-settings').click();
+      await page.locator('#layout-widget').selectOption(id); const front = page.getByRole('button', { name: 'Bring to front', exact: true }); if (await front.isEnabled()) await front.click(); await save(page);
       const top = await page.evaluate(() => { const area = document.querySelector('#widget-surface > section').getBoundingClientRect(); return document.elementFromPoint(area.x + area.width * .2, area.y + area.height * .2)?.closest('#widget-surface > section, #widget-surface > aside')?.id; });
       expect(top).toBe({ time: 'clock', weather: 'weather', calendar: 'calendar', bookmarks: 'bookmarks', 'home-assistant': 'dashboard-ha', wol: 'dashboard-wol' }[id]);
       await expect(page.locator('#open-settings')).toBeVisible(); await open(page);
@@ -148,22 +355,24 @@ test('minimum-clamped pointer moves and canceled/no-op edits retain canonical si
   const widgetLayout = layout(); widgetLayout.desktop.items = widgetLayout.desktop.items.map(item => item.id === 'time' ? { ...item, x: 100000, y: 100000, w: 100000, h: 100000 } : item); widgetLayout.desktop.items.push(widgetLayout.desktop.items.splice(widgetLayout.desktop.items.findIndex(item => item.id === 'time'), 1)[0]);
   const env = await environment({ widgetLayout }); const small = await browser.newPage({ viewport: { width: 832, height: 800 } }); const large = await browser.newPage({ viewport: { width: 1632, height: 1000 } });
   try {
+    await controlledViewport(small, { width: 832, height: 800 }); await controlledViewport(large, { width: 1632, height: 1000 });
     await ready(small, env); await ready(large, env); await open(small); await small.locator('#layout-widget').selectOption('time');
     const original = structuredClone(storedLayout(env)); const rect = await large.locator('#clock').boundingBox(); expect(rect.width).toBe(160);
-    expect((await small.locator('#clock').boundingBox()).width).toBe(100);
+    expect(await small.locator('#clock').evaluate(node => node.style.width)).toBe('100px');
     await drag(small, 'move', 'time', 20, 10); await save(small);
     const saved = structuredClone(storedLayout(env)); const item = saved.desktop.items.find(item => item.id === 'time'); expect(item.w).toBe(100000); expect(item.h).toBe(100000);
     expect(saved.desktop.items.filter(item => item.id !== 'time')).toEqual(original.desktop.items.filter(item => item.id !== 'time'));
     await large.reload(); await expect(large.locator('#clock')).toHaveCSS('width', '160px');
     const revision = env.store.getDashboardPreferences().revision;
-    await drag(small, 'move', 'time', 15, 15, true); await save(small); expect(env.store.getDashboardPreferences().revision).toBe(revision);
-    await drag(small, 'move', 'time', 0, 0); await save(small); expect(env.store.getDashboardPreferences().revision).toBe(revision);
+    await open(small); await drag(small, 'move', 'time', 15, 15, true); await save(small); expect(env.store.getDashboardPreferences().revision).toBe(revision);
+    await open(small); await drag(small, 'move', 'time', 0, 0); await save(small); expect(env.store.getDashboardPreferences().revision).toBe(revision);
+    await open(small);
     const handle = small.locator('[data-widget="time"] [data-action="move"]'); await handle.scrollIntoViewIfNeeded(); const box = await handle.boundingBox();
     await small.mouse.move(box.x + 4, box.y + 4); await small.mouse.down(); await small.mouse.move(box.x + 14, box.y + 14); await small.mouse.move(box.x + 4, box.y + 4); await small.mouse.up();
     await save(small); expect(env.store.getDashboardPreferences().revision).toBe(revision);
-    await small.mouse.move(box.x + 4, box.y + 4); await small.mouse.down(); await small.mouse.move(box.x + 14, box.y + 14);
-    await handle.dispatchEvent('pointercancel', { pointerId: 1 }); await small.mouse.up(); await save(small); expect(env.store.getDashboardPreferences().revision).toBe(revision);
-    const x = await small.locator('#layout-x').inputValue(); await pixel(small, 'x', Number(x) + 1); await save(small);
+    await open(small); await handle.evaluate(node => node.addEventListener('pointerdown', event => { window.layoutCaptureId = event.pointerId; }, { once: true })); await small.mouse.move(box.x + 4, box.y + 4); await small.mouse.down(); await small.mouse.move(box.x + 14, box.y + 14);
+    await handle.dispatchEvent('pointercancel', { pointerId: await small.evaluate(() => window.layoutCaptureId) }); await small.mouse.up(); await save(small); expect(env.store.getDashboardPreferences().revision).toBe(revision);
+    await open(small); const x = await small.locator('#layout-x').inputValue(); await pixel(small, 'x', Number(x) + 1); await save(small);
     expect(storedLayout(env).desktop.items.find(item => item.id === 'time').w).toBe(100000);
     expect(storedLayout(env).mobile).toEqual(original.mobile);
   } finally { await small.close(); await large.close(); await env.close(); }
@@ -179,32 +388,32 @@ test('custom cards stay within each viewport without resize writes, including ti
       await expect.poll(() => page.evaluate(() => { const stage = document.getElementById('widget-surface'); const area = stage.getBoundingClientRect(); if (stage.hidden) return area.width === 0 && area.height === 0; const scale = new DOMMatrix(getComputedStyle(stage).transform).a; return [...document.querySelectorAll('#widget-surface > section, #widget-surface > aside')].every(node => { const box = node.getBoundingClientRect(); return box.width + .1 >= Math.min(100, Number.parseFloat(stage.style.width)) * scale && box.height + .1 >= Math.min(100, Number.parseFloat(stage.style.height)) * scale && box.x >= area.x - .1 && box.y >= area.y - .1 && box.right <= area.right + .1 && box.bottom <= area.bottom + .1; }); })).toBe(true);
     }
     expect(writes).toBe(0); expect(env.store.getDashboardPreferences()).toEqual(original);
-    await page.setViewportSize({ width: 1200, height: 800 }); await open(page);
+    await page.setViewportSize({ width: 1200, height: 800 }); await page.locator('#open-settings').click();
     for (const name of ['time', 'weather', 'calendar', 'bookmarks', 'homeAssistant', 'wol']) await page.locator(`[name="${name}Visible"]`).uncheck();
-    await save(page); await page.locator('#close-settings').click(); await expect(page.locator('#widget-surface')).toBeHidden();
-    await open(page); await expect(page.locator('#layout-w')).toBeEnabled(); await expect(page.locator('#layout-preview')).toBeVisible();
-    await page.locator('#close-settings').click(); await page.locator('#fullscreen').click(); await expect(page.locator('#open-settings')).toBeVisible(); await page.locator('#fullscreen').click();
+    await page.locator('#save-preferences').click(); await expect(page.locator('#settings-status')).toHaveText('Preferences saved for all browsers.'); await page.locator('#close-settings').click(); await expect(page.locator('#widget-surface')).toBeHidden();
+    await open(page); await expect(page.locator('#layout-w')).toBeEnabled(); await expect(page.locator('#layout-frames')).toBeVisible();
+    await page.locator('#layout-cancel').click(); await page.locator('#fullscreen').click(); await expect(page.locator('#open-settings')).toBeVisible(); await page.locator('#fullscreen').click();
   } finally { await page.goto('about:blank'); await env.close(); }
 });
 
-test('remote layout conflicts preserve dirty geometry and credentials; offline writes never change live layout', async ({ browser }) => {
+test('remote layout conflicts preserve dirty geometry; failed writes retain only a local preview', async ({ browser }) => {
   const env = await environment({ widgetLayout: layout() }); const a = await browser.newPage(); const b = await browser.newPage();
   try {
     await b.clock.install(); await ready(a, env); await ready(b, env); await open(a); await open(b);
-    await pixel(b, 'w', 170); await b.locator('#settings-tab-home-assistant').click(); await b.locator('#home-assistant-url').fill('https://unsaved.test'); await b.locator('#settings-tab-general').click();
+    await pixel(b, 'w', 170);
     await pixel(a, 'w', 240); await save(a); await b.clock.fastForward(5000);
     await expect(b.locator('#layout-w')).toHaveValue('170');
-    await b.locator('#save-preferences').click(); await expect(b.locator('#settings-status')).toContainText('changed in another browser');
+    await b.locator('#layout-save').click(); await expect(b.locator('#layout-status')).toContainText('changed in another browser');
     await expect(b.locator('#layout-w')).toHaveValue('170');
-    await b.locator('#reload-shared-preferences').click(); await expect(b.locator('#layout-w')).toHaveValue('240');
-    await b.locator('#settings-tab-home-assistant').click(); await expect(b.locator('#home-assistant-url')).toHaveValue('https://unsaved.test'); await b.locator('#settings-tab-general').click();
+    await b.locator('#layout-reload').click(); await expect(b.locator('#layout-w')).toHaveValue('240');
     const saved = structuredClone(storedLayout(env));
     await b.route('**/api/dashboard/settings', route => route.request().method() === 'PUT' ? route.abort() : route.continue());
-    await pixel(b, 'w', 200); await b.locator('#save-preferences').click(); await expect(b.locator('#settings-status')).not.toHaveText('Preferences saved for all browsers.');
+    await pixel(b, 'w', 200); await b.locator('#layout-save').click(); await expect(b.locator('#layout-status')).not.toHaveText('Saving shared layout…');
     await expect(b.locator('#layout-w')).toHaveValue('200'); expect(storedLayout(env)).toEqual(saved);
-    await b.locator('#settings-tab-time').click(); await b.getByLabel('Timezone', { exact: true }).fill('Invalid/Zone'); await b.locator('#settings-tab-general').click(); await b.locator('#layout-cancel').click();
-    await pixel(a, 'w', 250); await save(a); await b.clock.fastForward(5000);
-    await expect(b.getByLabel('Timezone', { exact: true })).toHaveValue('Invalid/Zone'); await expect(b.locator('#layout-w')).toHaveValue('240');
+    await b.locator('#layout-cancel').click(); await b.locator('#open-settings').click(); await b.locator('#settings-tab-time').click(); await b.getByLabel('Timezone', { exact: true }).fill('Invalid/Zone');
+    await open(a); await pixel(a, 'w', 250); await save(a); await b.clock.fastForward(5000);
+    await expect(b.getByLabel('Timezone', { exact: true })).toHaveValue('Invalid/Zone');
+    await b.locator('#settings-tab-home-assistant').click(); await b.locator('#home-assistant-url').fill('https://unsaved.test'); await b.clock.fastForward(5000); await expect(b.locator('#home-assistant-url')).toHaveValue('https://unsaved.test');
     await b.locator('#close-settings').click(); await open(b); await expect(b.locator('#layout-w')).toHaveValue('250');
   } finally { await a.close(); await b.close(); await env.close(); }
 });
@@ -218,13 +427,13 @@ test('real resize gestures and keyboard fields edit only intended dimensions', a
     await drag(page, 'resize', 'time', 10, -8); await save(page);
     const item = storedLayout(env).desktop.items.at(-1); expect(item.w).toBeGreaterThan(time.w); expect(item.h).toBeGreaterThan(time.h);
     expect(item.x).toBe(time.x); expect(item.y).toBe(time.y);
-    await page.locator('#layout-w').focus(); await page.keyboard.press('ArrowUp'); await page.keyboard.press('Tab'); await save(page);
+    await open(page); await page.locator('#layout-w').focus(); await page.keyboard.press('ArrowUp'); await page.keyboard.press('Tab'); await save(page);
     const resized = storedLayout(env).desktop.items.at(-1); expect(resized.h).toBe(item.h); expect(resized.w).toBeGreaterThan(item.w);
     expect(storedLayout(env).desktop.items.slice(0, -1)).toEqual(original.desktop.items.slice(0, -1));
   } finally { await page.goto('about:blank'); await env.close(); }
 });
 
-test('touch preview gestures capture only editing affordances and cancel on viewport changes', async ({ browser }) => {
+test('touch direct gestures capture only editing affordances and cancel on viewport changes', async ({ browser }) => {
   const widgetLayout = layout(); const time = widgetLayout.desktop.items.splice(widgetLayout.desktop.items.findIndex(item => item.id === 'time'), 1)[0]; time.y = 300000; widgetLayout.desktop.items.push(time);
   const env = await environment({ widgetLayout }); const context = await browser.newContext({ hasTouch: true, viewport: { width: 1100, height: 800 } }); const page = await context.newPage();
   try {
@@ -235,13 +444,13 @@ test('touch preview gestures capture only editing affordances and cancel on view
     await session.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: point.x + 15, y: point.y + 10 }] });
     await session.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); await save(page);
     const saved = structuredClone(storedLayout(env)); expect(saved.desktop.items.at(-1).x).not.toBe(time.x); expect(saved.desktop.items.at(-1).w).toBe(time.w);
-    const next = await handle.boundingBox(); const point2 = { x: next.x + next.width / 2, y: next.y + next.height / 2 };
+    await open(page); const next = await handle.boundingBox(); const point2 = { x: next.x + next.width / 2, y: next.y + next.height / 2 };
     await session.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [point2] });
     await session.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: point2.x + 10, y: point2.y + 10 }] });
-    await page.locator('#layout-preview').dispatchEvent('pointercancel', { pointerId: 9999 }); await expect(page.locator('#layout-w')).toBeDisabled();
-    const referenceWidth = await page.locator('#layout-preview').getAttribute('data-width');
-    // Narrowing the Settings panel changes preview scale, not reference pixels.
-    await page.setViewportSize({ width: 650, height: 800 }); await expect(page.locator('#layout-preview')).toHaveAttribute('data-width', referenceWidth); await expect(page.locator('#layout-w')).toBeEnabled(); await session.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); await save(page);
+    await page.locator('#layout-frames').dispatchEvent('pointercancel', { pointerId: 9999 }); await expect(page.locator('#layout-w')).toBeDisabled();
+    const referenceWidth = await page.locator('#widget-surface').evaluate(node => node.style.width);
+    // Destination-only refitting cancels capture without changing the locked reference.
+    await page.setViewportSize({ width: 650, height: 800 }); await expect(page.locator('#widget-surface')).toHaveCSS('width', referenceWidth); await expect(page.locator('#layout-w')).toBeEnabled(); await session.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); await save(page);
     expect(storedLayout(env)).toEqual(saved);
   } finally { await context.close(); await env.close(); }
 });
@@ -258,7 +467,7 @@ test('100px cards retain scroll access and fullscreen fitting without changing s
       expect(await page.locator(`#${id}`).evaluate(node => node.scrollTop)).toBeGreaterThan(0);
     }
     await open(page); await page.locator('#layout-widget').selectOption('time');
-    await pixel(page, 'w', Number(await page.locator('#layout-preview').getAttribute('data-width'))); await pixel(page, 'h', Number(await page.locator('#layout-preview').getAttribute('data-height'))); await save(page); await page.locator('#close-settings').click();
+     await pixel(page, 'w', await page.locator('#widget-surface').evaluate(node => Number.parseFloat(node.style.width))); await pixel(page, 'h', await page.locator('#widget-surface').evaluate(node => Number.parseFloat(node.style.height))); await save(page);
     const area = await page.locator('#widget-surface').boundingBox(); const max = await page.locator('#clock').boundingBox(); expect(max).toEqual(area);
     const before = env.store.getDashboardPreferences(); await page.locator('#fullscreen').click();
     await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(true);
@@ -274,7 +483,7 @@ test('layout-only changes and caption callbacks retain clock/slideshow owners', 
     await page.route('**/api/dashboard/photos', route => { manifests++; return route.fulfill({ json: { available: true, photos: [{ name: 'first.png', lastModified: 1, url: '/api/dashboard/photos/abcdefghijklmnop' }, { name: 'second.png', lastModified: 2, url: '/api/dashboard/photos/qrstuvwxyzabcdef' }] } }); });
     await page.route('**/api/dashboard/photos/*', route => route.fulfill({ contentType: 'image/png', body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64') }));
     await ready(page, env); await expect(page.locator('#photo-caption')).toHaveText('first.png');
-    const timers = await page.evaluate(() => window.layoutClockCalls); await open(page); await pixel(page, 'w', 180); await save(page); await page.locator('#close-settings').click();
+    const timers = await page.evaluate(() => window.layoutClockCalls); await open(page); await pixel(page, 'w', 180); await save(page);
     expect(await page.evaluate(() => window.layoutClockCalls)).toEqual(timers);
     const revision = env.store.getDashboardPreferences().revision;
     for (const caption of ['second.png', 'first.png', 'second.png']) { await page.clock.fastForward(5000); await expect(page.locator('#photo-caption')).toHaveText(caption); expect(await page.evaluate(() => window.layoutClockCalls)).toEqual(timers); expect(manifests).toBe(1); expect(env.store.getDashboardPreferences().revision).toBe(revision); }
@@ -292,7 +501,7 @@ test('Firefox and Chromium share canonical layouts but fit their own viewport', 
 });
 
 test('custom/automatic transitions preserve a pending stubbed Wake, selected readings, and safe new-tab bookmarks', async ({ page }) => {
-  let sent = 0; let releaseWake; let url; let deviceReads = 0; let bookmarkReads = 0;
+  let sent = 0; let releaseWake; let url; let deviceReads = 0; let bookmarkReads = 0; let wakeRequests = 0;
   const services = {
     homeAssistant: { clearCache() {}, async listDevices() { deviceReads++; return [{ deviceId: 'fixture-sensor', name: 'Fixture sensor', area: 'Office', disabled: false, measurements: [{ entityId: 'sensor.temperature', name: 'Temperature', value: '21', unit: '°C', status: 'available', available: true }] }]; } },
     linkwarden: { clearCache() {}, listCollections: async () => [{ id: 1, name: 'Root', children: [] }], async getBookmarks() { bookmarkReads++; return { bookmarks: [{ id: 1, name: 'Fixture link', url: `${url}/api/health` }], stale: false }; } },
@@ -308,6 +517,7 @@ test('custom/automatic transitions preserve a pending stubbed Wake, selected rea
     const catalog = await (await fetch(`${env.base}/api/bookmarks?collection=${collections.collections[0].collectionToken}`)).json();
     const current = env.store.getDashboardPreferences();
     env.store.saveDashboardPreferences({ ...current.preferences, homeAssistantDeviceSelections: [devices.devices[0].selectionId], bookmarkLinkSelections: [{ selectionId: catalog.bookmarks[0].selectionId, collectionSelectionId: catalog.collectionSelectionId }] }, current.revision);
+    page.on('request', request => { if (request.method() === 'POST' && /\/api\/devices\/[^/]+\/wake$/.test(request.url())) wakeRequests++; });
     await page.setViewportSize({ width: 1200, height: 800 }); await ready(page, env);
     await expect(page.locator('#dashboard-ha-devices')).toContainText('Temperature: 21 °C');
     const link = page.getByRole('link', { name: 'Fixture link', exact: true }); await expect(link).toHaveAttribute('target', '_blank'); await expect(link).toHaveAttribute('rel', /noopener/);
@@ -316,10 +526,25 @@ test('custom/automatic transitions preserve a pending stubbed Wake, selected rea
     await page.evaluate(() => { window.pendingLayoutWake = document.querySelector('#dashboard-wol-devices button'); window.layoutSensor = document.querySelector('#dashboard-ha-devices > li'); });
     const reads = { devices: deviceReads, bookmarks: bookmarkReads };
     await open(page); await page.locator('#layout-arrangement').selectOption('automatic'); await save(page);
-    await page.locator('#layout-arrangement').selectOption('custom'); await save(page); await page.locator('#close-settings').click();
+    await open(page); await page.locator('#layout-arrangement').selectOption('custom');
+    let popups = 0; page.on('popup', () => popups++);
+    await page.evaluate(() => { window.pendingLayoutWake.click(); document.querySelector('#bookmark-tree a').click(); });
+    await expect(page.locator('#dashboard-wol')).toHaveAttribute('inert', ''); expect(sent).toBe(1); expect(popups).toBe(0);
+    // Complete the original owner while the draft and inert roots remain active.
+    releaseWake(); await expect(button).toBeEnabled(); await expect(page.locator('#dashboard-wol-action-status')).toContainText('does not confirm');
+    await page.evaluate(() => {
+      const button = window.pendingLayoutWake;
+      button.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+      // A detached stale row bypasses document capture; the injected dispatcher must still refuse it.
+      const parent = button.parentNode; const next = button.nextSibling; button.remove(); button.click(); parent.insertBefore(button, next);
+    });
+    expect(await link.evaluate(node => !node.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })))).toBe(true);
+    const linkBox = await link.boundingBox(); await page.mouse.click(linkBox.x + 2, linkBox.y + 2); expect(popups).toBe(0); expect(wakeRequests).toBe(1);
+    expect(sent).toBe(1); await save(page);
     expect(await page.evaluate(() => window.pendingLayoutWake === document.querySelector('#dashboard-wol-devices button') && window.layoutSensor === document.querySelector('#dashboard-ha-devices > li'))).toBe(true);
-    await expect(button).toBeDisabled(); expect(sent).toBe(1); expect({ devices: deviceReads, bookmarks: bookmarkReads }).toEqual(reads);
-    releaseWake(); await expect(button).toBeEnabled(); await expect(page.locator('#dashboard-wol-action-status')).toContainText('does not confirm'); expect(sent).toBe(1);
+    await expect(button).toBeEnabled(); expect(sent).toBe(1); expect({ devices: deviceReads, bookmarks: bookmarkReads }).toEqual(reads);
+    const resumed = page.waitForEvent('popup'); await link.click(); const reopened = await resumed; await reopened.waitForURL(`${env.base}/api/health`); await reopened.close();
+    await button.click(); await expect.poll(() => wakeRequests).toBe(2); expect(sent).toBe(1); // The existing server cooldown still owns repeated dispatch.
   } finally { releaseWake?.(); await page.goto('about:blank'); await env.close(); }
 });
 
@@ -329,7 +554,7 @@ test('confirmed cached layouts remain usable offline without becoming writable s
     await ready(page, env); const saved = env.store.getDashboardPreferences();
     await page.route('**/api/dashboard/settings', route => route.abort()); await page.reload();
     await expect(page.locator('#widget-surface')).toBeVisible(); await expect(page.locator('#settings-status')).not.toHaveText('Loading shared preferences…');
-    await open(page); await expect(page.locator('#save-preferences')).toBeDisabled(); await expect(page.locator('#layout-arrangement')).toHaveValue('custom');
+    await open(page); await expect(page.locator('#layout-save')).toBeDisabled(); await expect(page.locator('#layout-arrangement')).toHaveValue('custom');
     expect(env.store.getDashboardPreferences()).toEqual(saved);
     expect(await page.evaluate(() => JSON.parse(localStorage.getItem('dashboard.shared-settings.v1')).preferences.widgetLayout)).toEqual(saved.preferences.widgetLayout);
   } finally { await page.goto('about:blank'); await env.close(); }
@@ -340,23 +565,23 @@ test('bottom-left coordinates move upward and resize upward while preserving the
   try {
     await page.setViewportSize({ width: 1200, height: 800 }); await ready(page, env); await open(page);
     await page.locator('#layout-widget').selectOption('time'); await page.getByRole('button', { name: 'Bring to front', exact: true }).click();
-    await pixel(page, 'x', 0); await pixel(page, 'y', 0); await pixel(page, 'w', 200); await pixel(page, 'h', 120); await save(page); await page.locator('#close-settings').click();
+    await pixel(page, 'x', 0); await pixel(page, 'y', 0); await pixel(page, 'w', 200); await pixel(page, 'h', 120); await save(page);
     let area = await page.locator('#widget-surface').boundingBox(); let clock = await page.locator('#clock').boundingBox();
     expect(clock.x).toBe(area.x); expect(clock.y + clock.height).toBe(area.y + area.height);
     const bottom = clock.y + clock.height;
     await open(page); await page.locator('#layout-h').fill('170');
     await page.evaluate(async () => { window.dispatchEvent(new Event('resize')); await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))); });
     await expect(page.locator('#layout-h')).toHaveValue('170'); await page.locator('#layout-h').press('Tab');
-    await save(page); await page.locator('#close-settings').click();
+    await save(page);
     clock = await page.locator('#clock').boundingBox(); expect(clock.height).toBe(170); expect(clock.y + clock.height).toBe(bottom);
-    await open(page); await pixel(page, 'y', 30); await save(page); await page.locator('#close-settings').click();
+    await open(page); await pixel(page, 'y', 30); await save(page);
     clock = await page.locator('#clock').boundingBox(); expect(clock.y + clock.height).toBe(bottom - 30);
     await open(page); const beforeMove = structuredClone(storedLayout(env).desktop.items.find(item => item.id === 'time'));
     await drag(page, 'move', 'time', 0, -10); await save(page);
     const moved = storedLayout(env).desktop.items.find(item => item.id === 'time'); expect(moved.y).toBeGreaterThan(beforeMove.y); expect(moved.h).toBe(beforeMove.h); expect(moved.w).toBe(beforeMove.w);
-    const beforeResize = structuredClone(moved); await drag(page, 'resize', 'time', 0, -8); await save(page);
+    const beforeResize = structuredClone(moved); await open(page); await drag(page, 'resize', 'time', 0, -8); await save(page);
     const resized = storedLayout(env).desktop.items.find(item => item.id === 'time'); expect(resized.h).toBeGreaterThan(beforeResize.h); expect(resized.y).toBe(beforeResize.y); expect(resized.w).toBe(beforeResize.w);
-    await pixel(page, 'y', 0); await save(page); await page.locator('#close-settings').click(); const canonical = storedLayout(env);
+    await open(page); await pixel(page, 'y', 0); await save(page); const canonical = storedLayout(env);
     for (const height of [600, 1000]) { await page.setViewportSize({ width: 1200, height }); await expect.poll(async () => { const a = await page.locator('#widget-surface').boundingBox(); const b = await page.locator('#clock').boundingBox(); return b.y + b.height - a.y - a.height; }).toBe(0); }
     expect(storedLayout(env)).toEqual(canonical);
   } finally { await page.goto('about:blank'); await env.close(); }
@@ -379,7 +604,7 @@ test('tiny live border boxes match projection independently on each axis', async
   } finally { await page.goto('about:blank'); await env.close(); }
 });
 
-test('reference preview geometry stays fixed while destination dimensions shrink', async ({ page }) => {
+test('direct frame reference geometry stays fixed while destination dimensions shrink', async ({ page }) => {
   const widgetLayout = edgeLayout(); const env = await environment({ widgetLayout });
   try {
     await page.setViewportSize({ width: 1200, height: 800 }); await controlledViewport(page); await ready(page, env); await open(page);
@@ -403,22 +628,22 @@ test('tiny and zero surfaces recover without draft changes or preference writes'
     for (const [width, height] of [[10, 200], [200, 10], [1, 1], [0, 200], [200, 0]]) {
       await usableSurface(page, width, height);
       if (!width || !height) {
-        await expect(page.locator('#widget-surface')).toBeHidden(); await expect(page.locator('#layout-preview')).toBeHidden();
+        await expect(page.locator('#widget-surface')).toBeHidden(); await expect(page.locator('#layout-frames')).toBeHidden();
         for (const key of ['x', 'y', 'w', 'h']) await expect(page.locator(`#layout-${key}`)).toBeDisabled();
       } else { await assertProjectedBoxes(page, widgetLayout, 'desktop'); await assertProjectedBoxes(page, widgetLayout, 'desktop', true); }
     }
     await usableSurface(page, 800, 500);
-    await expect(page.locator('#layout-w')).toBeEnabled(); await expect(page.locator('#layout-preview')).toBeVisible();
+    await expect(page.locator('#layout-w')).toBeEnabled(); await expect(page.locator('#layout-frames')).toBeVisible();
     expect(await assertProjectedBoxes(page, widgetLayout, 'desktop')).toEqual(before);
     expect(writes).toEqual([]); expect(env.store.getDashboardPreferences()).toEqual(original);
     // An explicit no-op save proves the recovered editor still contains exact canonical data.
-    await save(page); expect(writes).toHaveLength(1); expect(writes[0].preferences).toEqual(original.preferences);
+    await save(page); expect(writes).toHaveLength(0);
     expect(env.store.getDashboardPreferences()).toEqual(original);
-    await page.locator('#layout-arrangement').selectOption('automatic'); await save(page);
+    await open(page); await page.locator('#layout-arrangement').selectOption('automatic'); await save(page);
     for (const id of ['clock', 'weather', 'calendar', 'bookmarks', 'dashboard-ha', 'dashboard-wol']) {
       expect(await page.locator(`#${id}`).evaluate(node => [node.style.getPropertyValue('--widget-width'), node.style.getPropertyValue('--widget-height')])).toEqual(['', '']);
     }
-    await page.locator('#layout-arrangement').selectOption('custom'); await save(page);
+    await open(page); await page.locator('#layout-arrangement').selectOption('custom'); await save(page);
     await assertProjectedBoxes(page, storedLayout(env), 'desktop');
   } finally { await page.goto('about:blank'); await env.close(); }
 });
@@ -472,7 +697,7 @@ test('fullscreen reference uniformly fits different windows and confirms once wi
   } finally { await page.goto('about:blank'); await env.close(); }
 });
 
-test('Settings holds reference pixels across display changes and fullscreen confirmation until close', async ({ page }) => {
+test('direct editing holds reference pixels across display changes and fullscreen confirmation until cancel', async ({ page }) => {
   const env = await environment({ widgetLayout: edgeLayout() }); let writes = 0;
   try {
     await page.setViewportSize({ width: 1200, height: 800 }); await controlledViewport(page); await ready(page, env); await open(page);
@@ -480,14 +705,14 @@ test('Settings holds reference pixels across display changes and fullscreen conf
     const original = env.store.getDashboardPreferences(); const old = (await canvasState(page)).reference;
     await pixel(page, 'w', 180); const draftWidth = await page.locator('#layout-w').inputValue();
     await page.evaluate(() => { Object.defineProperty(screen, 'width', { configurable: true, value: 1900 }); window.dispatchEvent(new Event('resize')); }); await settleFrames(page);
-    expect((await canvasState(page)).reference).toEqual(old); await expect(page.locator('#layout-preview')).toHaveAttribute('data-width', String(old.width)); await expect(page.locator('#layout-w')).toHaveValue(draftWidth);
+    expect((await canvasState(page)).reference).toEqual(old); await expect(page.locator('#layout-w')).toHaveValue(draftWidth);
     await page.evaluate(() => document.documentElement.requestFullscreen()); await settleFrames(page);
     expect((await canvasState(page)).reference).toEqual(old); await expect(page.locator('#layout-w')).toHaveValue(draftWidth);
     const confirmedSize = await page.evaluate(() => ({ width: innerWidth - 32, height: innerHeight - 120 }));
     await page.evaluate(() => document.exitFullscreen()); await settleFrames(page);
-    await page.locator('#close-settings').click();
+    await page.locator('#layout-cancel').click();
     const confirmed = (await canvasState(page)).reference; expect(confirmed).toEqual(confirmedSize);
-    await open(page); await expect(page.locator('#layout-preview')).toHaveAttribute('data-width', String(confirmed.width));
+    await open(page); expect((await canvasState(page)).reference).toEqual(confirmed);
     expect(writes).toBe(0); expect(env.store.getDashboardPreferences()).toEqual(original);
   } finally { await page.goto('about:blank'); await env.close(); }
 });
