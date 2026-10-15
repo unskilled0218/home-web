@@ -1,0 +1,71 @@
+# plan
+
+## scope
+
+Resolve the release-blocking npm PTY Ctrl+C assertion from `1-goal.md`, distinguishing the npm wrapper's signal exit from the dashboard's cleanup result. Prefer a narrowly evidenced test-contract correction if application cleanup already succeeds; change production lifecycle code only if reproduction establishes a directly related defect. This planning stage changes no implementation, version, dependency, user configuration, process, or release artifact.
+
+## Current Evidence And Boundaries
+
+- `test/server-shutdown.test.js:104-112` starts normal Node, direct development, and npm development launches through `test/fixtures/terminal-shutdown.py`. It verifies port reuse, disappearance of recorded PIDs, and absence of native crash/core artifacts before requiring zero exit, except for an npm `EACCES` diagnostic. The reported `-2` contains no such diagnostic.
+- The Python driver sends one terminal Ctrl+C after detecting listening, then stops reading as soon as `waitpid()` observes the immediate command's exit. `os.waitstatus_to_exitcode()` returns `-2` for SIGINT. It does not report separate signal/normal-exit fields, drain remaining descendant output after wrapper exit, or independently establish application cleanup success.
+- The existing test preload prints each Node PID and installs a 12-second self-stop fallback. Process disappearance alone therefore cannot prove the initial Ctrl+C caused successful cleanup; the fallback could eventually remove a process. The timeout/fallback must not count as a successful shutdown.
+- `scripts/dev.js` handles SIGINT/SIGTERM through `supervisor.stop()` and exits with `supervisor.done.code`. `scripts/dev-supervisor.js` records the server's `dashboard:stopped` result and owns child shutdown/reload ordering. `src/server.js:19-31` sends the lifecycle result before exiting. Existing mechanisms provide test observation points without adding a production monitoring API.
+- Inspection environment: Linux, Node `v24.21.0`, npm `11.19.0`. Installed npm's `@npmcli/run-script/lib/signal-manager.js` forwards terminal signals to its script child; `run-script-pkg.js:94-107` can re-send a child's termination signal to npm itself. This establishes that signal termination is an intentional npm behavior, not that every observed `-2` is safe or that this precise path caused the supplied failure.
+- `scripts/release.sh:100-105` runs `npm test` and `npm run check` before pushing/publishing. Keep this gate intact and do not execute the release script during verification. Archived task 42 and task 46's review supply historical context, not authority to reopen unrelated lifecycle findings.
+
+## Implementation Plan
+
+### 1. Establish the actual process and cleanup outcomes
+
+- Start implementation on a new branch named `47-npm-terminal-shutdown-exit`; create `4-implemented.md` before implementation edits. Record Node/npm/Python versions and focused baseline commands/results.
+- Reproduce all three terminal modes using the existing owned temporary-source-tree fixtures, with loopback ports, isolated SQLite/key paths, NFS disabled, and no live integration configuration. Clear inherited scoped CA and other application settings that could make these fixtures read user files; preserve deliberate test-only `NODE_OPTIONS` instrumentation.
+- Extend the existing test-only preload instrumentation rather than production log output: record each observed Node process's PID, role/entry point, normal exit code, and whether its safety fallback fired. Capture the actual server `dashboard:stopped` payload through the preload's narrowly scoped observation of outgoing IPC, preserving the original send method's receiver, arguments, return value, and callback behavior. Write only allowlisted lifecycle fields to per-process files in the owned fixture directory; never record settings, tokens, or unrelated IPC payloads.
+- Observe terminal signal delivery through test-only listeners that do not install a handler where one did not otherwise exist or change signal semantics. Prefer external wait status and existing application handlers/results to intrusive signal interception. Record npm/shell process-group behavior with available read-only evidence; no runtime/npm patch or new system package is required.
+- Establish whether both server and supervisor exit normally with successful cleanup before the fallback, while npm alone ends by SIGINT. If either application layer fails or remains unconfirmed, retain the failure and diagnose that specific path before selecting a remedy. Do not predeclare all npm interruptions successful.
+
+### 2. Make the PTY driver retain trustworthy bounded evidence
+
+- Refactor `test/fixtures/terminal-shutdown.py` to distinguish immediate-child reaping from terminal-output completion. Preserve existing `code` compatibility or update its consumers together, and report explicit normal exit status versus terminating signal, whether Ctrl+C was sent, deadline expiry, and whether output drainage reached EOF/EIO.
+- After observing npm exit, continue reading the same owned PTY until terminal EOF/EIO or the existing bounded overall deadline rather than closing it immediately. This preserves late diagnostics and avoids prematurely hanging up still-cleaning descendants. Handle EOF without a busy loop; retain the immediate child's original wait status without attempting to reap it twice.
+- Return timeout/incomplete-drain state as failure evidence, not a capability skip or a synthesized exit zero. Keep driver and outer Node deadlines ordered, with enough time for the current 30-second application/35-second supervisor budgets. Do not introduce sleeps as proof of cleanup.
+- Ensure failure paths close/reap what they own and do not remove a fixture while an owned application process might still use it. Retain the cooperative safety fallback, mark its use as a failed scenario, and preserve owned diagnostic storage with an actionable message if cleanup cannot be confirmed. Never terminate broad process groups, unrelated PIDs, or user services.
+
+### 3. Correct only the evidenced exit contract
+
+- Keep direct normal/development Ctrl+C expectations strict: successful interruption requires exit zero, no termination signal, and independently successful owned cleanup.
+- If step 1 confirms expected npm wrapper signal propagation, allow only the observed npm SIGINT termination for a scenario where the driver actually sent Ctrl+C after readiness, output completed without a deadline, the server reported `{ code: 0, cleanupSafe: true, forced: false }` with no failure, and the development supervisor exited normally with code zero. Require all expected application process records, no fallback invocation, no leftover owned process, successful port rebinding, and no native assertion/segfault/new core artifact. Preserve raw npm wait status in diagnostics; never rewrite it as application exit zero.
+- Do not accept arbitrary negative statuses, signal names, numeric exit codes such as 130 merely by convention, or missing application evidence. Add another platform-specific representation only when actual supported-environment evidence establishes its exact equivalence and the same cleanup predicates protect it.
+- Keep npm `kill EACCES` reporting separate from normal supported wrapper interruption. Do not broaden the existing output-based exception into a general pass for errors. Require the same application-cleanup evidence if retaining the environment-limitation branch, and report it explicitly as an npm permission limitation, not silent npm success.
+- If reproduction instead identifies an application lifecycle defect, apply the smallest relevant correction in `scripts/dev.js`, `scripts/dev-supervisor.js`, or `src/server.js`, with a regression for that causal path. Preserve error status, resource ordering, total budgets, and no-replacement-on-stop behavior. Do not add process-wide signal swallowing, production test hooks, or a new launcher solely to force npm exit zero.
+
+### 4. Add positive and negative regression coverage
+
+- Keep all three real PTY integration scenarios and repeat the npm scenario at least five times during verification. Assert server cleanup and supervisor completion separately from npm wrapper status. Include terminal output and structured non-secret process evidence in assertion failures.
+- Exercise the outcome predicates with deterministic test records, using a test-local helper only if needed: valid npm SIGINT with clean application evidence passes; the same signal for direct mode fails; no Ctrl+C, unrelated signal, missing/nonzero supervisor exit, missing/unsafe/forced server result, deadline expiry, fallback invocation, and incomplete output capture all fail. Include a genuine application failure that remains a failed result even if the wrapper exits by SIGINT.
+- Test the driver itself with small cooperative temporary commands: ordinary exit, terminal interruption, wrapper exit before a descendant's late diagnostic/normal exit, and a bounded timeout. Give every child a short self-exit fallback and confirm exit before deleting its storage. Prove late output is captured instead of relying only on fabricated JavaScript records. Never intentionally create an unkillable process in a restricted environment.
+- Retain existing supervisor tests for unrecovered failures, unsafe cleanup, startup interruption, repeated stop requests, and reload ordering. Add a focused production regression only if production behavior changes; do not expand this task into the archived NFS, IPC-disconnect, or Home Assistant transport findings.
+
+### 5. Verify, document, and commit
+
+- Run the focused server shutdown/terminal-driver tests with explicit deadlines, followed by `test/dev-supervisor.test.js`, `test/shutdown.test.js`, and `test/http-shutdown.test.js`. Run `npm test -- --test-timeout=10000 --test-reporter=spec`, ordinary `npm test` as used by release, and `npm run check`; explicitly syntax-check each modified JavaScript file because the existing wildcard check does not guarantee every file is parsed. Check Python syntax without leaving generated artifacts in the repository, and run `git diff --check`.
+- Record repeated PTY outcomes, actual lifecycle results, final suite counts, raw npm exit representation, and any capability limits in `4-implemented.md`. Missing Python/PTY or denied OS-signal delivery must remain explicit limitations; do not install tools, silently skip the npm regression, or label an unrun terminal case verified. Use existing IPC and direct terminal checks independently of capability-denied signal probes.
+- Update `docs/testing.md` and `docs/local-setup.md` to explain the proven npm wrapper/application distinction, strict cleanup checks, and the separate `EACCES` limitation. Keep direct Node commands supported and README simple. Do not promise every shell/npm/runtime reports the same numeric status.
+- Bump the package patch version consistently in `package.json` and `package-lock.json` during implementation, finalize the implementation report, and commit only task-scoped changes. No dependency install or update is necessary unless an actual prerequisite is missing; report such a blocker instead of changing environment policy. No push, tag, release, image build, service restart, user data/configuration edit, or `todo.md` change is included.
+
+## Acceptance Criteria
+
+- The supplied release-test failure has a demonstrated explanation separating npm/shell signal status from server/supervisor cleanup, with versions and reproducible evidence recorded.
+- The npm terminal case passes repeatedly only when intentional interruption and successful application cleanup are independently confirmed. Other signals, genuine failures, missing evidence, deadlines, safety fallback use, and unsafe cleanup cannot be mistaken for success.
+- The PTY driver retains late descendant diagnostics after wrapper exit, reports wait status honestly, and remains bounded without leaking owned processes or deleting active storage.
+- Direct launch contracts, cooperative/idempotent shutdown, development reload, startup env/TLS behavior, resource drainage, and error propagation remain intact.
+- The focused tests, full Node suite, and syntax checks pass under supported capabilities. Environment limitations are explicit; release test gating remains unchanged and no release/push occurs.
+- Documentation describes the observed behavior without claiming a wrapper SIGINT is an application crash or claiming permissions/runtime constraints were fixed by test changes.
+
+## Risks And Decisions
+
+- npm may terminate by a signal after a shell exits even when the Node application stopped correctly. Require independent application evidence rather than assuming either wrapper zero or wrapper SIGINT proves cleanup.
+- Closing the PTY at npm exit can lose descendant output and influence descendant lifetime. Drain output and observe owned completion independently under a single bounded budget.
+- Fixture watchdogs protect the environment but can hide a failed Ctrl+C. Any watchdog/fallback use invalidates the successful-stop assertion.
+- Test instrumentation must observe, not change, IPC and signal behavior. Keep it confined to temporary fixtures and allowlisted non-secret lifecycle fields; no production telemetry surface is needed for this task.
+- Runtime/shell versions can change wrapper exit representation. Prefer narrow evidence-based support over accepting a list of conventional exit codes. A capability skip or documented npm permission error is not equivalent to a fully verified silent launch/stop.
+- Goal/plan work does not execute a release or implement the fix. This stage adds and commits only this `2-plan.md`.
