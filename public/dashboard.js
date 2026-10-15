@@ -14,6 +14,8 @@ import { createDashboardDevices } from './dashboard-devices.js';
 import { createDeviceSelection } from './dashboard-device-selection.js';
 import { createDashboardDeviceView } from './dashboard-device-view.js';
 import { dashboardDisplay, applyDashboardDisplay } from './dashboard-display.js';
+import { createDashboardLayoutView } from './dashboard-layout-view.js';
+import { createDashboardLayoutEditor } from './dashboard-layout-editor.js';
 
 const $ = (id) => document.getElementById(id);
 const currentWeatherSubValues = document.createElement('div');
@@ -26,9 +28,11 @@ let servicesStarted = false; let draftRevision = null; let draftDirty = false; l
 let clockTimer; let searchController; let searchGeneration = 0; let weatherState = {}; let calendarState = {}; let animations = [];
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 const mobileViewport = matchMedia(MOBILE_MEDIA_QUERY);
-let mobileLayout;
+let draftBaseline; let settingsSession = 0; let layoutEditor;
 const preferences = $('preferences');
 const dialog = $('settings-dialog');
+const layoutView = createDashboardLayoutView({ document, window, onMeasure: () => layoutEditor?.refreshSurface() });
+layoutEditor = createDashboardLayoutEditor({ document, window, surface: layoutView.surface, position: () => preferences.elements.namedItem('position').value, onChange: () => updateDraftDirty() });
 const settingsTabs = createSettingsTabs(dialog, { onSelect: (id) => { deviceIntegrations.setPickerOpen(dialog.open && id === 'settings-tab-home-assistant'); bookmarks.setPickerOpen(dialog.open && id === 'settings-tab-bookmarks'); } });
 const deviceView = createDashboardDeviceView({ document, wake: (id) => deviceIntegrations.wake(id) });
 const deviceSelection = createDeviceSelection({ document, root: $('home-assistant-device-picker'), status: $('home-assistant-selection-status'), onChange: () => { draftDirty = true; } });
@@ -53,6 +57,29 @@ function fillForm() {
   }
   deviceSelection.setDraft(settings.homeAssistantDeviceSelections);
   bookmarkSelection.setDraft(settings.bookmarkLinkSelections);
+  layoutEditor.setDraft(settings.widgetLayout);
+  draftBaseline = normalizeDashboardPreferences(settings);
+}
+
+function readPreferenceDraft() {
+  const next = {};
+  for (const control of preferences.elements) {
+    if (!PREFERENCE_KEYS.includes(control.name)) continue;
+    next[control.name] = control.type === 'checkbox' ? control.checked : control.type === 'number' ? control.valueAsNumber : control.value;
+  }
+  next.homeAssistantDeviceSelections = deviceSelection.getDraft();
+  next.bookmarkLinkSelections = bookmarkSelection.getDraft();
+  next.widgetLayout = layoutEditor.getDraft();
+  return normalizeDashboardPreferences(next);
+}
+function updateDraftDirty() {
+  for (const control of preferences.elements) {
+    if (!PREFERENCE_KEYS.includes(control.name)) continue;
+    const value = control.type === 'checkbox' ? control.checked : control.type === 'number' ? control.valueAsNumber : control.value;
+    if (!preferencesEqual(value, draftBaseline?.[control.name])) { draftDirty = true; return; }
+  }
+  try { draftDirty = !preferencesEqual(readPreferenceDraft(), draftBaseline); }
+  catch { draftDirty = true; }
 }
 
 function updateClock() {
@@ -136,6 +163,7 @@ function stopAnimations() { animations.forEach((animation) => animation.cancel()
 function applyVisibilityLayout() {
   const display = dashboardDisplay(settings, { mobile: mobileViewport.matches, fullscreen: Boolean(document.fullscreenElement), caption: Boolean($('photo-caption').textContent) });
   applyDashboardDisplay(document, display);
+  layoutView.update({ layout: settings.widgetLayout, mobile: mobileViewport.matches, scale: settings.scale, display });
   return display;
 }
 function clearPhotos() { stopAnimations(); $('photos').replaceChildren(); $('photo-caption').textContent = ''; applyVisibilityLayout(); }
@@ -171,11 +199,6 @@ function applyPresentation() {
   $('clock').style.setProperty('--time-scale', display.timeScale);
   $('weather').style.setProperty('--weather-scale', display.weatherScale);
   $('calendar').style.setProperty('--calendar-scale', display.calendarScale);
-  if (mobileLayout !== mobile) {
-    const order = mobile ? ['clock', 'weather', 'calendar'] : ['calendar', 'clock', 'weather'];
-    $('photo-caption').before(...order.map($));
-    mobileLayout = mobile;
-  }
   startClock();
   applyBookmarkPresentation();
 }
@@ -195,6 +218,7 @@ const settingsSync = createSettingsSync({ storage,
     if (first || changed(['position', 'scale', 'timeVisible', 'timeScale', 'weatherVisible', 'weatherScale', 'calendarVisible', 'calendarScale', 'mobileTimeVisible', 'mobileTimeScale', 'mobileWeatherVisible', 'mobileWeatherScale', 'mobileCalendarVisible', 'mobileCalendarScale'])) applyPresentation();
     else if (changed(['timezone', 'dateStyle', 'hour12', 'seconds'])) startClock();
     if (first || changed(['mobileBookmarksMode', 'hideBookmarksFullscreen', 'bookmarksVisible', 'mobileBookmarksVisible', 'homeAssistantVisible', 'mobileHomeAssistantVisible', 'wolVisible', 'mobileWolVisible'])) applyBookmarkPresentation();
+    if (changed(['widgetLayout'])) applyVisibilityLayout();
     if (first || changed(['homeAssistantDeviceSelections'])) deviceIntegrations.configure(settings.homeAssistantDeviceSelections);
     if (first || changed(['bookmarkLinkSelections'])) bookmarks.configure(settings.bookmarkLinkSelections);
     document.body.style.backgroundColor = settings.color;
@@ -220,6 +244,7 @@ const settingsSync = createSettingsSync({ storage,
     for (const control of preferences.elements) if (PREFERENCE_KEYS.includes(control.name)) control.disabled = saving;
     deviceSelection.setSaving(saving);
     bookmarkSelection.setSaving(saving);
+    layoutEditor.setSaving(saving);
     $('save-preferences').disabled = saving || !state.confirmed || (dialog.open && draftRevision === null);
     $('reload-shared-preferences').disabled = saving || !state.confirmed;
     $('settings-status').textContent = saving ? 'Saving shared preferences…' : state.error ? state.error : preferenceMessage || (state.confirmed ? 'Preferences are shared across all browsers.' : state.cache ? 'Using cached shared preferences while loading the server.' : 'Loading shared preferences…');
@@ -231,19 +256,16 @@ preferences.addEventListener('submit', async (event) => {
   event.preventDefault();
   const invalid = [...preferences.elements].find((control) => control.willValidate && !control.validity.valid);
   if (invalid) { settingsTabs.reveal(invalid); invalid.reportValidity(); return; }
-  const next = {};
-  for (const control of preferences.elements) {
-    if (!PREFERENCE_KEYS.includes(control.name)) continue;
-    next[control.name] = control.type === 'checkbox' ? control.checked : control.type === 'number' ? control.valueAsNumber : control.value;
-  }
-  next.homeAssistantDeviceSelections = deviceSelection.getDraft();
-  next.bookmarkLinkSelections = bookmarkSelection.getDraft();
-  draftDirty = true;
+  const layoutInvalid = $('widget-layout-editor').querySelector('input:invalid:not(:disabled)');
+  if (layoutInvalid) { settingsTabs.reveal(layoutInvalid); layoutInvalid.reportValidity(); return; }
+  const session = settingsSession;
   try {
-    const saved = await settingsSync.save(normalizeDashboardPreferences(next), draftRevision);
+    const next = readPreferenceDraft(); draftDirty = true;
+    const saved = await settingsSync.save(next, draftRevision);
+    if (session !== settingsSession) return;
     draftRevision = saved.revision; draftDirty = false; fillForm(); preferenceMessage = 'Preferences saved for all browsers.';
     $('settings-status').textContent = preferenceMessage;
-  } catch (error) { $('settings-status').textContent = error.message || 'Shared preferences could not be saved.'; }
+  } catch (error) { if (session === settingsSession) $('settings-status').textContent = error.message || 'Shared preferences could not be saved.'; }
 });
 $('reload-shared-preferences').addEventListener('click', () => {
   fillForm(); draftRevision = settingsSync.getState().snapshot.revision; draftDirty = false; preferenceMessage = 'Shared preferences reloaded. Reapply your changes before saving.'; $('settings-status').textContent = preferenceMessage;
@@ -265,6 +287,7 @@ function setCalendarMutationPending(pending) {
   $('disconnect-calendar').disabled = pending || (!calendar.getState().configured && !calendar.getState().needsReauthentication);
 }
 $('open-settings').addEventListener('click', () => {
+  settingsSession++;
   draftDirty = false; draftRevision = settingsSync.getState().confirmed ? settingsSync.getState().snapshot.revision : null;
   fillForm(); fillCalendarForm(); fillLinkwardenForm(); $('calendar-settings-status').textContent = '';
   settingsTabs.select('settings-tab-general');
@@ -274,7 +297,8 @@ $('open-settings').addEventListener('click', () => {
   $('settings-tab-general').focus();
 });
 $('close-settings').addEventListener('click', () => dialog.close());
-dialog.addEventListener('close', () => { integrationSettings.close(); deviceIntegrations.setPickerOpen(false); bookmarks.setPickerOpen(false); $('open-settings').focus(); });
+dialog.addEventListener('cancel', event => { if (layoutEditor.cancelGesture()) event.preventDefault(); });
+dialog.addEventListener('close', () => { settingsSession++; layoutEditor.cancelGesture(); draftDirty = false; integrationSettings.close(); deviceIntegrations.setPickerOpen(false); bookmarks.setPickerOpen(false); $('open-settings').focus(); });
 function cancelSearch() { searchGeneration++; searchController?.abort(); }
 $('location-search').addEventListener('submit', async (event) => {
   event.preventDefault(); cancelSearch(); const request = searchGeneration;
@@ -355,7 +379,7 @@ document.addEventListener('fullscreenchange', fullscreenState);
 document.addEventListener('visibilitychange', () => { startClock(); photos.setVisible(!document.hidden); weather.setVisible(!document.hidden); calendar.setVisible(!document.hidden); bookmarks.setVisible(!document.hidden); settingsSync.setVisible(!document.hidden); deviceIntegrations.setVisible(!document.hidden); if (document.hidden) stopAnimations(); });
 reducedMotion.addEventListener('change', () => { stopAnimations(); photos.configure(settings); });
 mobileViewport.addEventListener('change', applyPresentation);
-window.addEventListener('pagehide', (event) => { clearInterval(clockTimer); cancelSearch(); weather.dispose(); photos.dispose(); if (event.persisted) { bookmarks.setVisible(false); settingsSync.setVisible(false); deviceIntegrations.setVisible(false); integrationSettings.suspend(); } else { calendar.dispose(); bookmarks.dispose(); settingsSync.dispose(); integrationSettings.dispose(); deviceIntegrations.dispose(); } });
+window.addEventListener('pagehide', (event) => { clearInterval(clockTimer); cancelSearch(); layoutEditor.cancelGesture(); weather.dispose(); photos.dispose(); if (event.persisted) { bookmarks.setVisible(false); settingsSync.setVisible(false); deviceIntegrations.setVisible(false); integrationSettings.suspend(); } else { layoutEditor.dispose(); layoutView.dispose(); calendar.dispose(); bookmarks.dispose(); settingsSync.dispose(); integrationSettings.dispose(); deviceIntegrations.dispose(); } });
 window.addEventListener('pageshow', (event) => { if (event.persisted) { void photos.load(); applyPresentation(); weather.configure(settings); void weather.refresh(); void calendar.refresh(); bookmarks.setVisible(!document.hidden); settingsSync.setVisible(!document.hidden); deviceIntegrations.setVisible(!document.hidden); } });
 photos.setVisible(!document.hidden); weather.setVisible(!document.hidden); calendar.setVisible(!document.hidden);
 bookmarks.setVisible(!document.hidden);

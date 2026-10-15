@@ -10,6 +10,7 @@ import { createStore } from '../src/db.js';
 import { createDashboardServer } from '../src/app.js';
 import { decodeStoredDashboardPreferences, normalizeDashboardPreferences, validateDashboardPreferences, legacyDashboardPreferences, PREFERENCE_KEYS } from '../public/dashboard-helpers.js';
 import { encryptApiKey } from '../src/linkwarden-crypto.js';
+import { initialWidgetProfile, changeWidgetLayer } from '../public/dashboard-layout.js';
 
 async function setup(t) {
   const directory = mkdtempSync(path.join(tmpdir(), 'dashboard-settings-')); const filename = path.join(directory, 'app.db'); const store = createStore(filename);
@@ -141,8 +142,31 @@ test('bookmark choices distinguish setup from empty, enforce exact records, and 
   for (const invalid of [{}, false, [record, record], [{ ...record, url: 'https://private.test' }], [{ ...record, selectionId: 'raw' }], [{ ...record, collectionSelectionId: 'x' }], Array.from({ length: 257 }, () => record)]) assert.throws(() => validateDashboardPreferences({ ...defaults, bookmarkLinkSelections: invalid }));
   const bookmarkLinkSelections = Array.from({ length: 256 }, (_, index) => ({ selectionId: 'b_' + String(index).padStart(43, 'a'), collectionSelectionId: 'c'.repeat(43) }));
   const homeAssistantDeviceSelections = Array.from({ length: 256 }, (_, index) => 'd_' + String(index).padStart(43, 'a'));
-  const maximum = validateDashboardPreferences({ ...defaults, bookmarkLinkSelections, homeAssistantDeviceSelections });
+  const maximum = validateDashboardPreferences({ ...defaults, bookmarkLinkSelections, homeAssistantDeviceSelections, widgetLayout: { version: 1, desktop: initialWidgetProfile('desktop'), mobile: initialWidgetProfile('mobile') } });
   assert.ok(Buffer.byteLength(JSON.stringify({ preferences: maximum, revision: 1, integrations: { linkwarden: { baseUrl: 'x'.repeat(2048), username: 'x'.repeat(120) }, calendar: { serverUrl: 'x'.repeat(2048), username: 'x'.repeat(120) }, weather: {} } })) < 65536, 'maximum choices and bounded integration metadata fit the response budget');
+});
+
+test('widget layouts upgrade without read writes and persist atomically with conflicts and stable revisions', async t => {
+  const env = await setup(t); const old = normalizeDashboardPreferences({ scale: 1.2, mobileTimeVisible: false }); delete old.widgetLayout;
+  const db = new DatabaseSync(env.filename); t.after(() => db.close());
+  db.prepare('INSERT INTO dashboard_preferences (id, configuration, revision) VALUES (1, ?, 7)').run(JSON.stringify(old));
+  const read = await (await env.api()).json();
+  assert.equal(read.revision, 7); assert.deepEqual(read.preferences.widgetLayout, { version: 1, desktop: null, mobile: null });
+  assert.equal(db.prepare('SELECT configuration FROM dashboard_preferences').get().configuration, JSON.stringify(old));
+  const incomplete = await env.api('/api/dashboard/settings', 'PUT', { revision: 7, preferences: old });
+  assert.equal(incomplete.status, 400); assert.match((await incomplete.json()).error, /Reload this page/);
+  const widgetLayout = { version: 1, desktop: changeWidgetLayer(initialWidgetProfile('desktop'), 'time', 'front'), mobile: initialWidgetProfile('mobile') };
+  const preferences = { ...read.preferences, widgetLayout };
+  const saved = await (await env.api('/api/dashboard/settings', 'PUT', { revision: 7, preferences })).json();
+  assert.equal(saved.revision, 8); assert.deepEqual(saved.preferences, preferences);
+  const same = await (await env.api('/api/dashboard/settings', 'PUT', { revision: 8, preferences })).json(); assert.equal(same.revision, 8);
+  assert.equal((await env.api('/api/dashboard/settings', 'PUT', { revision: 7, preferences: read.preferences })).status, 409);
+  const unrelated = await (await env.api('/api/dashboard/settings', 'PUT', { revision: 8, preferences: { ...preferences, color: '#123456' } })).json();
+  assert.deepEqual(unrelated.preferences.widgetLayout, widgetLayout);
+  const reopened = createStore(env.filename); assert.deepEqual(reopened.getDashboardPreferences().preferences, unrelated.preferences); reopened.close();
+  assert.equal((await env.api('/api/dashboard/settings', 'PUT', { revision: 9, preferences: { ...preferences, widgetLayout: { ...widgetLayout, desktop: { items: [] } } } })).status, 400);
+  db.prepare('UPDATE dashboard_preferences SET configuration = ?').run(JSON.stringify({ ...preferences, widgetLayout: null }));
+  assert.equal((await env.api()).status, 503, 'invalid present layout is not reset to automatic');
 });
 
 test('old bookmark preference records decode without writes; explicit saves persist choices and keep conflict ownership', async (t) => {

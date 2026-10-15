@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createSettingsSync, SHARED_SETTINGS_KEY } from '../public/dashboard-settings-sync.js';
 import { normalizeDashboardPreferences } from '../public/dashboard-helpers.js';
+import { initialWidgetProfile } from '../public/dashboard-layout.js';
 
 const snapshot = (overrides = {}) => ({ initialized: true, revision: 1, preferences: normalizeDashboardPreferences(), integrations: { weather: { available: true, revision: 0, location: null }, calendar: { available: true, configured: false, configurationId: null }, linkwarden: { available: true, configured: false, configurationId: null } }, ...overrides });
 const settle = async () => { for (let i = 0; i < 8; i++) await new Promise(setImmediate); };
@@ -93,4 +94,19 @@ test('snapshot guards also protect initialization and conflict metadata', async 
 test('request deadlines release ownership and malformed snapshots retain the last confirmed configuration', async (t) => {
   const timeout = setup(t, { handler: () => new Promise(() => {}) }); const read = timeout.client.start(); timeout.run(10000); await read; assert.equal(timeout.tasks.size, 1); assert.match(timeout.client.getState().error, /timed out/);
   let bad = false; const env = setup(t, { handler: () => Response.json(bad ? { preferences: {} } : snapshot()) }); await env.client.start(); bad = true; await env.client.refresh(); assert.equal(env.client.getState().snapshot.revision, 1); assert.ok(env.client.getState().error);
+});
+
+test('old caches gain automatic layout without initialization and nested layouts survive confirmation', async t => {
+  const old = normalizeDashboardPreferences({ scale: 1.2 }); delete old.widgetLayout;
+  const cached = JSON.stringify({ schema: 1, initialized: true, revision: 7, preferences: old });
+  const values = new Map([[SHARED_SETTINGS_KEY, cached]]);
+  const preferences = normalizeDashboardPreferences({ widgetLayout: { version: 1, desktop: initialWidgetProfile('desktop'), mobile: null } });
+  const env = setup(t, { values, handler: (_url, options) => Response.json(snapshot({ revision: options.method === 'PUT' ? 9 : 8, preferences })) });
+  assert.deepEqual(env.client.getState().snapshot.preferences.widgetLayout, { version: 1, desktop: null, mobile: null });
+  assert.equal(values.get(SHARED_SETTINGS_KEY), cached, 'decoding does not rewrite cache');
+  await env.client.start(); assert.deepEqual(env.client.getState().snapshot.preferences.widgetLayout, preferences.widgetLayout);
+  await env.client.save(preferences, 8);
+  assert.deepEqual(JSON.parse(env.calls.at(-1).options.body).preferences.widgetLayout, preferences.widgetLayout);
+  assert.equal(env.calls.some(call => call.url.endsWith('/initialize')), false);
+  assert.equal(env.tasks.size, 1, 'layout saves keep the existing single poll owner');
 });

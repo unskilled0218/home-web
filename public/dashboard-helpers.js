@@ -1,4 +1,5 @@
 import { normalizeBookmarkSelections } from './bookmark-selection-data.js';
+import { defaultWidgetLayout, normalizeWidgetLayout } from './dashboard-layout.js';
 
 export const SETTINGS_KEY = 'dashboard.preferences.v1';
 export const MOBILE_MEDIA_QUERY = '(max-width: 600px)';
@@ -34,6 +35,7 @@ export function normalizeSettings(input = {}, fallbackZone = Intl.DateTimeFormat
   const interval = number(value.interval, 5, 3600, 60);
   return {
     position: choice(value.position, ['left', 'right'], 'left'), scale: number(value.scale, 0.5, 2, 1),
+    widgetLayout: Object.hasOwn(value, 'widgetLayout') ? normalizeWidgetLayout(value.widgetLayout) : defaultWidgetLayout(),
     timezone, dateStyle: choice(value.dateStyle, ['short', 'medium', 'long', 'full'], 'medium'), hour12: boolean(value.hour12, false), seconds: boolean(value.seconds, true),
     timeVisible: boolean(value.timeVisible, true), timeScale: number(value.timeScale, 0.5, 2, 1), weatherVisible: boolean(value.weatherVisible, true), weatherScale: number(value.weatherScale, 0.5, 2, 1), calendarVisible: boolean(value.calendarVisible, true), calendarScale: number(value.calendarScale, 0.5, 2, 1),
     mobileTimeVisible: boolean(value.mobileTimeVisible, true), mobileTimeScale: mobileScale(value.mobileTimeScale), mobileWeatherVisible: boolean(value.mobileWeatherVisible, true), mobileWeatherScale: mobileScale(value.mobileWeatherScale), mobileCalendarVisible: boolean(value.mobileCalendarVisible, true), mobileCalendarScale: mobileScale(value.mobileCalendarScale),
@@ -60,13 +62,14 @@ export function normalizeDashboardPreferences(input = {}) {
   return result;
 }
 export function validateDashboardPreferences(value) {
+  if (value && typeof value === 'object' && !Object.hasOwn(value, 'widgetLayout')) throw new Error('Dashboard preferences have changed. Reload this page before saving.');
   if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length !== PREFERENCE_KEYS.length || Object.keys(value).some((key) => !PREFERENCE_KEYS.includes(key))) throw new Error('Invalid dashboard preference fields.');
   const canonical = normalizeDashboardPreferences(value);
-  for (const key of PREFERENCE_KEYS) if (!['homeAssistantDeviceSelections', 'bookmarkLinkSelections'].includes(key) && value[key] !== canonical[key]) throw new Error(`Invalid dashboard preference: ${key}.`);
+  for (const key of PREFERENCE_KEYS) if (!['homeAssistantDeviceSelections', 'bookmarkLinkSelections', 'widgetLayout'].includes(key) && value[key] !== canonical[key]) throw new Error(`Invalid dashboard preference: ${key}.`);
   return canonical;
 }
 export function decodeStoredDashboardPreferences(value) {
-  if (value && typeof value === 'object' && !Array.isArray(value)) return validateDashboardPreferences({ homeAssistantDeviceSelections: [], bookmarkLinkSelections: null, bookmarksVisible: true, homeAssistantVisible: true, wolVisible: true, mobileBookmarksVisible: true, mobileHomeAssistantVisible: true, mobileWolVisible: true, ...value });
+  if (value && typeof value === 'object' && !Array.isArray(value)) return validateDashboardPreferences({ widgetLayout: defaultWidgetLayout(), homeAssistantDeviceSelections: [], bookmarkLinkSelections: null, bookmarksVisible: true, homeAssistantVisible: true, wolVisible: true, mobileBookmarksVisible: true, mobileHomeAssistantVisible: true, mobileWolVisible: true, ...value });
   return validateDashboardPreferences(value);
 }
 export function legacyDashboardPreferences(value) {

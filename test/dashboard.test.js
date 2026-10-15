@@ -130,7 +130,8 @@ test('Settings associates all preferences with one form and keeps service forms 
   assert.match(html, /<form id="preferences" novalidate hidden><\/form>/);
   const controls = [...html.matchAll(/<(?:input|select)\b[^>]*form="preferences"[^>]*>/g)];
   const names = controls.map((control) => /name="([^"]+)"/.exec(control[0])?.[1]);
-  assert.deepEqual(names.sort(), Object.keys(normalizeSettings()).filter((name) => !['location', 'homeAssistantDeviceSelections', 'bookmarkLinkSelections'].includes(name)).sort());
+  assert.deepEqual(names.sort(), Object.keys(normalizeSettings()).filter((name) => !['location', 'homeAssistantDeviceSelections', 'bookmarkLinkSelections', 'widgetLayout'].includes(name)).sort());
+  assert.match(html, /id="widget-layout-editor"/);
   assert.match(html, /id="bookmark-link-picker"/);
   assert.match(html, /id="home-assistant-device-picker"/);
   assert.match(html, /<button[^>]*type="submit"[^>]*form="preferences"[^>]*>Save preferences<\/button>/);

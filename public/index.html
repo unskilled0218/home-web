@@ -30,6 +30,7 @@
       <section id="dashboard-ha" aria-labelledby="dashboard-ha-title"><h2 id="dashboard-ha-title">Home Assistant</h2><p id="dashboard-ha-status" role="status"></p><time id="dashboard-ha-updated" hidden></time><ul id="dashboard-ha-devices" aria-label="Selected Home Assistant devices"></ul></section>
       <section id="dashboard-wol" aria-labelledby="dashboard-wol-title"><h2 id="dashboard-wol-title">Wake-on-LAN</h2><p id="dashboard-wol-status" role="status" tabindex="-1"></p><p id="dashboard-wol-action-status" role="status" aria-live="polite"></p><ul id="dashboard-wol-devices" aria-label="Wake-on-LAN dashboard devices"></ul></section>
     </div><aside id="bookmarks" aria-labelledby="bookmarks-title"><h2 id="bookmarks-title">Bookmarks</h2><p id="bookmarks-status" role="status">Checking Linkwarden connection…</p><p><a id="open-linkwarden" hidden>Open Linkwarden</a></p><ul id="bookmark-tree" aria-label="Selected bookmark links"></ul></aside></div>
+    <main id="widget-surface" aria-label="Custom dashboard layout" hidden><h1 class="sr-only">Photo dashboard</h1></main>
     <dialog id="settings-dialog" aria-labelledby="settings-title">
       <header class="settings-header"><div><p class="settings-eyebrow">Make it yours</p><h2 id="settings-title">Dashboard settings</h2></div><button id="close-settings" type="button">Close</button></header>
       <form id="preferences" novalidate hidden></form>
@@ -69,6 +70,21 @@
             <fieldset><legend>Information layout</legend>
               <label>Position<select name="position" form="preferences"><option value="left">Lower left</option><option value="right">Lower right</option></select></label>
               <label>Overall scale<input name="scale" form="preferences" type="number" min="0.5" max="2" step="0.1"></label>
+            </fieldset>
+            <fieldset id="widget-layout-editor"><legend>Widget layout</legend>
+              <p class="settings-description">Choose Custom to overlap and resize widgets. Layers control which widget is in front. Pixel sizes range from 100 × 100 to the usable current window (smaller windows temporarily reduce the minimum). Changes apply only after Save preferences. Position controls the Automatic arrangement; scales still affect content.</p>
+              <label>Layout profile<select id="layout-profile"><option value="desktop">Desktop</option><option value="mobile">Mobile</option></select></label>
+              <label>Layout arrangement<select id="layout-arrangement"><option value="automatic">Automatic</option><option value="custom">Custom</option></select></label>
+              <label>Select widget<select id="layout-widget"></select></label>
+              <div id="layout-preview" aria-label="Widget layout preview"></div>
+              <div id="layout-geometry">
+                <label>Widget X (pixels)<input id="layout-x" type="number" min="0" step="1"></label>
+                <label>Widget Y (pixels)<input id="layout-y" type="number" min="0" step="1"></label>
+                <label>Widget width (pixels)<input id="layout-w" type="number" min="100" step="1"></label>
+                <label>Widget height (pixels)<input id="layout-h" type="number" min="100" step="1"></label>
+              </div>
+              <div class="layout-actions"><button type="button" data-layer="forward">Bring forward</button><button type="button" data-layer="backward">Send backward</button><button type="button" data-layer="front">Bring to front</button><button type="button" data-layer="back">Send to back</button><button id="layout-reset" type="button">Reset selected layout</button><button id="layout-cancel" type="button">Cancel layout edits</button></div>
+              <p id="layout-status" role="status" aria-live="polite"></p>
             </fieldset>
           </section>
           <section id="settings-panel-time" role="tabpanel" aria-labelledby="settings-tab-time" tabindex="0" hidden>
