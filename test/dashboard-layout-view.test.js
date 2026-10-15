@@ -5,10 +5,10 @@ import { defaultWidgetLayout, initialWidgetProfile, WIDGET_ELEMENTS } from '../p
 
 function fixture() {
   const nodes = new Map(); const listeners = new Map(); const frames = new Map(); const observers = []; let sequence = 0;
-  const document = { getElementById: id => nodes.get(id), querySelector: () => nodes.get('tools'), createComment: () => new Node(), documentElement: {} };
+  const document = { getElementById: id => nodes.get(id), querySelector: () => nodes.get('tools'), createComment: () => new Node(), documentElement: {}, addEventListener: (name, fn) => listeners.set(`document:${name}`, fn), removeEventListener: name => listeners.delete(`document:${name}`) };
   class Node {
     constructor(id) {
-      this.id = id; this.children = []; this.textContent = ''; this.hidden = false; this.rect = { bottom: 0 };
+      this.id = id; this.children = []; this.textContent = ''; this.hidden = false; this.rect = { bottom: 0 }; this.dataset = {};
       const properties = new Map(); this.classList = { toggle: (key, value) => properties.set(key, value), contains: key => Boolean(properties.get(key)) };
       this.style = { setProperty(key, value) { this[key] = value; }, removeProperty(key) { delete this[key.startsWith('--') ? key : key.replace(/-([a-z])/g, (_, value) => value.toUpperCase())]; } };
       if (id) nodes.set(id, this);
@@ -34,7 +34,7 @@ function fixture() {
   information.append(new Node('calendar'), new Node('clock'), new Node('weather'), new Node('photo-caption'));
   devices.append(new Node('dashboard-ha'), new Node('dashboard-wol'));
   const window = {
-    innerWidth: 1200, innerHeight: 800,
+    innerWidth: 1200, innerHeight: 800, screen: { width: 1600, height: 1000 },
     getComputedStyle: () => ({ getPropertyValue: () => '0px' }),
     requestAnimationFrame(fn) { frames.set(++sequence, fn); return sequence; }, cancelAnimationFrame: id => frames.delete(id),
     addEventListener: (name, fn) => listeners.set(name, fn), removeEventListener: name => listeners.delete(name),
@@ -76,12 +76,66 @@ test('resize observation coalesces one DOM-only frame and disposal removes all o
   const f = fixture(); let measurements = 0;
   const view = createDashboardLayoutView({ ...f, onMeasure() { measurements++; } });
   const state = { layout: { ...defaultWidgetLayout(), desktop: initialWidgetProfile('desktop') }, mobile: false, scale: 1, display: { content: false } };
-  view.update(state); assert.equal(f.nodes.get('widget-surface').hidden, true); assert.ok(view.surface().width > 0);
+  view.update(state); assert.equal(f.nodes.get('widget-surface').hidden, true); assert.ok(view.destination().width > 0);
   for (let i = 0; i < 10; i++) f.observers[0].fn(); assert.equal(f.frames.size, 1);
   const fn = [...f.frames.values()][0]; f.frames.clear(); fn(); assert.equal(measurements, 2);
   f.listeners.get('resize')(); assert.equal(f.frames.size, 1);
   view.dispose(); assert.equal(f.frames.size, 0); assert.equal(f.listeners.size, 0); assert.equal(f.observers[0].nodes.length, 0);
   fn(); assert.equal(measurements, 2, 'late frame cannot update a disposed view');
+});
+
+test('destination fitting never rebases reference geometry and Automatic clears the transform', () => {
+  const f = fixture(); const view = createDashboardLayoutView(f);
+  const state = { layout: { ...defaultWidgetLayout(), desktop: initialWidgetProfile('desktop') }, mobile: false, scale: 1, display: { content: true } };
+  view.update(state); const reference = view.reference('desktop'); const width = f.nodes.get('clock').style.width;
+  assert.equal(reference.width, 1568); assert.equal(reference.height, 880);
+  f.window.innerWidth = 800; f.window.innerHeight = 400; view.update(state);
+  assert.equal(view.reference('desktop'), reference); assert.equal(f.nodes.get('clock').style.width, width);
+  const stage = f.nodes.get('widget-surface');
+  assert.equal(stage.style.width, '1568px'); assert.equal(stage.style.transform, `scale(${306 / 880})`);
+  assert.equal(stage.style.top, '-496px'); assert.equal(stage.style.transformOrigin, 'left bottom');
+  view.update({ ...state, layout: defaultWidgetLayout() });
+  assert.equal(stage.style.transform, undefined); assert.equal(stage.style.transformOrigin, undefined); view.dispose();
+});
+
+test('fullscreen confirmation is bounded, ignores exit callbacks, and queues behind Settings lock', () => {
+  const f = fixture(); const view = createDashboardLayoutView(f); const original = view.reference('desktop');
+  const flush = () => { const pending = [...f.frames.values()]; f.frames.clear(); for (const fn of pending) fn(); };
+  view.lockReference(); f.document.fullscreenElement = f.document.documentElement;
+  f.listeners.get('document:fullscreenchange')(); flush();
+  f.window.innerWidth = 1500; f.window.innerHeight = 900;
+  for (let i = 0; i < 15; i++) flush();
+  assert.equal(f.frames.size, 0); assert.equal(view.reference('desktop'), original);
+  view.releaseReference(); assert.equal(view.reference('desktop').width, 1468); assert.equal(view.reference('desktop').source, 'confirmed');
+  f.document.fullscreenElement = null; f.listeners.get('document:fullscreenchange')(); flush();
+  f.window.innerWidth = 800; f.listeners.get('resize')(); flush(); assert.equal(view.reference('desktop').width, 1468);
+  f.document.fullscreenElement = f.document.documentElement; f.listeners.get('document:fullscreenchange')();
+  const late = [...f.frames.values()][0]; view.dispose(); late();
+  assert.equal(view.reference('desktop').width, 1468); assert.equal(f.frames.size, 0); assert.equal(f.listeners.size, 0);
+});
+
+test('rapid fullscreen exit invalidates a provisional sample before it can confirm', () => {
+  const f = fixture(); const view = createDashboardLayoutView(f); const original = view.reference('desktop');
+  const flush = () => { const pending = [...f.frames.values()]; f.frames.clear(); for (const fn of pending) fn(); };
+  f.document.fullscreenElement = f.document.documentElement; f.listeners.get('document:fullscreenchange')(); flush();
+  f.document.fullscreenElement = null; f.listeners.get('document:fullscreenchange')(); flush(); flush();
+  assert.equal(view.reference('desktop'), original); assert.equal(f.frames.size, 0); view.dispose();
+});
+
+test('keyboard and pinch observations cannot confirm and ordinary post-entry resizes cannot rebase', () => {
+  const f = fixture(); const view = createDashboardLayoutView(f);
+  const flush = () => { const pending = [...f.frames.values()]; f.frames.clear(); for (const fn of pending) fn(); };
+  f.window.visualViewport = { height: 400, scale: 1, removeEventListener() {} };
+  f.document.activeElement.matches = () => true;
+  f.document.fullscreenElement = f.document.documentElement; f.listeners.get('document:fullscreenchange')();
+  for (let i = 0; i < 12; i++) flush();
+  assert.equal(view.reference('desktop').source, 'estimated');
+  f.window.visualViewport.height = 800; f.window.visualViewport.scale = 2;
+  f.listeners.get('document:fullscreenchange')(); for (let i = 0; i < 12; i++) flush();
+  assert.equal(view.reference('desktop').source, 'estimated');
+  f.window.visualViewport.scale = 1; f.listeners.get('document:fullscreenchange')(); for (let i = 0; i < 12; i++) flush();
+  assert.equal(view.reference('desktop').source, 'confirmed'); const reference = view.reference('desktop');
+  f.window.innerHeight = 400; f.listeners.get('resize')(); flush(); assert.equal(view.reference('desktop'), reference); view.dispose();
 });
 
 test('projected padding dimensions update on resize and never leak into Automatic mode', () => {

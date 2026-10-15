@@ -23,12 +23,29 @@ async function save(page) { await page.locator('#save-preferences').click(); awa
 async function pixel(page, key, value) { await page.locator(`#layout-${key}`).fill(String(value)); await page.locator(`#layout-${key}`).press('Tab'); }
 const storedLayout = env => env.store.getDashboardPreferences().preferences.widgetLayout;
 // Only viewport measurement is controlled; CSS, DOM, observers, and the app remain real.
-async function controlledViewport(page) {
-  await page.addInitScript(() => {
+async function controlledViewport(page, screenSize = { width: 1600, height: 1000 }) {
+  await page.addInitScript(size => {
+    Object.defineProperty(screen, 'width', { configurable: true, value: size.width }); Object.defineProperty(screen, 'height', { configurable: true, value: size.height });
     const viewport = new EventTarget();
     Object.assign(viewport, { width: innerWidth, height: innerHeight, offsetLeft: 0, offsetTop: 0 });
     Object.defineProperty(window, 'visualViewport', { value: viewport, configurable: true });
+  }, screenSize);
+}
+async function settleFrames(page, count = 14) {
+  await page.evaluate(async count => { for (let i = 0; i < count; i++) await new Promise(resolve => requestAnimationFrame(resolve)); }, count);
+}
+async function canvasState(page) {
+  return page.evaluate(async () => {
+    const { measureLayoutSurface } = await import('/dashboard-layout-view.js');
+    const stage = document.getElementById('widget-surface'); const rect = stage.getBoundingClientRect();
+    const reference = { width: Number.parseFloat(stage.style.width), height: Number.parseFloat(stage.style.height) };
+    const destination = measureLayoutSurface(document, window); const scale = Math.min(1, destination.width / reference.width, destination.height / reference.height);
+    return { reference, source: stage.dataset.referenceSource, scale, actualScale: new DOMMatrix(getComputedStyle(stage).transform).a, actual: { x: rect.x, y: rect.y, width: rect.width, height: rect.height }, expected: { x: destination.x, y: destination.y + destination.height - reference.height * scale, width: reference.width * scale, height: reference.height * scale }, textHeight: document.getElementById('time').getBoundingClientRect().height / scale };
   });
+}
+function assertCanvasFit(state) {
+  expect(state.actualScale).toBeCloseTo(state.scale, 5);
+  for (const key of ['x', 'y', 'width', 'height']) expect(Math.abs(state.actual[key] - state.expected[key]), JSON.stringify(state)).toBeLessThanOrEqual(.1);
 }
 async function usableSurface(page, width, height) {
   const measured = await page.evaluate(async ({ width, height }) => {
@@ -51,24 +68,27 @@ async function assertProjectedBoxes(page, widgetLayout, mode, preview = false) {
   const boxes = await page.evaluate(async ({ widgetLayout, mode, preview }) => {
     const { projectWidget, WIDGET_ELEMENTS } = await import('/dashboard-layout.js');
     const { measureLayoutSurface } = await import('/dashboard-layout-view.js');
-    const surface = measureLayoutSurface(document, window);
     const parent = document.getElementById(preview ? 'layout-preview' : 'widget-surface');
+    const surface = preview ? { width: Number(parent.dataset.width), height: Number(parent.dataset.height) } : { width: Number.parseFloat(parent.style.width), height: Number.parseFloat(parent.style.height) };
     const area = parent.getBoundingClientRect();
-    const scale = preview ? Number.parseFloat(parent.style.width) / surface.width : 1;
+    const scale = preview ? Number.parseFloat(parent.style.width) / surface.width : new DOMMatrix(getComputedStyle(parent).transform).a;
+    const destination = measureLayoutSurface(document, window);
+    if (!preview && (area.x < destination.x - .1 || area.y < destination.y - .1 || area.right > destination.x + destination.width + .1 || area.bottom > destination.y + destination.height + .1)) throw new Error(`Canvas outside destination: ${JSON.stringify({ area: area.toJSON(), destination })}`);
     return widgetLayout[mode].items.map((item, index) => {
       const node = preview ? parent.querySelector(`[data-widget="${item.id}"]`) : document.getElementById(WIDGET_ELEMENTS[item.id]);
       const rect = projectWidget(item, surface); const box = node.getBoundingClientRect();
-      return { id: item.id, actual: { x: box.x, y: box.y, width: box.width, height: box.height }, expected: { x: area.x + rect.x * scale, y: area.bottom - (rect.y + rect.h) * scale, width: rect.w * scale, height: rect.h * scale }, area: area.toJSON(), layer: node.style.zIndex, expectedLayer: String(index + 1) };
+      return { id: item.id, hidden: node.hidden, actual: { x: box.x, y: box.y, width: box.width, height: box.height }, expected: { x: area.x + rect.x * scale, y: area.bottom - (rect.y + rect.h) * scale, width: rect.w * scale, height: rect.h * scale }, area: area.toJSON(), layer: node.style.zIndex, expectedLayer: String(index + 1) };
     });
   }, { widgetLayout, mode, preview });
   for (const box of boxes) {
     const context = JSON.stringify({ preview, mode, ...box });
+    expect(box.layer, context).toBe(box.expectedLayer);
+    if (box.hidden) { expect(box.actual.width, context).toBe(0); expect(box.actual.height, context).toBe(0); continue; }
     for (const key of ['x', 'y', 'width', 'height']) expect(Math.abs(box.actual[key] - box.expected[key]), `${key}: ${context}`).toBeLessThanOrEqual(.1);
     expect(box.actual.x, context).toBeGreaterThanOrEqual(box.area.x - .1);
     expect(box.actual.y, context).toBeGreaterThanOrEqual(box.area.y - .1);
     expect(box.actual.x + box.actual.width, context).toBeLessThanOrEqual(box.area.right + .1);
     expect(box.actual.y + box.actual.height, context).toBeLessThanOrEqual(box.area.bottom + .1);
-    expect(box.layer, context).toBe(box.expectedLayer);
   }
   return boxes;
 }
@@ -156,7 +176,7 @@ test('custom cards stay within each viewport without resize writes, including ti
     page.on('request', request => { if (request.url().endsWith('/api/dashboard/settings') && request.method() === 'PUT') writes++; });
     for (const [width, height] of [[320, 480], [600, 300], [601, 800], [1000, 500], [1200, 800], [160, 150]]) {
       await page.setViewportSize({ width, height });
-      await expect.poll(() => page.evaluate(() => { const stage = document.getElementById('widget-surface'); const area = stage.getBoundingClientRect(); if (stage.hidden) return area.width === 0 && area.height === 0; return [...document.querySelectorAll('#widget-surface > section, #widget-surface > aside')].every(node => { const box = node.getBoundingClientRect(); return box.width >= Math.min(100, area.width) && box.height >= Math.min(100, area.height) && box.x >= area.x && box.y >= area.y && box.right <= area.right && box.bottom <= area.bottom; }); })).toBe(true);
+      await expect.poll(() => page.evaluate(() => { const stage = document.getElementById('widget-surface'); const area = stage.getBoundingClientRect(); if (stage.hidden) return area.width === 0 && area.height === 0; const scale = new DOMMatrix(getComputedStyle(stage).transform).a; return [...document.querySelectorAll('#widget-surface > section, #widget-surface > aside')].every(node => { const box = node.getBoundingClientRect(); return box.width + .1 >= Math.min(100, Number.parseFloat(stage.style.width)) * scale && box.height + .1 >= Math.min(100, Number.parseFloat(stage.style.height)) * scale && box.x >= area.x - .1 && box.y >= area.y - .1 && box.right <= area.right + .1 && box.bottom <= area.bottom + .1; }); })).toBe(true);
     }
     expect(writes).toBe(0); expect(env.store.getDashboardPreferences()).toEqual(original);
     await page.setViewportSize({ width: 1200, height: 800 }); await open(page);
@@ -219,7 +239,9 @@ test('touch preview gestures capture only editing affordances and cancel on view
     await session.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [point2] });
     await session.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: point2.x + 10, y: point2.y + 10 }] });
     await page.locator('#layout-preview').dispatchEvent('pointercancel', { pointerId: 9999 }); await expect(page.locator('#layout-w')).toBeDisabled();
-    await page.setViewportSize({ width: 1000, height: 800 }); await expect(page.locator('#layout-preview')).toHaveAttribute('data-width', '968'); await session.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); await save(page);
+    const referenceWidth = await page.locator('#layout-preview').getAttribute('data-width');
+    // Narrowing the Settings panel changes preview scale, not reference pixels.
+    await page.setViewportSize({ width: 650, height: 800 }); await expect(page.locator('#layout-preview')).toHaveAttribute('data-width', referenceWidth); await expect(page.locator('#layout-w')).toBeEnabled(); await session.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); await save(page);
     expect(storedLayout(env)).toEqual(saved);
   } finally { await context.close(); await env.close(); }
 });
@@ -357,7 +379,7 @@ test('tiny live border boxes match projection independently on each axis', async
   } finally { await page.goto('about:blank'); await env.close(); }
 });
 
-test('tiny preview decoration never enlarges scaled widget border boxes', async ({ page }) => {
+test('reference preview geometry stays fixed while destination dimensions shrink', async ({ page }) => {
   const widgetLayout = edgeLayout(); const env = await environment({ widgetLayout });
   try {
     await page.setViewportSize({ width: 1200, height: 800 }); await controlledViewport(page); await ready(page, env); await open(page);
@@ -365,7 +387,7 @@ test('tiny preview decoration never enlarges scaled widget border boxes', async 
       await page.locator('#layout-profile').selectOption(mode);
       for (const [width, height] of [[1, 200], [200, 1], [1, 1], [10, 10], [1, 1000], [800, 500]]) {
         await usableSurface(page, width, height); const boxes = await assertProjectedBoxes(page, widgetLayout, mode, true);
-        if (width === 1 || height === 1) expect(boxes.some(box => box.expected.width < 2 || box.expected.height < 2)).toBe(true);
+        expect(boxes.every(box => box.expected.width > 0 && box.expected.height > 0)).toBe(true);
       }
     }
   } finally { await page.goto('about:blank'); await env.close(); }
@@ -398,5 +420,130 @@ test('tiny and zero surfaces recover without draft changes or preference writes'
     }
     await page.locator('#layout-arrangement').selectOption('custom'); await save(page);
     await assertProjectedBoxes(page, storedLayout(env), 'desktop');
+  } finally { await page.goto('about:blank'); await env.close(); }
+});
+
+test('custom weather content is independent of fullscreen bookmark visibility', async ({ page }) => {
+  const widgetLayout = edgeLayout(); widgetLayout.desktop.items.find(item => item.id === 'weather').w = 100000;
+  const env = await environment({ widgetLayout, hideBookmarksFullscreen: true });
+  try {
+    await page.setViewportSize({ width: 1200, height: 800 }); await ready(page, env);
+    const preferences = env.store.getDashboardPreferences().preferences;
+    await page.evaluate(() => { document.getElementById('forecast-details').hidden = false; const daily = document.getElementById('daily'); daily.hidden = false; daily.innerHTML = '<li><span class="forecast-temperature">−123456789–123456789°C</span></li>'; });
+    const sample = async fullscreen => page.evaluate(async ({ preferences, fullscreen }) => {
+      const { dashboardDisplay, applyDashboardDisplay } = await import('/dashboard-display.js');
+      applyDashboardDisplay(document, dashboardDisplay(preferences, { fullscreen }));
+      const node = document.querySelector('#daily .forecast-temperature'); const weather = document.getElementById('weather');
+      const scale = weather.getBoundingClientRect().width / Number.parseFloat(weather.style.width);
+      const card = weather.getBoundingClientRect(); const child = node.getBoundingClientRect();
+      return { flex: getComputedStyle(document.getElementById('current-weather-values')).flex, whiteSpace: getComputedStyle(node).whiteSpace, x: (child.x - card.x) / scale, y: (child.y - card.y) / scale, width: child.width / scale, height: child.height / scale };
+    }, { preferences, fullscreen });
+    const before = await sample(false); const during = await sample(true);
+    await expect(page.locator('#bookmarks')).toBeHidden(); expect(during).toEqual(before);
+    expect(await sample(false)).toEqual(before); await expect(page.locator('#bookmarks')).toBeVisible();
+  } finally { await page.goto('about:blank'); await env.close(); }
+});
+
+test('fullscreen reference uniformly fits different windows and confirms once without writes', async ({ page }) => {
+  const widgetLayout = edgeLayout(); const env = await environment({ widgetLayout }); let writes = 0;
+  try {
+    await page.setViewportSize({ width: 1200, height: 800 }); await controlledViewport(page); await ready(page, env);
+    page.on('request', request => { if (request.url().endsWith('/api/dashboard/settings') && request.method() === 'PUT') writes++; });
+    const original = env.store.getDashboardPreferences();
+    const initial = await canvasState(page); expect(initial.reference).toEqual({ width: 1568, height: 880 }); expect(initial.source).toBe('estimated');
+    for (const [width, height] of [[1000, 400], [400, 1000], [10, 200], [800, 500]]) {
+      await usableSurface(page, width, height); const state = await canvasState(page); assertCanvasFit(state);
+      expect(state.reference).toEqual(initial.reference);
+      expect(Math.abs((state.textHeight - initial.textHeight) * state.scale), 'rendered text follows the same scale within CSS subpixel rounding').toBeLessThanOrEqual(.1);
+      await assertProjectedBoxes(page, widgetLayout, 'desktop');
+    }
+    await page.evaluate(() => document.documentElement.requestFullscreen()); await settleFrames(page);
+    const confirmedSize = await page.evaluate(() => ({ width: innerWidth - 32, height: innerHeight - 120 }));
+    const confirmed = await canvasState(page); expect(confirmed.source).toBe('confirmed'); expect(confirmed.reference).toEqual(confirmedSize); assertCanvasFit(confirmed);
+    await page.evaluate(() => document.exitFullscreen()); await settleFrames(page);
+    expect((await canvasState(page)).reference).toEqual(confirmed.reference);
+    for (let i = 0; i < 2; i++) {
+      await page.evaluate(() => document.documentElement.requestFullscreen()); await settleFrames(page);
+      expect((await canvasState(page)).reference).toEqual(confirmed.reference);
+      await page.evaluate(() => document.exitFullscreen()); await settleFrames(page);
+    }
+    await usableSurface(page, 500, 300); assertCanvasFit(await canvasState(page));
+    expect(writes).toBe(0); expect(env.store.getDashboardPreferences()).toEqual(original);
+  } finally { await page.goto('about:blank'); await env.close(); }
+});
+
+test('Settings holds reference pixels across display changes and fullscreen confirmation until close', async ({ page }) => {
+  const env = await environment({ widgetLayout: edgeLayout() }); let writes = 0;
+  try {
+    await page.setViewportSize({ width: 1200, height: 800 }); await controlledViewport(page); await ready(page, env); await open(page);
+    page.on('request', request => { if (request.url().endsWith('/api/dashboard/settings') && request.method() === 'PUT') writes++; });
+    const original = env.store.getDashboardPreferences(); const old = (await canvasState(page)).reference;
+    await pixel(page, 'w', 180); const draftWidth = await page.locator('#layout-w').inputValue();
+    await page.evaluate(() => { Object.defineProperty(screen, 'width', { configurable: true, value: 1900 }); window.dispatchEvent(new Event('resize')); }); await settleFrames(page);
+    expect((await canvasState(page)).reference).toEqual(old); await expect(page.locator('#layout-preview')).toHaveAttribute('data-width', String(old.width)); await expect(page.locator('#layout-w')).toHaveValue(draftWidth);
+    await page.evaluate(() => document.documentElement.requestFullscreen()); await settleFrames(page);
+    expect((await canvasState(page)).reference).toEqual(old); await expect(page.locator('#layout-w')).toHaveValue(draftWidth);
+    const confirmedSize = await page.evaluate(() => ({ width: innerWidth - 32, height: innerHeight - 120 }));
+    await page.evaluate(() => document.exitFullscreen()); await settleFrames(page);
+    await page.locator('#close-settings').click();
+    const confirmed = (await canvasState(page)).reference; expect(confirmed).toEqual(confirmedSize);
+    await open(page); await expect(page.locator('#layout-preview')).toHaveAttribute('data-width', String(confirmed.width));
+    expect(writes).toBe(0); expect(env.store.getDashboardPreferences()).toEqual(original);
+  } finally { await page.goto('about:blank'); await env.close(); }
+});
+
+test('invalid screen data falls back once and destination reservations never redefine its reference', async ({ page }) => {
+  const env = await environment({ widgetLayout: edgeLayout() });
+  try {
+    await page.setViewportSize({ width: 1200, height: 800 }); await controlledViewport(page, { width: 0, height: 0 }); await ready(page, env);
+    const initial = await canvasState(page); expect(initial.reference).toEqual({ width: 1168, height: 680 }); expect(initial.source).toBe('fallback');
+    await page.setViewportSize({ width: 900, height: 600 }); await usableSurface(page, 400, 300);
+    await page.evaluate(() => { document.documentElement.style.setProperty('--layout-safe-left', '10px'); document.getElementById('page-status').textContent = 'A longer status message '.repeat(30); document.getElementById('photo-caption').textContent = 'Fixture caption'; window.dispatchEvent(new Event('resize')); });
+    await settleFrames(page); const changed = await canvasState(page); expect(changed.reference).toEqual(initial.reference); assertCanvasFit(changed);
+    expect(env.store.getDashboardPreferences().preferences.widgetLayout).toEqual(edgeLayout());
+  } finally { await page.goto('about:blank'); await env.close(); }
+});
+
+test('direct tiny references retain borderless subpixel previews and bounded live padding', async ({ browser }) => {
+  const widgetLayout = edgeLayout(); const env = await environment({ widgetLayout });
+  try {
+    for (const size of [{ width: 33, height: 320 }, { width: 232, height: 121 }, { width: 33, height: 1120 }]) {
+      const page = await browser.newPage({ viewport: { width: 1200, height: 800 } });
+      try {
+        await controlledViewport(page, size); await ready(page, env); await open(page);
+        const reference = (await canvasState(page)).reference;
+        expect(reference.width === 1 || reference.height === 1).toBe(true);
+        await assertProjectedBoxes(page, widgetLayout, 'desktop'); const boxes = await assertProjectedBoxes(page, widgetLayout, 'desktop', true);
+        expect(boxes.some(box => box.expected.width < 2 || box.expected.height < 2)).toBe(true);
+      } finally { await page.close(); }
+    }
+  } finally { await env.close(); }
+});
+
+test('real fullscreen bookmark hiding preserves reference-local forecast lines and weather flow', async ({ page }) => {
+  const widgetLayout = edgeLayout(); widgetLayout.desktop.items.find(item => item.id === 'weather').w = 100000;
+  const env = await environment({ widgetLayout, hideBookmarksFullscreen: true }); let writes = 0;
+  try {
+    await page.setViewportSize({ width: 1200, height: 800 }); await controlledViewport(page); await ready(page, env);
+    page.on('request', request => { if (request.url().endsWith('/api/dashboard/settings') && request.method() === 'PUT') writes++; });
+    const original = env.store.getDashboardPreferences();
+    await page.evaluate(() => document.documentElement.requestFullscreen()); await settleFrames(page);
+    await page.evaluate(() => document.exitFullscreen()); await settleFrames(page);
+    await page.evaluate(() => { document.getElementById('forecast-details').hidden = false; document.getElementById('daily').innerHTML = '<li><span class="forecast-temperature">−123456789–123456789°C</span></li>'; });
+    const sample = () => page.evaluate(() => {
+      const card = document.getElementById('weather'); const node = document.querySelector('#daily .forecast-temperature');
+      const scale = card.getBoundingClientRect().width / Number.parseFloat(card.style.width); const bounds = card.getBoundingClientRect(); const child = node.getBoundingClientRect();
+      const range = document.createRange(); range.selectNodeContents(node);
+      return { flex: getComputedStyle(document.getElementById('current-weather-values')).flex, whiteSpace: getComputedStyle(node).whiteSpace, lines: new Set([...range.getClientRects()].map(rect => Math.round(rect.y / scale))).size, x: (child.x - bounds.x) / scale, y: (child.y - bounds.y) / scale, width: child.width / scale, height: child.height / scale };
+    });
+    const before = await sample(); expect(before.lines).toBeGreaterThan(1); expect(before.height).toBeGreaterThan(0);
+    await page.evaluate(() => document.documentElement.requestFullscreen()); await settleFrames(page);
+    await expect(page.locator('#bookmarks')).toBeHidden(); const during = await sample();
+    for (const key of ['x', 'y', 'width', 'height']) expect(during[key]).toBeCloseTo(before[key], 1);
+    expect(during.lines).toBe(before.lines); expect(during.flex).toBe(before.flex); expect(during.whiteSpace).toBe(before.whiteSpace);
+    await assertProjectedBoxes(page, widgetLayout, 'desktop');
+    await page.evaluate(() => document.exitFullscreen()); await settleFrames(page); await expect(page.locator('#bookmarks')).toBeVisible();
+    const after = await sample(); for (const key of ['x', 'y', 'width', 'height']) expect(after[key]).toBeCloseTo(before[key], 1);
+    expect(after.lines).toBe(before.lines); expect(writes).toBe(0); expect(env.store.getDashboardPreferences()).toEqual(original);
   } finally { await page.goto('about:blank'); await env.close(); }
 });

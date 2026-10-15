@@ -32,7 +32,7 @@ let draftBaseline; let settingsSession = 0; let layoutEditor;
 const preferences = $('preferences');
 const dialog = $('settings-dialog');
 const layoutView = createDashboardLayoutView({ document, window, onMeasure: () => layoutEditor?.refreshSurface() });
-layoutEditor = createDashboardLayoutEditor({ document, window, surface: layoutView.surface, position: () => preferences.elements.namedItem('position').value, onChange: () => updateDraftDirty() });
+layoutEditor = createDashboardLayoutEditor({ document, window, reference: layoutView.reference, destination: layoutView.destination, position: () => preferences.elements.namedItem('position').value, onChange: () => updateDraftDirty() });
 const settingsTabs = createSettingsTabs(dialog, { onSelect: (id) => { deviceIntegrations.setPickerOpen(dialog.open && id === 'settings-tab-home-assistant'); bookmarks.setPickerOpen(dialog.open && id === 'settings-tab-bookmarks'); } });
 const deviceView = createDashboardDeviceView({ document, wake: (id) => deviceIntegrations.wake(id) });
 const deviceSelection = createDeviceSelection({ document, root: $('home-assistant-device-picker'), status: $('home-assistant-selection-status'), onChange: () => { draftDirty = true; } });
@@ -287,6 +287,7 @@ function setCalendarMutationPending(pending) {
   $('disconnect-calendar').disabled = pending || (!calendar.getState().configured && !calendar.getState().needsReauthentication);
 }
 $('open-settings').addEventListener('click', () => {
+  layoutView.lockReference();
   settingsSession++;
   draftDirty = false; draftRevision = settingsSync.getState().confirmed ? settingsSync.getState().snapshot.revision : null;
   fillForm(); fillCalendarForm(); fillLinkwardenForm(); $('calendar-settings-status').textContent = '';
@@ -298,7 +299,7 @@ $('open-settings').addEventListener('click', () => {
 });
 $('close-settings').addEventListener('click', () => dialog.close());
 dialog.addEventListener('cancel', event => { if (layoutEditor.cancelGesture()) event.preventDefault(); });
-dialog.addEventListener('close', () => { settingsSession++; layoutEditor.cancelGesture(); draftDirty = false; integrationSettings.close(); deviceIntegrations.setPickerOpen(false); bookmarks.setPickerOpen(false); $('open-settings').focus(); });
+dialog.addEventListener('close', () => { settingsSession++; layoutEditor.cancelGesture(); layoutView.releaseReference(); draftDirty = false; integrationSettings.close(); deviceIntegrations.setPickerOpen(false); bookmarks.setPickerOpen(false); $('open-settings').focus(); });
 function cancelSearch() { searchGeneration++; searchController?.abort(); }
 $('location-search').addEventListener('submit', async (event) => {
   event.preventDefault(); cancelSearch(); const request = searchGeneration;

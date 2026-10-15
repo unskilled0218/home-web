@@ -72,16 +72,16 @@
               <label>Overall scale<input name="scale" form="preferences" type="number" min="0.5" max="2" step="0.1"></label>
             </fieldset>
             <fieldset id="widget-layout-editor"><legend>Widget layout</legend>
-              <p class="settings-description">Choose Custom to overlap and resize widgets. The origin is bottom-left: X increases rightward and Y increases upward. Resize from the upper-right corner to grow upward. Layers control which widget is in front. Pixel sizes range from 100 × 100 to the usable current window (smaller windows temporarily reduce the minimum). Changes apply only after Save preferences. Position controls the Automatic arrangement; scales still affect content.</p>
+              <p class="settings-description">Choose Custom to overlap and resize widgets on a fullscreen reference canvas. X measures rightward from its bottom-left; Y measures upward. Resize from the upper-right corner to grow upward. Fields use reference CSS pixels, normally at least 100 × 100, not the scaled window size. The whole canvas, including text, shrinks uniformly to fit; unused space stays above or right. Screen dimensions estimate the reference until fullscreen confirms it. Reference updates wait until Settings closes. Layers control the front widget. Changes apply only after Save preferences. Position controls Automatic; font scales still affect content.</p>
               <label>Layout profile<select id="layout-profile"><option value="desktop">Desktop</option><option value="mobile">Mobile</option></select></label>
               <label>Layout arrangement<select id="layout-arrangement"><option value="automatic">Automatic</option><option value="custom">Custom</option></select></label>
               <label>Select widget<select id="layout-widget"></select></label>
               <div id="layout-preview" aria-label="Widget layout preview"></div>
               <div id="layout-geometry">
-                <label>Widget X from left (pixels)<input id="layout-x" type="number" min="0" step="1"></label>
-                <label>Widget Y from bottom (pixels)<input id="layout-y" type="number" min="0" step="1"></label>
-                <label>Widget width (pixels)<input id="layout-w" type="number" min="100" step="1"></label>
-                <label>Widget height (pixels)<input id="layout-h" type="number" min="100" step="1"></label>
+                <label>Widget X from left (reference pixels)<input id="layout-x" type="number" min="0" step="1"></label>
+                <label>Widget Y from bottom (reference pixels)<input id="layout-y" type="number" min="0" step="1"></label>
+                <label>Widget width (reference pixels)<input id="layout-w" type="number" min="100" step="1"></label>
+                <label>Widget height (reference pixels)<input id="layout-h" type="number" min="100" step="1"></label>
               </div>
               <div class="layout-actions"><button type="button" data-layer="forward">Bring forward</button><button type="button" data-layer="backward">Send backward</button><button type="button" data-layer="front">Bring to front</button><button type="button" data-layer="back">Send to back</button><button id="layout-reset" type="button">Reset selected layout</button><button id="layout-cancel" type="button">Cancel layout edits</button></div>
               <p id="layout-status" role="status" aria-live="polite"></p>

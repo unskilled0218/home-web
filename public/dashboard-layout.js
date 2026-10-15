@@ -7,6 +7,12 @@ const object = value => value !== null && typeof value === 'object' && !Array.is
 const fields = (value, keys) => object(value) && Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
 export const defaultWidgetLayout = () => ({ version: 2, desktop: null, mobile: null });
 
+export function fitLayoutCanvas(reference, destination) {
+  if (![reference?.width, reference?.height, destination?.width, destination?.height].every(value => Number.isFinite(value) && value > 0) || !Number.isFinite(destination.x) || !Number.isFinite(destination.y)) return null;
+  const scale = Math.min(1, destination.width / reference.width, destination.height / reference.height);
+  return { x: destination.x, y: destination.y + destination.height - reference.height * scale, width: reference.width * scale, height: reference.height * scale, scale };
+}
+
 export function normalizeWidgetLayout(value) {
   if (value?.version === 1) throw new Error('Widget layout coordinates changed. Reload this page before saving.');
   if (!fields(value, ['version', 'desktop', 'mobile']) || value.version !== 2) throw new Error('Invalid widget layout.');

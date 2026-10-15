@@ -1,6 +1,6 @@
 import { DASHBOARD_WIDGETS, normalizeWidgetLayout, initialWidgetProfile, projectWidget, editWidget, changeWidgetLayer } from './dashboard-layout.js';
 
-export function createDashboardLayoutEditor({ document, window, surface, onChange, position = () => 'left' }) {
+export function createDashboardLayoutEditor({ document, window, reference, destination, onChange, position = () => 'left' }) {
   const root = document.getElementById('widget-layout-editor');
   const get = id => document.getElementById(`layout-${id}`);
   const profileControl = get('profile'); const arrangement = get('arrangement'); const selected = get('widget'); const preview = get('preview'); const status = get('status');
@@ -17,20 +17,22 @@ export function createDashboardLayoutEditor({ document, window, surface, onChang
     preview.append(box); boxes.set(id, box);
   }
   const mode = () => profileControl.value;
+  const surface = () => reference(mode());
+  const previewScale = area => Math.min(Math.max(1, root.clientWidth - 32) / area.width, 280 / area.height, 1);
   const equal = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   function announce() {
     const profile = draft?.[mode()];
     if (!profile) { status.textContent = 'Automatic layout. Choose Custom to arrange widgets.'; return; }
     const rect = projectWidget(profile.items.find(item => item.id === selected.value), surface());
-    status.textContent = rect ? `${DASHBOARD_WIDGETS[selected.value]} · Layer ${profile.items.findIndex(item => item.id === selected.value) + 1} of 6 (6 is front) · ${rect.w} × ${rect.h} pixels at ${rect.x} from left, ${rect.y} from bottom. Save preferences to share changes.` : 'Window area unavailable. Enlarge the window to edit.';
+    status.textContent = rect ? `${DASHBOARD_WIDGETS[selected.value]} · Layer ${profile.items.findIndex(item => item.id === selected.value) + 1} of 6 (6 is front) · ${rect.w} × ${rect.h} reference pixels at ${rect.x} from left, ${rect.y} from bottom (${surface().source}). Save preferences to share changes.` : 'Reference area unavailable. Enlarge the window to edit.';
   }
   function render(preserveInput = false) {
     if (!draft || disposed) return;
     const area = surface();
-    const available = area.width > 0 && area.height > 0;
+    const target = destination(); const available = area.width > 0 && area.height > 0 && target.width > 0 && target.height > 0;
     const profile = draft[mode()]; const custom = Boolean(profile);
     arrangement.value = custom ? 'custom' : 'automatic';
-    scale = available ? Math.min(Math.max(1, root.clientWidth - 32) / area.width, 280 / area.height, 1) : 1;
+    scale = available ? previewScale(area) : 1;
     preview.style.width = `${available ? area.width * scale : 0}px`; preview.style.height = `${available ? area.height * scale : 0}px`;
     preview.dataset.width = String(area.width); preview.dataset.height = String(area.height); preview.hidden = !custom || !available;
     for (const [id, box] of boxes) {
@@ -43,7 +45,7 @@ export function createDashboardLayoutEditor({ document, window, surface, onChang
       }
       for (const button of box.querySelectorAll('button')) button.disabled = saving || !available || !custom;
     }
-    const rect = custom ? projectWidget(profile.items.find(item => item.id === selected.value), area) : null;
+    const rect = custom && available ? projectWidget(profile.items.find(item => item.id === selected.value), area) : null;
     for (const [key, input] of Object.entries(inputs)) {
       input.disabled = saving || !rect || Boolean(gesture);
       if (!preserveInput || input !== document.activeElement) {
@@ -105,7 +107,7 @@ export function createDashboardLayoutEditor({ document, window, surface, onChang
   root.addEventListener('keydown', event => { if (event.key === 'Escape' && cancelGesture()) { event.preventDefault(); event.stopPropagation(); } }, options);
   const observer = new window.ResizeObserver(() => refreshSurface()); observer.observe(root);
   function refreshSurface() {
-    if (gesture) { const area = surface(); if (area.width !== gesture.area.width || area.height !== gesture.area.height || area.x !== gesture.area.x || area.y !== gesture.area.y) cancelGesture(); }
+    if (gesture) { const area = surface(); const target = destination(); if (area.width !== gesture.area.width || area.height !== gesture.area.height || area.context !== gesture.area.context || previewScale(area) !== gesture.scale || target.width <= 0 || target.height <= 0) cancelGesture(); }
     render(true);
   }
   return {

@@ -208,6 +208,8 @@ input[type=color] { min-height: 2.5rem; }
 #widget-surface #time { font-size: clamp(1.5rem, 30cqw, 5em); }
 #widget-surface :is(#current-weather, #current-weather-values) { min-width: 0; flex-wrap: wrap; }
 #widget-surface :is(#current-weather-values, #current-weather-subvalues) > * { min-width: 0; max-width: 100%; }
+#widget-surface #current-weather-values { flex: 1 1 10em; }
+#widget-surface .forecast-temperature { white-space: normal; overflow-wrap: anywhere; }
 #widget-surface :is(#hourly, #daily) { flex-wrap: wrap; max-width: 100%; }
 #widget-surface :is(#hourly, #daily) li { min-width: min(5.5em, 100%); }
 #widget-surface .calendar-event { grid-template-columns: minmax(0, 1fr); }
