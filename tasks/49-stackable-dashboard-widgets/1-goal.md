@@ -1,0 +1,28 @@
+# goal
+
+## command
+
+- customize dashboard widgets
+  - stackable
+    - options to set z-index. need ui for non-developer
+  - change size freely
+    - min: 100px x 100px?
+    - max: current window size
+
+## goal
+
+Let a non-developer customize the current photo dashboard by positioning, freely resizing, and intentionally overlapping its existing widgets: Time, Weather, Calendar, Bookmarks, Home Assistant, and Wake-on-LAN. Provide an obvious layout-editing interface, not a requirement to edit CSS, JSON, or developer tools. Keep the photo background, existing content, integration settings, selections, and actions intact; this is not a replacement dashboard or a general custom-widget/plugin system.
+
+Make stacking a supported layout choice. Provide plain-language layer controls such as Bring forward, Send backward, Bring to front, and Send to back, with a clear indication of the selected widget and its layer order. Translate those controls into a deterministic, bounded, persisted stacking order; users must not need to understand arbitrary CSS z-index values. Intentional overlap must not trigger collision avoidance, relocate other widgets, or grow the canvas. Allow selecting and recovering a widget even when another widget fully covers it, for example through an accessible widget list. Keep Settings, editing tools, status feedback, and dialogs above user-controlled widget layers.
+
+Allow free pixel-based width and height changes rather than only font-scale presets or coarse grid spans. Support direct manipulation where practical and accessible labeled controls for mouse, keyboard, and touch users. Treat 100px × 100px as the proposed minimum from the request, to be confirmed during planning against actual widget content and controls; document any necessary exception rather than silently imposing the retired layout engine's larger minima. Limit each widget to the current usable dashboard viewport, no larger than the current window, and keep its editable position reachable within that surface. Explicitly handle unusually small viewports where the proposed minimum does not fit. Larger content should remain usable through suitable internal scrolling or responsive rendering instead of enlarging the widget beyond its chosen bounds or discarding information/actions.
+
+Define consistent behavior when window dimensions, orientation, or fullscreen state change. Preserve the user's saved arrangement and relative layer order while projecting/clamping the displayed geometry into the current usable viewport. A browser with a smaller window must not silently overwrite a larger screen's saved layout simply because it rendered it. Keep desktop and mobile choices independent, using the current dashboard's existing profile boundary of up to and including 600px for mobile; editing either profile must not rewrite the other. Provide a clear way to cancel an unsaved edit and reset a layout to usable defaults. Ordinary dashboard interactions must not accidentally move or resize widgets outside explicit editing mode.
+
+Persist confirmed layout and layer choices through the existing shared dashboard-settings ownership and revision/conflict flow so they survive reloads/server restarts and propagate to other browsers. Preserve dirty local drafts when remote settings change, report save conflicts/failures honestly, and avoid claiming an unsaved local-only layout is shared. Validate widget identities, finite bounded coordinates/sizes, and layer order on both sides of the existing boundary. Upgrade existing preferences compatibly without erasing visibility, scale, connection details, selected bookmarks/devices, or other display settings; existing installations must start with a usable arrangement rather than an empty dashboard.
+
+Apply this to the live UI served by `public/index.html`, `public/dashboard.js`, and `public/dashboard.css`. That UI currently groups clock/weather/calendar under an information area and uses normal grid/flow positioning for device and bookmark sections; its layout settings expose position and scale, not widget rectangles or layers. The old `public/home-layout.js` and `/api/home/settings` still exist but are not the live dashboard's current settings owner: their collision-avoidance, growing canvas, and 768px breakpoint must not be revived accidentally or create competing persistence. Reuse existing code only where it matches the new behavior and the current shared `/api/dashboard/settings` contract.
+
+Retain normal widget updates, polling ownership, visibility-driven network demand, focus behavior, selected-link navigation, Home Assistant controls, and Wake-on-LAN safety while geometry changes. Layout editing must not reconnect integrations, emit Wake packets, recreate unrelated timers/controllers, expose secrets, or modify source data. Keep the photo caption and background behavior intact without implicitly treating them as additional customizable widgets.
+
+Completion requires unit/API and real-browser coverage of deliberate overlap, deterministic layer changes, selection of covered widgets, free resize bounds, cancel/reset, validation, viewport/fullscreen/orientation changes, desktop/mobile independence, persistence and multi-browser conflicts, keyboard/touch operation, and existing widget interactions. Use owned temporary storage and stubbed providers/actions; do not access live integrations, send real Wake packets, or change user `.env`, credentials, NFS mounts, services, or `todo.md`. Document the layout workflow in focused user documentation and keep README simple. This goal-writing stage changes no implementation, runtime data, dependencies, or project version.
