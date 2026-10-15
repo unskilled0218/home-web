@@ -328,5 +328,16 @@
       "suggestion": 0
     },
     "scope": "Branch review: 47-npm-terminal-shutdown-exit vs main (86eefdd...cf4ab47)"
+  },
+  {
+    "date": "2026-10-15",
+    "mode": "PR Review",
+    "score": 95,
+    "findings": {
+      "critical": 0,
+      "warning": 1,
+      "suggestion": 0
+    },
+    "scope": "Plan review: tasks/49-stackable-dashboard-widgets/2-plan.md"
   }
 ]
