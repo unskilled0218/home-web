@@ -108,3 +108,9 @@ Add optional, independently saved desktop/mobile arrangements for the six live d
 ## Plan Update
 
 Addresses the R2 warning in `3-plan-review.md` by specifying field-specific canonical edits, fixed-start gesture calculations, exact no-op/cancel preservation, minimal same-axis containment adjustments, and pure-model/two-viewport regressions for minimum-clamped moves. Only this plan is updated; the review remains a historical record, and no implementation code, tests, dependencies, runtime data, or version are changed.
+
+## Follow-up: Bottom-Left Origin
+
+The user requests a bottom-left baseline after the first implementation. Update custom layout coordinates so X measures from the left and Y measures upward from the bottom of the usable surface. Render cards/preview boxes using CSS bottom positioning, make upward drags increase Y, and move the resize affordance to the upper-right so increasing height grows upward while preserving the bottom anchor except for necessary containment adjustments. Retain field-specific edits, bounds, no-op behavior, layers, independent profiles, and Automatic mode.
+
+Use nested layout version 2 for the new coordinate contract. Decode valid version-1 stored/cache records by converting each Y to `1,000,000 - oldY - h`, preserving normalized geometry/order without a database write on GET; reject old version-1 writes with a reload error rather than reinterpreting them. Physical minimum-size clamps now preserve the bottom anchor. Add model/API/cache and real-browser regressions for the origin, Y/height numeric edits, upward move/resize, no-op/cancel behavior, viewport fitting, migration idempotence, and unchanged revisions on read. Update focused documentation, the implementation report, and patch version; run relevant unit/full browser checks. Do not edit user data or operate live services.

@@ -1,5 +1,5 @@
 import { normalizeBookmarkSelections } from './bookmark-selection-data.js';
-import { defaultWidgetLayout, normalizeWidgetLayout } from './dashboard-layout.js';
+import { defaultWidgetLayout, normalizeWidgetLayout, decodeStoredWidgetLayout } from './dashboard-layout.js';
 
 export const SETTINGS_KEY = 'dashboard.preferences.v1';
 export const MOBILE_MEDIA_QUERY = '(max-width: 600px)';
@@ -69,14 +69,14 @@ export function validateDashboardPreferences(value) {
   return canonical;
 }
 export function decodeStoredDashboardPreferences(value) {
-  if (value && typeof value === 'object' && !Array.isArray(value)) return validateDashboardPreferences({ widgetLayout: defaultWidgetLayout(), homeAssistantDeviceSelections: [], bookmarkLinkSelections: null, bookmarksVisible: true, homeAssistantVisible: true, wolVisible: true, mobileBookmarksVisible: true, mobileHomeAssistantVisible: true, mobileWolVisible: true, ...value });
+  if (value && typeof value === 'object' && !Array.isArray(value)) return validateDashboardPreferences({ homeAssistantDeviceSelections: [], bookmarkLinkSelections: null, bookmarksVisible: true, homeAssistantVisible: true, wolVisible: true, mobileBookmarksVisible: true, mobileHomeAssistantVisible: true, mobileWolVisible: true, ...value, widgetLayout: Object.hasOwn(value, 'widgetLayout') ? decodeStoredWidgetLayout(value.widgetLayout) : defaultWidgetLayout() });
   return validateDashboardPreferences(value);
 }
 export function legacyDashboardPreferences(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const defaults = normalizeDashboardPreferences();
   if (!PREFERENCE_KEYS.some((key) => Object.hasOwn(value, key) && typeof value[key] === typeof defaults[key] && (typeof value[key] !== 'number' || Number.isFinite(value[key])))) return null;
-  try { return normalizeDashboardPreferences(value); } catch { return null; }
+  try { return normalizeDashboardPreferences(Object.hasOwn(value, 'widgetLayout') ? { ...value, widgetLayout: decodeStoredWidgetLayout(value.widgetLayout) } : value); } catch { return null; }
 }
 export function validateDashboardSnapshot(value) {
   if (!value || typeof value.initialized !== 'boolean' || !Number.isSafeInteger(value.revision) || value.revision < 0 || value.initialized !== (value.revision > 0)) throw new Error('Invalid shared settings revision.');

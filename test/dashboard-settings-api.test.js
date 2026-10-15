@@ -142,7 +142,7 @@ test('bookmark choices distinguish setup from empty, enforce exact records, and 
   for (const invalid of [{}, false, [record, record], [{ ...record, url: 'https://private.test' }], [{ ...record, selectionId: 'raw' }], [{ ...record, collectionSelectionId: 'x' }], Array.from({ length: 257 }, () => record)]) assert.throws(() => validateDashboardPreferences({ ...defaults, bookmarkLinkSelections: invalid }));
   const bookmarkLinkSelections = Array.from({ length: 256 }, (_, index) => ({ selectionId: 'b_' + String(index).padStart(43, 'a'), collectionSelectionId: 'c'.repeat(43) }));
   const homeAssistantDeviceSelections = Array.from({ length: 256 }, (_, index) => 'd_' + String(index).padStart(43, 'a'));
-  const maximum = validateDashboardPreferences({ ...defaults, bookmarkLinkSelections, homeAssistantDeviceSelections, widgetLayout: { version: 1, desktop: initialWidgetProfile('desktop'), mobile: initialWidgetProfile('mobile') } });
+  const maximum = validateDashboardPreferences({ ...defaults, bookmarkLinkSelections, homeAssistantDeviceSelections, widgetLayout: { version: 2, desktop: initialWidgetProfile('desktop'), mobile: initialWidgetProfile('mobile') } });
   assert.ok(Buffer.byteLength(JSON.stringify({ preferences: maximum, revision: 1, integrations: { linkwarden: { baseUrl: 'x'.repeat(2048), username: 'x'.repeat(120) }, calendar: { serverUrl: 'x'.repeat(2048), username: 'x'.repeat(120) }, weather: {} } })) < 65536, 'maximum choices and bounded integration metadata fit the response budget');
 });
 
@@ -151,11 +151,11 @@ test('widget layouts upgrade without read writes and persist atomically with con
   const db = new DatabaseSync(env.filename); t.after(() => db.close());
   db.prepare('INSERT INTO dashboard_preferences (id, configuration, revision) VALUES (1, ?, 7)').run(JSON.stringify(old));
   const read = await (await env.api()).json();
-  assert.equal(read.revision, 7); assert.deepEqual(read.preferences.widgetLayout, { version: 1, desktop: null, mobile: null });
+  assert.equal(read.revision, 7); assert.deepEqual(read.preferences.widgetLayout, { version: 2, desktop: null, mobile: null });
   assert.equal(db.prepare('SELECT configuration FROM dashboard_preferences').get().configuration, JSON.stringify(old));
   const incomplete = await env.api('/api/dashboard/settings', 'PUT', { revision: 7, preferences: old });
   assert.equal(incomplete.status, 400); assert.match((await incomplete.json()).error, /Reload this page/);
-  const widgetLayout = { version: 1, desktop: changeWidgetLayer(initialWidgetProfile('desktop'), 'time', 'front'), mobile: initialWidgetProfile('mobile') };
+  const widgetLayout = { version: 2, desktop: changeWidgetLayer(initialWidgetProfile('desktop'), 'time', 'front'), mobile: initialWidgetProfile('mobile') };
   const preferences = { ...read.preferences, widgetLayout };
   const saved = await (await env.api('/api/dashboard/settings', 'PUT', { revision: 7, preferences })).json();
   assert.equal(saved.revision, 8); assert.deepEqual(saved.preferences, preferences);
@@ -180,4 +180,22 @@ test('old bookmark preference records decode without writes; explicit saves pers
   assert.equal((await env.api('/api/dashboard/settings', 'PUT', { revision: 8, preferences: canonical.preferences })).status, 409);
   const reopened = createStore(env.filename); assert.deepEqual(reopened.getDashboardPreferences(), { initialized: true, revision: selected.revision, preferences: selected.preferences }); reopened.close();
   const empty = await (await env.api('/api/dashboard/settings', 'PUT', { revision: selected.revision, preferences: { ...selected.preferences, bookmarkLinkSelections: [] } })).json(); assert.deepEqual(empty.preferences.bookmarkLinkSelections, []);
+});
+
+test('top-origin layouts migrate on read without changing revision and old-coordinate writes are rejected', async t => {
+  const env = await setup(t);
+  const widgetLayout = { version: 1, desktop: initialWidgetProfile('desktop'), mobile: initialWidgetProfile('mobile') };
+  const old = { ...normalizeDashboardPreferences({ color: '#123456' }), widgetLayout };
+  const bytes = JSON.stringify(old); const db = new DatabaseSync(env.filename); t.after(() => db.close());
+  db.prepare('INSERT INTO dashboard_preferences (id, configuration, revision) VALUES (1, ?, 7)').run(bytes);
+  const first = await (await env.api()).json(); const second = await (await env.api()).json();
+  assert.deepEqual(second, first); assert.equal(first.revision, 7); assert.equal(first.preferences.widgetLayout.version, 2);
+  for (const mode of ['desktop', 'mobile']) for (const [index, item] of widgetLayout[mode].items.entries()) assert.deepEqual(first.preferences.widgetLayout[mode].items[index], { ...item, y: 1_000_000 - item.y - item.h });
+  assert.equal(db.prepare('SELECT configuration FROM dashboard_preferences').get().configuration, bytes, 'GET does not rewrite old coordinates');
+  const rejected = await env.api('/api/dashboard/settings', 'PUT', { revision: 7, preferences: old });
+  assert.equal(rejected.status, 400); assert.match((await rejected.json()).error, /Reload this page/);
+  const saved = await (await env.api('/api/dashboard/settings', 'PUT', { revision: 7, preferences: first.preferences })).json();
+  assert.equal(saved.revision, 8); assert.deepEqual(saved.preferences, first.preferences);
+  const same = await (await env.api('/api/dashboard/settings', 'PUT', { revision: 8, preferences: saved.preferences })).json(); assert.equal(same.revision, 8);
+  const reopened = createStore(env.filename); assert.deepEqual(reopened.getDashboardPreferences().preferences, first.preferences); reopened.close();
 });

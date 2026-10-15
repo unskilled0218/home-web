@@ -4,7 +4,9 @@ Open **Settings → General → Widget layout**. Select **Desktop** or **Mobile*
 
 ## Position and size
 
-Choose a widget from **Select widget**, including one hidden behind another widget. Drag its labeled box in the preview to move it, or drag the lower-right corner to resize it. Use the labeled X, Y, width, and height fields for exact pixel changes or keyboard editing. The preview contains labels, not live links, device actions, or private content.
+Choose a widget from **Select widget**, including one hidden behind another widget. Drag its labeled box in the preview to move it, or drag the upper-right corner to resize it. Use the labeled X, Y, width, and height fields for exact pixel changes or keyboard editing. The preview contains labels, not live links, device actions, or private content.
+
+The origin is **bottom-left of the usable dashboard area**. X increases rightward; Y increases upward. X = 0 and Y = 0 place a widget against that area's lower-left corner, above any reserved filename strip. Increasing height grows the widget upward and normally preserves its bottom offset. Increasing Y lifts the entire widget. Bounds may adjust the offset when a larger widget would otherwise extend beyond the window.
 
 Each widget normally has a minimum displayed size of 100 × 100 pixels. The maximum is the usable current window, excluding page tools, status, safe-area margins, and a filename strip when shown. If that area is smaller than 100 pixels, widgets temporarily fit the available space. When no space is available, enlarge the window before editing. Small widgets scroll internally so their content and actions remain reachable.
 
@@ -23,6 +25,6 @@ Widgets may overlap; moving one does not push another out of the way. Use **Brin
 - Closing Settings discards unsaved edits. A failed save keeps the draft and does not present it as shared state.
 - If another browser changed settings, the stale save reports a conflict. **Reload shared preferences** deliberately replaces preference/layout drafts with the newest server values before you reapply edits; integration credential drafts stay separate.
 
-Reload already-open pages after upgrading to the expanded settings schema. Previous saved preferences and confirmed caches gain Automatic profiles without a database write on read. Integration credentials, selections, backgrounds, and the retired home-widget settings record are not migrated or replaced.
+Reload already-open pages after upgrading to the expanded settings schema. Previous saved preferences and confirmed caches gain Automatic profiles without a database write on read. Version-1 custom layouts used a top origin; they decode once into version-2 bottom offsets (`newY = 1,000,000 - oldY - height`) without rewriting SQLite or changing the revision on read. This preserves normalized placement and layers; minimum-size clamping now keeps the bottom anchor. An older page cannot save top-origin coordinates against the new contract and must reload. Integration credentials, selections, backgrounds, and the retired home-widget settings record are not migrated or replaced.
 
 [Back to dashboard](dashboard.md)

@@ -100,13 +100,26 @@ test('old caches gain automatic layout without initialization and nested layouts
   const old = normalizeDashboardPreferences({ scale: 1.2 }); delete old.widgetLayout;
   const cached = JSON.stringify({ schema: 1, initialized: true, revision: 7, preferences: old });
   const values = new Map([[SHARED_SETTINGS_KEY, cached]]);
-  const preferences = normalizeDashboardPreferences({ widgetLayout: { version: 1, desktop: initialWidgetProfile('desktop'), mobile: null } });
+  const preferences = normalizeDashboardPreferences({ widgetLayout: { version: 2, desktop: initialWidgetProfile('desktop'), mobile: null } });
   const env = setup(t, { values, handler: (_url, options) => Response.json(snapshot({ revision: options.method === 'PUT' ? 9 : 8, preferences })) });
-  assert.deepEqual(env.client.getState().snapshot.preferences.widgetLayout, { version: 1, desktop: null, mobile: null });
+  assert.deepEqual(env.client.getState().snapshot.preferences.widgetLayout, { version: 2, desktop: null, mobile: null });
   assert.equal(values.get(SHARED_SETTINGS_KEY), cached, 'decoding does not rewrite cache');
   await env.client.start(); assert.deepEqual(env.client.getState().snapshot.preferences.widgetLayout, preferences.widgetLayout);
   await env.client.save(preferences, 8);
   assert.deepEqual(JSON.parse(env.calls.at(-1).options.body).preferences.widgetLayout, preferences.widgetLayout);
   assert.equal(env.calls.some(call => call.url.endsWith('/initialize')), false);
   assert.equal(env.tasks.size, 1, 'layout saves keep the existing single poll owner');
+});
+
+test('top-origin cached geometry converts once while offline without cache writes or initialization', async t => {
+  const old = { ...normalizeDashboardPreferences(), widgetLayout: { version: 1, desktop: initialWidgetProfile('desktop'), mobile: null } };
+  const bytes = JSON.stringify({ schema: 1, initialized: true, revision: 7, preferences: old });
+  const values = new Map([[SHARED_SETTINGS_KEY, bytes]]);
+  const env = setup(t, { values, handler: () => { throw new Error('offline'); } });
+  const before = structuredClone(env.client.getState().snapshot.preferences.widgetLayout);
+  assert.equal(before.version, 2);
+  assert.deepEqual(before.desktop.items, old.widgetLayout.desktop.items.map(item => ({ ...item, y: 1_000_000 - item.y - item.h })));
+  await env.client.start(); assert.equal(env.client.getState().confirmed, false);
+  assert.deepEqual(env.client.getState().snapshot.preferences.widgetLayout, before);
+  assert.equal(values.get(SHARED_SETTINGS_KEY), bytes); assert.equal(env.calls.some(call => call.url.endsWith('/initialize')), false);
 });

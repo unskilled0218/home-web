@@ -59,11 +59,12 @@ test('custom projection retains widget identity, restores automatic groups/order
   const display = { content: true }; const clock = f.nodes.get('clock'); clock.focus();
   view.update({ layout, mobile: false, scale: 1.2, display });
   assert.equal(clock.parent, f.nodes.get('widget-surface'));
+  assert.ok(clock.style.bottom.endsWith('px')); assert.equal(clock.style.top, undefined);
   assert.equal(f.nodes.get('dashboard-content').hidden, true);
   assert.equal(f.document.activeElement, clock);
   for (const [index, item] of layout.desktop.items.entries()) assert.equal(f.nodes.get(WIDGET_ELEMENTS[item.id]).style.zIndex, String(index + 1));
   view.update({ layout, mobile: true, scale: 1.2, display });
-  assert.equal(clock.parent, f.nodes.get('information')); assert.equal(clock.style.width, undefined);
+  assert.equal(clock.parent, f.nodes.get('information')); assert.equal(clock.style.width, undefined); assert.equal(clock.style.bottom, undefined);
   assert.deepEqual(f.nodes.get('information').children.filter(node => node.id).map(node => node.id), ['clock', 'weather', 'calendar', 'photo-caption']);
   assert.equal(f.nodes.get('dashboard-ha').parent, f.nodes.get('dashboard-devices'));
   assert.equal(f.nodes.get('bookmarks').parent, f.nodes.get('dashboard-content'));

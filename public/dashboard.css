@@ -221,6 +221,6 @@ input[type=color] { min-height: 2.5rem; }
 .layout-preview-widget.selected { outline: 2px solid #b4d2ff; outline-offset: -3px; }
 #settings-dialog .layout-preview-widget button { border: 0; border-radius: 0; padding: 2px; font-size: 11px; background: transparent; touch-action: none; }
 .layout-preview-widget [data-action=move] { display: block; width: 100%; height: 100%; cursor: move; overflow-wrap: anywhere; }
-.layout-preview-widget [data-action=resize] { position: absolute; right: 0; bottom: 0; width: 22px; height: 22px; cursor: nwse-resize; background: #304d71 !important; }
+.layout-preview-widget [data-action=resize] { position: absolute; right: 0; top: 0; width: 22px; height: 22px; cursor: nesw-resize; background: #304d71 !important; }
 #layout-geometry { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
 .layout-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: 1rem; }

@@ -11,7 +11,7 @@ export function createDashboardLayoutEditor({ document, window, surface, onChang
   for (const [id, label] of Object.entries(DASHBOARD_WIDGETS)) {
     const option = document.createElement('option'); option.value = id; option.textContent = label; selected.append(option);
     const box = document.createElement('div'); box.className = 'layout-preview-widget'; box.dataset.widget = id;
-    for (const [action, text] of [['move', label], ['resize', '↘']]) {
+    for (const [action, text] of [['move', label], ['resize', '↗']]) {
       const button = document.createElement('button'); button.type = 'button'; button.dataset.action = action; button.textContent = text; button.setAttribute('aria-label', `${action === 'move' ? 'Move' : 'Resize'} ${label}`); box.append(button);
     }
     preview.append(box); boxes.set(id, box);
@@ -22,9 +22,9 @@ export function createDashboardLayoutEditor({ document, window, surface, onChang
     const profile = draft?.[mode()];
     if (!profile) { status.textContent = 'Automatic layout. Choose Custom to arrange widgets.'; return; }
     const rect = projectWidget(profile.items.find(item => item.id === selected.value), surface());
-    status.textContent = rect ? `${DASHBOARD_WIDGETS[selected.value]} · Layer ${profile.items.findIndex(item => item.id === selected.value) + 1} of 6 (6 is front) · ${rect.w} × ${rect.h} pixels at ${rect.x}, ${rect.y}. Save preferences to share changes.` : 'Window area unavailable. Enlarge the window to edit.';
+    status.textContent = rect ? `${DASHBOARD_WIDGETS[selected.value]} · Layer ${profile.items.findIndex(item => item.id === selected.value) + 1} of 6 (6 is front) · ${rect.w} × ${rect.h} pixels at ${rect.x} from left, ${rect.y} from bottom. Save preferences to share changes.` : 'Window area unavailable. Enlarge the window to edit.';
   }
-  function render() {
+  function render(preserveInput = false) {
     if (!draft || disposed) return;
     const area = surface();
     const available = area.width > 0 && area.height > 0;
@@ -38,7 +38,7 @@ export function createDashboardLayoutEditor({ document, window, surface, onChang
       const rect = index >= 0 ? projectWidget(profile.items[index], area) : null;
       box.classList.toggle('selected', id === selected.value);
       if (rect) {
-        for (const [key, value] of Object.entries({ left: rect.x, top: rect.y, width: rect.w, height: rect.h })) box.style[key] = `${value * scale}px`;
+        for (const [key, value] of Object.entries({ left: rect.x, bottom: rect.y, width: rect.w, height: rect.h })) box.style[key] = `${value * scale}px`;
         box.style.zIndex = String(index + 1);
       }
       for (const button of box.querySelectorAll('button')) button.disabled = saving || !available || !custom;
@@ -46,7 +46,9 @@ export function createDashboardLayoutEditor({ document, window, surface, onChang
     const rect = custom ? projectWidget(profile.items.find(item => item.id === selected.value), area) : null;
     for (const [key, input] of Object.entries(inputs)) {
       input.disabled = saving || !rect || Boolean(gesture);
-      if (rect) input.value = String(rect[key]); else input.value = '';
+      if (!preserveInput || input !== document.activeElement) {
+        if (rect) input.value = String(rect[key]); else input.value = '';
+      }
       input.setCustomValidity('');
       const extent = key === 'x' || key === 'w' ? area.width : area.height;
       input.min = String(key === 'w' || key === 'h' ? Math.min(100, extent) : 0);
@@ -90,7 +92,7 @@ export function createDashboardLayoutEditor({ document, window, surface, onChang
   preview.addEventListener('pointermove', event => {
     if (!gesture || gesture.pointer !== event.pointerId) return;
     const g = gesture; const dx = Math.round((event.clientX - g.x) / g.scale); const dy = Math.round((event.clientY - g.y) / g.scale);
-    const pixels = g.action === 'move' ? { x: g.rect.x + dx, y: g.rect.y + dy } : { w: g.rect.w + dx, h: g.rect.h + dy };
+    const pixels = g.action === 'move' ? { x: g.rect.x + dx, y: g.rect.y - dy } : { w: g.rect.w + dx, h: g.rect.h - dy };
     draft[g.mode] = editWidget(g.profile, g.id, pixels, g.area); render();
   }, options);
   preview.addEventListener('pointerup', event => {
@@ -104,7 +106,7 @@ export function createDashboardLayoutEditor({ document, window, surface, onChang
   const observer = new window.ResizeObserver(() => refreshSurface()); observer.observe(root);
   function refreshSurface() {
     if (gesture) { const area = surface(); if (area.width !== gesture.area.width || area.height !== gesture.area.height || area.x !== gesture.area.x || area.y !== gesture.area.y) cancelGesture(); }
-    render();
+    render(true);
   }
   return {
     setDraft(value) { cancelGesture(); draft = normalizeWidgetLayout(value); baseline = structuredClone(draft); render(); announce(); },

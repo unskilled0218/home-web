@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeWidgetLayout, defaultWidgetLayout, initialWidgetProfile, projectWidget, editWidget, changeWidgetLayer, LAYOUT_UNITS } from '../public/dashboard-layout.js';
+import { normalizeWidgetLayout, defaultWidgetLayout, initialWidgetProfile, projectWidget, editWidget, changeWidgetLayer, decodeStoredWidgetLayout, LAYOUT_UNITS } from '../public/dashboard-layout.js';
 import { normalizeDashboardPreferences, validateDashboardPreferences, decodeStoredDashboardPreferences } from '../public/dashboard-helpers.js';
 
 const surface = { width: 800, height: 800 };
@@ -11,7 +11,7 @@ function sample() {
 }
 
 test('layout defaults preserve automatic profiles and canonical normalization preserves layer order', () => {
-  assert.deepEqual(normalizeWidgetLayout(defaultWidgetLayout()), { version: 1, desktop: null, mobile: null });
+  assert.deepEqual(normalizeWidgetLayout(defaultWidgetLayout()), { version: 2, desktop: null, mobile: null });
   for (const mode of ['desktop', 'mobile']) for (const position of ['left', 'right']) {
     const layout = { ...defaultWidgetLayout(), [mode]: initialWidgetProfile(mode, position) };
     assert.deepEqual(normalizeWidgetLayout(layout), layout);
@@ -20,7 +20,7 @@ test('layout defaults preserve automatic profiles and canonical normalization pr
 });
 
 const malformed = {
-  'unknown version': value => { value.version = 2; },
+  'unknown version': value => { value.version = 99; },
   'missing profile': value => { delete value.mobile; },
   'extra envelope field': value => { value.zIndex = 5; },
   'missing widget': value => { value.desktop.items.pop(); },
@@ -120,4 +120,31 @@ test('old stored preferences gain only automatic layout; invalid present data an
   assert.throws(() => decodeStoredDashboardPreferences({ ...old, widgetLayout: null }));
   const configured = { ...preferences, widgetLayout: { ...defaultWidgetLayout(), desktop: sample() } };
   assert.deepEqual(validateDashboardPreferences(configured), configured);
+});
+
+test('version-1 top coordinates decode to bottom offsets without changing order or source data', () => {
+  const old = { version: 1, desktop: sample(), mobile: initialWidgetProfile('mobile') }; const before = structuredClone(old);
+  const decoded = decodeStoredWidgetLayout(old);
+  assert.equal(decoded.version, 2);
+  for (const mode of ['desktop', 'mobile']) for (const [index, item] of old[mode].items.entries()) assert.deepEqual(decoded[mode].items[index], { ...item, y: LAYOUT_UNITS - item.y - item.h });
+  assert.deepEqual(old, before); assert.deepEqual(decodeStoredWidgetLayout(decoded), decoded, 'conversion happens only once');
+  assert.throws(() => normalizeWidgetLayout(old), /Reload this page/);
+  assert.throws(() => validateDashboardPreferences({ ...normalizeDashboardPreferences(), widgetLayout: old }), /Reload this page/);
+  assert.deepEqual(decodeStoredDashboardPreferences({ ...normalizeDashboardPreferences(), widgetLayout: old }).widgetLayout, decoded);
+  const invalid = structuredClone(old); invalid.desktop.items[0].y = LAYOUT_UNITS;
+  assert.throws(() => decodeStoredWidgetLayout(invalid), /bounds/);
+});
+
+test('bottom-left origin and height edits preserve the bottom anchor except for containment', () => {
+  const profile = sample(); profile.items[0] = { id: 'calendar', x: 0, y: 0, w: 200000, h: 200000 };
+  for (const height of [400, 800, 1000]) {
+    const rect = projectWidget(profile.items[0], { width: 800, height });
+    assert.equal(rect.x, 0); assert.equal(rect.y, 0, 'zero Y always anchors at the bottom');
+  }
+  const taller = editWidget(profile, 'calendar', { h: 300 }, surface);
+  assert.equal(taller.items[0].y, 0); assert.equal(taller.items[0].x, 0); assert.equal(taller.items[0].w, profile.items[0].w);
+  const lifted = editWidget(taller, 'calendar', { y: 100 }, surface);
+  assert.equal(projectWidget(lifted.items[0], surface).y, 100); assert.equal(lifted.items[0].h, taller.items[0].h);
+  const contained = editWidget(lifted, 'calendar', { h: 800 }, surface);
+  assert.equal(contained.items[0].y, 0); assert.equal(contained.items[0].h, LAYOUT_UNITS);
 });

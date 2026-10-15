@@ -5,11 +5,12 @@ export const WIDGET_ELEMENTS = Object.freeze({ time: 'clock', weather: 'weather'
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const fields = (value, keys) => object(value) && Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key));
-export const defaultWidgetLayout = () => ({ version: 1, desktop: null, mobile: null });
+export const defaultWidgetLayout = () => ({ version: 2, desktop: null, mobile: null });
 
 export function normalizeWidgetLayout(value) {
-  if (!fields(value, ['version', 'desktop', 'mobile']) || value.version !== 1) throw new Error('Invalid widget layout.');
-  const result = { version: 1 };
+  if (value?.version === 1) throw new Error('Widget layout coordinates changed. Reload this page before saving.');
+  if (!fields(value, ['version', 'desktop', 'mobile']) || value.version !== 2) throw new Error('Invalid widget layout.');
+  const result = { version: 2 };
   for (const mode of ['desktop', 'mobile']) {
     const profile = value[mode];
     if (profile === null) { result[mode] = null; continue; }
@@ -26,6 +27,15 @@ export function normalizeWidgetLayout(value) {
   return result;
 }
 
+// Version 1 measured Y downward from the top. Decode only; current writes use v2.
+export function decodeStoredWidgetLayout(value) {
+  if (value?.version !== 1) return normalizeWidgetLayout(value);
+  const result = normalizeWidgetLayout({ ...value, version: 2 });
+  for (const mode of ['desktop', 'mobile']) if (result[mode]) result[mode].items = result[mode].items.map(item => ({ ...item, y: LAYOUT_UNITS - item.y - item.h }));
+  return result;
+}
+
+// Pixel X/Y are distances from the usable surface's left/bottom edges.
 export function projectWidget(item, surface) {
   const width = Math.floor(surface.width); const height = Math.floor(surface.height);
   if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null;
@@ -73,6 +83,6 @@ export function initialWidgetProfile(mode, position = 'left') {
   return { items: ids.map((id, index) => {
     const [column, row] = cells[index]; const x = Math.round(column * LAYOUT_UNITS / columns); const y = Math.round(row * LAYOUT_UNITS / rows);
     const w = Math.floor(LAYOUT_UNITS / columns) - 10000; const h = Math.floor(LAYOUT_UNITS / rows) - 10000;
-    return { id, x: position === 'right' && mode === 'desktop' ? LAYOUT_UNITS - x - w : x, y, w, h };
+    return { id, x: position === 'right' && mode === 'desktop' ? LAYOUT_UNITS - x - w : x, y: LAYOUT_UNITS - y - h, w, h };
   }) };
 }

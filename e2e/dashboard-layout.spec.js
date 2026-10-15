@@ -67,7 +67,7 @@ test('covered widgets are selectable and all six share one hit-tested stacking s
     await page.setViewportSize({ width: 1200, height: 800 }); await ready(page, env); await open(page);
     for (const id of ['time', 'weather', 'calendar', 'bookmarks', 'home-assistant', 'wol']) {
       await page.locator('#layout-widget').selectOption(id); await page.getByRole('button', { name: 'Bring to front', exact: true }).click(); await save(page); await page.locator('#close-settings').click();
-      const top = await page.evaluate(() => { const area = document.getElementById('widget-surface').getBoundingClientRect(); return document.elementFromPoint(area.x + area.width * .2, area.y + area.height * .2)?.closest('#widget-surface > section, #widget-surface > aside')?.id; });
+      const top = await page.evaluate(() => { const area = document.querySelector('#widget-surface > section').getBoundingClientRect(); return document.elementFromPoint(area.x + area.width * .2, area.y + area.height * .2)?.closest('#widget-surface > section, #widget-surface > aside')?.id; });
       expect(top).toBe({ time: 'clock', weather: 'weather', calendar: 'calendar', bookmarks: 'bookmarks', 'home-assistant': 'dashboard-ha', wol: 'dashboard-wol' }[id]);
       await expect(page.locator('#open-settings')).toBeVisible(); await open(page);
     }
@@ -145,8 +145,8 @@ test('real resize gestures and keyboard fields edit only intended dimensions', a
   try {
     await ready(page, env); await open(page); await page.locator('#layout-widget').selectOption('time');
     const original = structuredClone(storedLayout(env));
-    await drag(page, 'resize', 'time', 10, 8); await save(page);
-    const item = storedLayout(env).desktop.items.at(-1); expect(item.w).not.toBe(time.w); expect(item.h).not.toBe(time.h);
+    await drag(page, 'resize', 'time', 10, -8); await save(page);
+    const item = storedLayout(env).desktop.items.at(-1); expect(item.w).toBeGreaterThan(time.w); expect(item.h).toBeGreaterThan(time.h);
     expect(item.x).toBe(time.x); expect(item.y).toBe(time.y);
     await page.locator('#layout-w').focus(); await page.keyboard.press('ArrowUp'); await page.keyboard.press('Tab'); await save(page);
     const resized = storedLayout(env).desktop.items.at(-1); expect(resized.h).toBe(item.h); expect(resized.w).toBeGreaterThan(item.w);
@@ -155,7 +155,7 @@ test('real resize gestures and keyboard fields edit only intended dimensions', a
 });
 
 test('touch preview gestures capture only editing affordances and cancel on viewport changes', async ({ browser }) => {
-  const widgetLayout = layout(); const time = widgetLayout.desktop.items.splice(widgetLayout.desktop.items.findIndex(item => item.id === 'time'), 1)[0]; widgetLayout.desktop.items.push(time);
+  const widgetLayout = layout(); const time = widgetLayout.desktop.items.splice(widgetLayout.desktop.items.findIndex(item => item.id === 'time'), 1)[0]; time.y = 300000; widgetLayout.desktop.items.push(time);
   const env = await environment({ widgetLayout }); const context = await browser.newContext({ hasTouch: true, viewport: { width: 1100, height: 800 } }); const page = await context.newPage();
   try {
     await ready(page, env); await open(page); await page.locator('#layout-widget').selectOption('time');
@@ -260,5 +260,32 @@ test('confirmed cached layouts remain usable offline without becoming writable s
     await open(page); await expect(page.locator('#save-preferences')).toBeDisabled(); await expect(page.locator('#layout-arrangement')).toHaveValue('custom');
     expect(env.store.getDashboardPreferences()).toEqual(saved);
     expect(await page.evaluate(() => JSON.parse(localStorage.getItem('dashboard.shared-settings.v1')).preferences.widgetLayout)).toEqual(saved.preferences.widgetLayout);
+  } finally { await page.goto('about:blank'); await env.close(); }
+});
+
+test('bottom-left coordinates move upward and resize upward while preserving the bottom anchor', async ({ page }) => {
+  const env = await environment({ widgetLayout: layout() });
+  try {
+    await page.setViewportSize({ width: 1200, height: 800 }); await ready(page, env); await open(page);
+    await page.locator('#layout-widget').selectOption('time'); await page.getByRole('button', { name: 'Bring to front', exact: true }).click();
+    await pixel(page, 'x', 0); await pixel(page, 'y', 0); await pixel(page, 'w', 200); await pixel(page, 'h', 120); await save(page); await page.locator('#close-settings').click();
+    let area = await page.locator('#widget-surface').boundingBox(); let clock = await page.locator('#clock').boundingBox();
+    expect(clock.x).toBe(area.x); expect(clock.y + clock.height).toBe(area.y + area.height);
+    const bottom = clock.y + clock.height;
+    await open(page); await page.locator('#layout-h').fill('170');
+    await page.evaluate(async () => { window.dispatchEvent(new Event('resize')); await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))); });
+    await expect(page.locator('#layout-h')).toHaveValue('170'); await page.locator('#layout-h').press('Tab');
+    await save(page); await page.locator('#close-settings').click();
+    clock = await page.locator('#clock').boundingBox(); expect(clock.height).toBe(170); expect(clock.y + clock.height).toBe(bottom);
+    await open(page); await pixel(page, 'y', 30); await save(page); await page.locator('#close-settings').click();
+    clock = await page.locator('#clock').boundingBox(); expect(clock.y + clock.height).toBe(bottom - 30);
+    await open(page); const beforeMove = structuredClone(storedLayout(env).desktop.items.find(item => item.id === 'time'));
+    await drag(page, 'move', 'time', 0, -10); await save(page);
+    const moved = storedLayout(env).desktop.items.find(item => item.id === 'time'); expect(moved.y).toBeGreaterThan(beforeMove.y); expect(moved.h).toBe(beforeMove.h); expect(moved.w).toBe(beforeMove.w);
+    const beforeResize = structuredClone(moved); await drag(page, 'resize', 'time', 0, -8); await save(page);
+    const resized = storedLayout(env).desktop.items.find(item => item.id === 'time'); expect(resized.h).toBeGreaterThan(beforeResize.h); expect(resized.y).toBe(beforeResize.y); expect(resized.w).toBe(beforeResize.w);
+    await pixel(page, 'y', 0); await save(page); await page.locator('#close-settings').click(); const canonical = storedLayout(env);
+    for (const height of [600, 1000]) { await page.setViewportSize({ width: 1200, height }); await expect.poll(async () => { const a = await page.locator('#widget-surface').boundingBox(); const b = await page.locator('#clock').boundingBox(); return b.y + b.height - a.y - a.height; }).toBe(0); }
+    expect(storedLayout(env)).toEqual(canonical);
   } finally { await page.goto('about:blank'); await env.close(); }
 });

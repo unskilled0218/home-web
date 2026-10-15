@@ -1,5 +1,15 @@
 # implemented
 
+## Follow-up: Bottom-Left Origin (`0.17.18`)
+
+Changed custom profiles to a bottom-left origin as requested. X measures from the left; Y measures upward from the bottom of the usable dashboard area. Live widgets and preview boxes now use CSS `bottom`. Upward moves increase Y, and the upper-right resize handle grows height upward while retaining the bottom offset unless containment requires adjustment. Automatic layout, visibility, stacking, field-preservation semantics, and shared save ownership remain unchanged. Labels, announcements, and dedicated documentation explain the new coordinates.
+
+Nested layout version 2 identifies this coordinate contract. Valid stored/cache version-1 layouts decode once using `newY = 1,000,000 - oldY - height`, preserving normalized placement and record order without a database/cache write or revision bump on read. Minimum-size projection now clamps against the bottom anchor. Current writes reject version-1 layouts with a reload instruction, preventing older pages from silently saving top-origin geometry. The next explicit save persists the converted layout through the existing revision owner.
+
+Added model, API, cache, and browser regressions for migration validation/idempotence, unchanged read revisions/bytes, rejected old-coordinate writes, bottom anchoring, numeric Y/height changes, upward move/resize, and viewport changes. Browser verification also exposed a measurement callback overwriting an in-progress numeric entry; measurement-only renders now retain the focused input until its edit commits. The browser regression explicitly remeasures while a height field is being edited.
+
+Verification: the complete Node suite passed 389 tests, and the complete browser suite passed 115 tests, including Firefox/Chromium sharing. After adding the explicit in-progress-entry assertion, the final focused layout suite passed all 13 scenarios. `npm run check`, individual syntax checks for all changed JavaScript files, and `git diff --check` passed. Package manifests now use `0.17.18`; no dependencies, runtime data, or legacy layout settings were changed.
+
 ## Outcome
 
 Implemented task 49 on the new branch `49-stackable-dashboard-widgets`, version `0.17.17`. Settings → General → Widget layout now offers independent Automatic/Custom desktop and mobile profiles, a labeled drag/resize preview, exact pixel controls, covered-widget selection, and plain-language layer actions. Automatic remains the default; the live dashboard changes only after a confirmed shared preference save.
