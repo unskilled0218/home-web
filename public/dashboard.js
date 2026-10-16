@@ -154,7 +154,10 @@ function renderCalendar(state = calendarState) {
   }
 }
 const calendar = createCalendarController({ onChange: renderCalendar, autoStart: false });
-function stopAnimations() { animations.forEach((animation) => animation.cancel()); animations = []; }
+function stopAnimations() {
+  animations.forEach((animation) => animation.cancel()); animations = [];
+  const container = $('photos'); while (container.children.length > 1) container.firstElementChild.remove();
+}
 function applyVisibilityLayout() {
   const display = dashboardDisplay(settings, { mobile: mobileViewport.matches, fullscreen: Boolean(document.fullscreenElement), caption: Boolean($('photo-caption').textContent) });
   applyDashboardDisplay(document, display);
@@ -162,8 +165,21 @@ function applyVisibilityLayout() {
   return display;
 }
 function clearPhotos() { stopAnimations(); $('photos').replaceChildren(); $('photo-caption').textContent = ''; applyVisibilityLayout(); }
+function updatePhotoPresentation(photo, options) {
+  const container = $('photos'); const layer = container.lastElementChild;
+  if (!layer) return;
+  stopAnimations(); while (container.children.length > 1) container.firstElementChild.remove();
+  layer.style.opacity = options.opacity;
+  let background = layer.querySelector('.photo-blur');
+  if (options.background === 'blur') {
+    if (!background) { background = new Image(); background.alt = ''; background.src = photo.url; background.className = 'photo-blur'; layer.prepend(background); }
+    background.style.filter = `blur(${options.blur}px)`;
+  } else background?.remove();
+  $('photo-caption').textContent = options.imageInfo ? photo.file.name : ''; applyVisibilityLayout();
+}
 const photos = createPhotoController({
   clear: clearPhotos,
+  update: updatePhotoPresentation,
   report: (message) => { $('photo-status').textContent = message; },
   show(photo, options) {
     stopAnimations();
@@ -377,8 +393,9 @@ document.addEventListener('fullscreenchange', fullscreenState);
 document.addEventListener('visibilitychange', () => { startClock(); photos.setVisible(!document.hidden); weather.setVisible(!document.hidden); calendar.setVisible(!document.hidden); bookmarks.setVisible(!document.hidden); settingsSync.setVisible(!document.hidden); deviceIntegrations.setVisible(!document.hidden); if (document.hidden) stopAnimations(); });
 reducedMotion.addEventListener('change', () => { stopAnimations(); photos.configure(settings); });
 mobileViewport.addEventListener('change', applyPresentation);
-window.addEventListener('pagehide', (event) => { clearInterval(clockTimer); cancelSearch(); layoutActivation.cancel(); layoutEditor.cancelGesture(); weather.dispose(); photos.dispose(); if (event.persisted) { bookmarks.setVisible(false); settingsSync.setVisible(false); deviceIntegrations.setVisible(false); integrationSettings.suspend(); } else { layoutActivation.dispose(); layoutEditor.dispose(); layoutView.dispose(); calendar.dispose(); bookmarks.dispose(); settingsSync.dispose(); integrationSettings.dispose(); deviceIntegrations.dispose(); } });
-window.addEventListener('pageshow', (event) => { if (event.persisted) { void photos.load(); applyPresentation(); weather.configure(settings); void weather.refresh(); void calendar.refresh(); bookmarks.setVisible(!document.hidden); settingsSync.setVisible(!document.hidden); deviceIntegrations.setVisible(!document.hidden); } });
+window.addEventListener('pagehide', (event) => { clearInterval(clockTimer); cancelSearch(); layoutActivation.cancel(); layoutEditor.cancelGesture(); weather.dispose(); if (event.persisted) { photos.setVisible(false); bookmarks.setVisible(false); settingsSync.setVisible(false); deviceIntegrations.setVisible(false); integrationSettings.suspend(); } else { photos.dispose(); layoutActivation.dispose(); layoutEditor.dispose(); layoutView.dispose(); calendar.dispose(); bookmarks.dispose(); settingsSync.dispose(); integrationSettings.dispose(); deviceIntegrations.dispose(); } });
+window.addEventListener('pageshow', (event) => { if (event.persisted) { photos.setVisible(!document.hidden); applyPresentation(); weather.configure(settings); void weather.refresh(); void calendar.refresh(); bookmarks.setVisible(!document.hidden); settingsSync.setVisible(!document.hidden); deviceIntegrations.setVisible(!document.hidden); } });
+window.addEventListener('online', () => { if (servicesStarted) void photos.load(); });
 photos.setVisible(!document.hidden); weather.setVisible(!document.hidden); calendar.setVisible(!document.hidden);
 bookmarks.setVisible(!document.hidden);
 deviceIntegrations.setVisible(!document.hidden);

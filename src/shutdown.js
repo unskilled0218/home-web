@@ -4,7 +4,7 @@ export function createShutdownCoordinator({ report = console.error, notify = () 
   const resources = {}; const preparations = new Map();
   let phase = 'startup'; let failure = null; let finished = false; let deadline; let shutdownPromise; let resolveShutdown;
   let resolveStartup; const startup = new Promise((resolve) => { resolveStartup = resolve; });
-  let startupSettled = false; let httpDrain; let weatherDrain;
+  let startupSettled = false; let httpDrain; let weatherDrain; let slideshowDrain;
   const log = (message) => { try { report(message); } catch { /* Reporting cannot prevent cleanup. */ } };
   const send = (message) => { try { notify(message); } catch { /* Owner loss does not undo local cleanup. */ } };
   const preparationStatus = () => send({ type: 'dashboard:preparation', pending: preparations.size });
@@ -21,6 +21,7 @@ export function createShutdownCoordinator({ report = console.error, notify = () 
   function beginDrains() {
     if (resources.server && !httpDrain) httpDrain = clean('HTTP', () => resources.server.lifecycle.shutdown({ graceMs, schedule, cancel }));
     if (resources.weather && !weatherDrain) weatherDrain = clean('Weather', () => resources.weather.stop());
+    if (resources.slideshow && !slideshowDrain) slideshowDrain = clean('Slideshow', () => resources.slideshow.stop());
   }
   function stopPreparation(child, owner) {
     if (owner.stopping) return;
@@ -39,7 +40,7 @@ export function createShutdownCoordinator({ report = console.error, notify = () 
     beginDrains(); for (const [child, owner] of preparations) stopPreparation(child, owner);
     void (async () => {
       await startup; beginDrains();
-      await Promise.all([httpDrain, weatherDrain, ...[...preparations.values()].map((owner) => owner.exited)]);
+      await Promise.all([httpDrain, weatherDrain, slideshowDrain, ...[...preparations.values()].map((owner) => owner.exited)]);
       if (finished) return;
       if (resources.homeAssistant) await clean('Home Assistant transport', () => resources.homeAssistant.dispose());
       if (finished) return;
@@ -51,7 +52,7 @@ export function createShutdownCoordinator({ report = console.error, notify = () 
   return {
     getState: () => ({ phase, failure, pendingPreparations: preparations.size }),
     get stopping() { return phase === 'stopping' || phase === 'stopped'; },
-    attach(name, resource) { resources[name] = resource; if (phase === 'stopping') beginDrains(); },
+    attach(name, resource) { resources[name] = resource; if (phase === 'stopping' || phase === 'stopped') beginDrains(); },
     startupFinished() { if (startupSettled) return; startupSettled = true; if (phase === 'startup') phase = 'running'; resolveStartup(); },
     fail(error) { markFailure('application', `Dashboard startup failed: ${String(error?.message ?? error).slice(0, 500)}`); return shutdown(); },
     ownPreparation(child) {

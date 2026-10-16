@@ -9,6 +9,7 @@ import { createCalDavClient } from './caldav.js';
 import { prepareNfs } from './nfs.js';
 import { createPhotoLibrary, createUnavailablePhotoLibrary } from './photo-library.js';
 import { createWeatherService } from './weather.js';
+import { createPhotoSlideshow } from './photo-slideshow.js';
 import { resolveLinkwardenEncryptionKey } from './linkwarden-key.js';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
@@ -65,11 +66,15 @@ async function boot() {
   if (config.nfs.error || nfs.reason === 'failed') console.warn('NFS backgrounds are unavailable; starting the dashboard without photos.');
   const photoLibrary = nfs.available ? createPhotoLibrary({ root: nfs.root }) : createUnavailablePhotoLibrary();
   const weather = createWeatherService({ store }); lifecycle.attach('weather', weather);
-  const server = createDashboardServer({ runtimeConfig: config, store, linkwarden, homeAssistant, homeAssistantControls, calDav, photoLibrary, weather }); lifecycle.attach('server', server);
+  let photoPreferences;
+  try { photoPreferences = store.getDashboardPreferences().preferences; } catch { console.warn('Shared photo preferences are unavailable; slideshow rotation is paused.'); }
+  const slideshow = createPhotoSlideshow({ photoLibrary, enabled: config.nfs.mode !== 'disabled', preferences: photoPreferences }); lifecycle.attach('slideshow', slideshow);
+  const server = createDashboardServer({ runtimeConfig: config, store, linkwarden, homeAssistant, homeAssistantControls, calDav, photoLibrary, weather, slideshow }); lifecycle.attach('server', server);
   server.on('error', (error) => { void stop(error); });
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(config.port, config.host, resolve); });
   if (lifecycle.stopping) { await new Promise((resolve) => server.close(() => resolve())); return; }
   weather.start();
+  void slideshow.start();
   console.log(`dashboard listening at http://${config.host}:${config.port}`);
   notify({ type: 'dashboard:ready' });
 }

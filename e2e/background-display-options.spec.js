@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { createStore } from '../src/db.js';
 import { createDashboardServer } from '../src/app.js';
 import { normalizeDashboardPreferences } from '../public/dashboard-helpers.js';
+import { mockSlideshow } from './photo-fixtures.js';
 
 const sections = { time: 'clock', weather: 'weather', calendar: 'calendar', bookmarks: 'bookmarks', homeAssistant: 'dashboard-ha', wol: 'dashboard-wol' };
 const field = (name, mobile) => `${mobile ? `mobile${name[0].toUpperCase()}${name.slice(1)}` : name}Visible`;
@@ -160,26 +161,27 @@ test('slideshow captions update geometry without resetting clock timers or addin
       window.clockIntervalCalls = []; const original = window.setInterval;
       window.setInterval = (...args) => { const id = original(...args); window.clockIntervalCalls.push({ id, delay: args[1], start: Date.now() }); return id; };
     });
-    await page.route('**/api/dashboard/photos', (route) => { manifests++; return route.fulfill({ json: { available: true, photos: [{ name: 'first.png', lastModified: 1, url: '/api/dashboard/photos/abcdefghijklmnop' }, { name: 'second.png', lastModified: 2, url: '/api/dashboard/photos/qrstuvwxyzabcdef' }] } }); });
+    const slideshow = await mockSlideshow(page, [{ name: 'first.png', lastModified: 1, url: '/api/dashboard/photos/abcdefghijklmnop' }, { name: 'second.png', lastModified: 2, url: '/api/dashboard/photos/qrstuvwxyzabcdef' }], () => { manifests++; });
     await page.route('**/api/dashboard/photos/*', (route) => route.fulfill({ contentType: 'image/png', body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64') }));
     page.on('request', (request) => { if (/api\/linkwarden\/.*bookmarks/.test(request.url())) folders++; });
     await ready(page, env); await expect(page.locator('#photo-caption')).toHaveText('first.png');
     const timers = await page.evaluate(() => window.clockIntervalCalls); const revision = env.store.getDashboardPreferences().revision;
     for (const caption of ['second.png', 'first.png', 'second.png']) {
+      slideshow.select(caption === 'first.png' ? 0 : 1);
       await page.clock.fastForward(5000); await expect(page.locator('#photo-caption')).toHaveText(caption);
-      expect(await page.evaluate(() => window.clockIntervalCalls)).toEqual(timers); expect(manifests).toBe(1); expect(folders).toBe(0); expect(env.store.getDashboardPreferences().revision).toBe(revision);
+      expect(await page.evaluate(() => window.clockIntervalCalls)).toEqual(timers); expect(manifests).toBeGreaterThan(1); expect(folders).toBe(0); expect(env.store.getDashboardPreferences().revision).toBe(revision);
     }
     await setFlags(page, { hideTimeFullscreen: true });
     const beforeFullscreen = await page.evaluate(() => window.clockIntervalCalls);
     await page.locator('#fullscreen').click(); await expect(page.locator('#clock')).toBeHidden(); await expect(page.locator('#open-settings')).toBeVisible();
     await page.locator('#fullscreen').click(); await expect(page.locator('#clock')).toBeVisible();
-    expect(await page.evaluate(() => window.clockIntervalCalls)).toEqual(beforeFullscreen); expect(manifests).toBe(1); expect(folders).toBe(0);
+    expect(await page.evaluate(() => window.clockIntervalCalls)).toEqual(beforeFullscreen); expect(manifests).toBeGreaterThanOrEqual(4); expect(folders).toBe(0);
     await setFlags(page, { timeVisible: false }); await expect(page.locator('#information')).toBeVisible(); await expect(page.locator('body')).toHaveClass('background-only');
     await page.locator('#fullscreen').click(); await expect(page.locator('#open-settings')).toBeVisible(); await page.locator('#fullscreen').click();
     const stable = await page.evaluate(() => window.clockIntervalCalls);
     await page.clock.fastForward(5000); expect(await page.evaluate(() => window.clockIntervalCalls)).toEqual(stable);
     await page.locator('#open-settings').click(); await page.locator('#settings-tab-images').click(); await page.locator('[name="imageInfo"]').uncheck(); await save(page); await page.locator('#close-settings').click();
     await expect(page.locator('#photo-caption')).toBeEmpty(); await expect(page.locator('#information')).toBeHidden();
-    await page.locator('#fullscreen').click(); await expect(page.locator('#open-settings')).toBeVisible(); await page.locator('#fullscreen').click(); expect(manifests).toBe(1);
+    await page.locator('#fullscreen').click(); await expect(page.locator('#open-settings')).toBeVisible(); await page.locator('#fullscreen').click(); expect(manifests).toBeGreaterThanOrEqual(5);
   } finally { await page.goto('about:blank'); await env.close(); }
 });

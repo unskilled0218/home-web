@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync, truncateSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync, truncateSync, writeFileSync, utimesSync } from 'node:fs';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { createPhotoLibrary, createUnavailablePhotoLibrary } from '../src/photo-library.js';
@@ -92,4 +92,13 @@ test('applies an overall scan deadline and reserves at most eight streams', asyn
   const opened = await Promise.all(Array.from({ length: 9 }, () => library.open(token)));
   assert.equal(opened.filter(Boolean).length, 8);
   for (const photo of opened.filter(Boolean)) photo.stream.destroy();
+});
+
+test('observed replacement metadata changes the opaque URL while unchanged scans remain stable', async (context) => {
+  const root = mkdtempSync('/tmp/opencode/photo-token-metadata-'); context.after(() => rmSync(root, { recursive: true, force: true }));
+  const file = path.join(root, 'photo.png'); writeFileSync(file, 'first'); const library = createPhotoLibrary({ root });
+  const first = await library.list(); assert.deepEqual(await library.list(), first);
+  writeFileSync(file, 'second-image'); utimesSync(file, 100, 100);
+  const second = await library.list(); assert.notEqual(second.photos[0].url, first.photos[0].url); assert.deepEqual(await library.list(), second);
+  const opened = await library.open(first.photos[0].url.split('/').at(-1)); assert.ok(opened); let content = ''; for await (const chunk of opened.stream) content += chunk; assert.equal(content, 'second-image');
 });

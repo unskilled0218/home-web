@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createShutdownCoordinator } from '../src/shutdown.js';
 import { FakeChild, deferred, fakeClock, tick } from './fixtures/lifecycle.js';
+import { createPhotoSlideshow } from '../src/photo-slideshow.js';
+import { photo } from './fixtures/photo-slideshow.js';
 
 test('shutdown is shared and waits for startup, HTTP and weather before closing SQLite exactly once', async () => {
   const clock = fakeClock(); const http = deferred(); const weather = deferred(); const order = [];
@@ -70,4 +72,28 @@ test('cooperative NFS child exit permits cleanup and spawn failure cannot invent
 test('shutdown during startup never becomes running and resources added before settlement still drain', async () => {
   const clock = fakeClock(); const shutdown = createShutdownCoordinator({ ...clock, report() {} }); const stopped = shutdown.shutdown(); let closed = 0;
   shutdown.attach('store', { close() { closed++; } }); assert.equal(shutdown.stopping, true); shutdown.startupFinished(); await stopped; assert.equal(shutdown.getState().phase, 'stopped'); assert.equal(closed, 1);
+});
+
+for (const lateAttach of [false, true]) test(`shutdown drains actual slideshow scans alongside HTTP before SQLite closure (late attach: ${lateAttach})`, async () => {
+  const clock = fakeClock(); const scan = deferred(); const http = deferred(); let closed = 0;
+  const service = createPhotoSlideshow({ ...clock, photoLibrary: { list: () => scan.promise }, preferences: { order: 'name', interval: 5 } }); void service.start(); await tick();
+  const owner = createShutdownCoordinator({ ...clock, report() {} }); owner.attach('store', { close() { closed++; } }); owner.attach('server', { lifecycle: { shutdown: () => http.promise } });
+  if (!lateAttach) owner.attach('slideshow', service);
+  const stopping = owner.shutdown(); if (lateAttach) owner.attach('slideshow', service); owner.startupFinished(); http.resolve(); await tick(); assert.equal(closed, 0);
+  scan.resolve({ available: true, photos: [photo()] }); assert.equal((await stopping).cleanupSafe, true); assert.equal(closed, 1); assert.equal(clock.timers.size, 0); assert.equal(service.snapshot().current, null);
+});
+
+test('unconfirmed slideshow scan triggers unsafe deadline outcome and never closes SQLite later', async () => {
+  const clock = fakeClock(); const scan = deferred(); let closed = 0;
+  const service = createPhotoSlideshow({ ...clock, photoLibrary: { list: () => scan.promise }, preferences: { order: 'name', interval: 5 } }); void service.start(); await tick();
+  const owner = createShutdownCoordinator({ ...clock, timeoutMs: 30, report() {} }); owner.attach('slideshow', service); owner.attach('store', { close() { closed++; } }); owner.startupFinished();
+  const stopping = owner.shutdown(); clock.fire(30); const result = await stopping; assert.equal(result.code, 1); assert.equal(result.cleanupSafe, false);
+  scan.resolve({ available: true, photos: [photo()] }); await tick(); assert.equal(closed, 0); assert.equal(service.snapshot().current, null); assert.equal(clock.timers.size, 0);
+});
+
+test('slideshow attached after the startup shutdown deadline is still stopped before it can start', async () => {
+  const clock = fakeClock(); const owner = createShutdownCoordinator({ ...clock, timeoutMs: 30, report() {} });
+  const stopping = owner.shutdown(); clock.fire(30); assert.equal((await stopping).forced, true);
+  let scans = 0; const service = createPhotoSlideshow({ ...clock, photoLibrary: { list() { scans++; return { available: true, photos: [photo()] }; } }, preferences: { order: 'name', interval: 5 } });
+  owner.attach('slideshow', service); await service.start(); owner.startupFinished(); await tick(); assert.equal(scans, 0); assert.equal(clock.timers.size, 0);
 });

@@ -17,7 +17,7 @@ const unavailable = () => ({ available: false, photos: [] });
 export function createPhotoLibrary({ root, available = Boolean(root), token, now = Date.now, scanTimeoutMs = 10_000 } = {}) {
   const snapshot = new Map();
   const tokenSecret = randomBytes(32);
-  const createToken = token ?? ((relative) => createHmac('sha256', tokenSecret).update(relative).digest('base64url'));
+  const createToken = token ?? ((relative, _attempt, metadata) => createHmac('sha256', tokenSecret).update(JSON.stringify([relative, metadata.mtimeMs, metadata.size])).digest('base64url'));
   let scanPromise;
   let activeStreams = 0;
 
@@ -71,7 +71,7 @@ export function createPhotoLibrary({ root, available = Boolean(root), token, now
       total += candidate.size;
       let id = null;
       for (let attempt = 0; attempt < 10 && (!id || snapshot.has(id)); attempt++) {
-        const value = createToken(candidate.relative, attempt);
+        const value = createToken(candidate.relative, attempt, candidate);
         if (/^[A-Za-z0-9_-]{16,128}$/.test(value)) id = value;
         if (id && snapshot.get(id)?.relative === candidate.relative) break;
       }

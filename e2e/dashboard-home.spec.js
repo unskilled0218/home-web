@@ -2,6 +2,7 @@ import { expect, test as base } from '@playwright/test';
 import { normalizeForecast } from '../public/weather-data.js';
 import { rawForecast } from '../test/fixtures/weather.js';
 import { normalizeDashboardPreferences, validateDashboardPreferences } from '../public/dashboard-helpers.js';
+import { mockSlideshow } from './photo-fixtures.js';
 
 const settingsKey = 'dashboard.shared-settings.v1';
 const instant = new Date('2026-10-11T12:00:00Z');
@@ -14,7 +15,7 @@ const test = base.extend({
     page.on('pageerror', (error) => errors.push(error.message));
     page.on('console', (message) => { if (/invalid form control|not focusable/i.test(message.text())) errors.push(message.text()); });
     await page.route('**/api/calendar', (route) => route.fulfill({ json: { configured: false, encryptionReady: true } }));
-    await page.route('**/api/dashboard/photos', (route) => route.fulfill({ json: { available: true, photos: [] } }));
+    await mockSlideshow(page);
     await page.route('**/api/linkwarden', (route) => route.fulfill({ json: { linkwarden: { configured: false, configurationId: null, encryptionReady: true } } }));
     await mockWeather(page, { configured: false });
     await mockSharedSettings(page);
@@ -214,7 +215,7 @@ for (const width of [1200, 320, 390]) test(`Settings remains usable at ${width}p
 test('home renders a decoded background, weather forecasts, and calendar events from service responses', async ({ page }) => {
   await page.clock.setFixedTime(instant);
   await seedPreferences(page, { timezone: 'UTC', imageInfo: true, animation: 'none', location: { latitude: 51, longitude: 0, label: 'London' } });
-  await page.route('**/api/dashboard/photos', (route) => route.fulfill({ json: { available: true, photos: [{ name: 'sample.png', lastModified: instant.getTime(), url: photoUrl }] } }));
+  await mockSlideshow(page, [{ name: 'sample.png', lastModified: instant.getTime(), url: photoUrl }]);
   await page.route(`**${photoUrl}`, (route) => route.fulfill({ contentType: 'image/png', body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64') }));
   await mockWeather(page);
   await page.route('**/api/calendar', (route) => route.fulfill({ json: { configured: true, encryptionReady: true, serverUrl: 'https://baikal.example.test', username: 'calendar' } }));
@@ -417,7 +418,7 @@ for (const mobileOnly of [true, false]) test(`resizing keeps one refresh owner w
   await seedPreferences(page, { timezone: 'UTC', calendarVisible: !mobileOnly, mobileCalendarVisible: mobileOnly, interval: 3600, animation: 'fade' });
   const weather = await mockWeather(page); const calendar = await mockCalendar(page);
   let manifests = 0; let images = 0;
-  await page.route('**/api/dashboard/photos', (route) => { manifests++; return route.fulfill({ json: { available: true, photos: [{ name: 'first.png', lastModified: 1, url: photoUrl }, { name: 'second.png', lastModified: 2, url: '/api/dashboard/photos/qrstuvwxyzABCDEF' }] } }); });
+  await mockSlideshow(page, [{ name: 'first.png', lastModified: 1, url: photoUrl }, { name: 'second.png', lastModified: 2, url: '/api/dashboard/photos/qrstuvwxyzABCDEF' }], () => { manifests++; });
   await page.route('**/api/dashboard/photos/*', (route) => { images++; return route.fulfill({ contentType: 'image/png', body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64') }); });
   await page.goto('/');
   await expect.poll(() => weather.requests.refresh).toBe(1); await expect.poll(() => calendar.events).toBe(1);
@@ -437,7 +438,7 @@ for (const mobileOnly of [true, false]) test(`resizing keeps one refresh owner w
   }
   await expect.poll(() => calendar.events).toBe(before.calendar.events + 1);
   expect(calendar.status).toBe(before.calendar.status); expect(weather.requests.snapshot).toBe(before.weather.snapshot + 5);
-  expect(manifests).toBe(before.manifests); expect(images).toBe(before.images); expect(await page.evaluate(() => window.activeClockIntervals())).toBe(1);
+  expect(manifests).toBeGreaterThan(before.manifests); expect(images).toBe(before.images); expect(await page.evaluate(() => window.activeClockIntervals())).toBe(1);
 });
 
 test('hiding calendar in both profiles pauses events while retaining connection controls', async ({ page }) => {
@@ -545,7 +546,7 @@ test('bookmark-only preference saves and fullscreen keep the photo and unrelated
   const mock = await mockBookmarks(page); await mockWeather(page); await mockCalendar(page);
   const calls = [];
   page.on('request', (request) => { const path = new URL(request.url()).pathname; if (path.startsWith('/api/weather') || path.startsWith('/api/calendar') || path.startsWith('/api/dashboard/photos')) calls.push(path); });
-  await page.route('**/api/dashboard/photos', (route) => route.fulfill({ json: { available: true, photos: [{ name: 'photo.png', lastModified: 1, url: photoUrl }] } }));
+  await mockSlideshow(page, [{ name: 'photo.png', lastModified: 1, url: photoUrl }]);
   await page.route(`**${photoUrl}`, (route) => route.fulfill({ contentType: 'image/png', body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64') }));
   await page.goto('/'); await expect(page.getByRole('link', { name: 'Deep bookmark', exact: true })).toBeVisible(); await expect(page.locator('#photos .photo-layer img')).toBeVisible();
   await page.locator('#open-settings').click();
@@ -1018,7 +1019,7 @@ test('different browsers present canonical weather in their own units and timezo
     await mockWeather(other);
     await mockSharedSettings(other);
     await other.route('**/api/calendar', (route) => route.fulfill({ json: { configured: false, encryptionReady: true } }));
-    await other.route('**/api/dashboard/photos', (route) => route.fulfill({ json: { available: true, photos: [] } }));
+    await mockSlideshow(other);
     await other.goto('/');
     await expect(other.locator('#current-weather-values .temperature')).toHaveText('53.6 °F');
     await expect(other.locator('#current-weather-subvalues')).toContainText('Wind 4.3 kn');

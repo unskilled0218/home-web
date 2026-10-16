@@ -117,14 +117,6 @@ export function clockText(date, settings, locale = undefined) {
   };
 }
 
-export function orderPhotos(photos, order, random = Math.random) {
-  const result = [...photos];
-  if (order === 'random') {
-    for (let i = result.length - 1; i > 0; i--) { const j = Math.floor(random() * (i + 1)); [result[i], result[j]] = [result[j], result[i]]; }
-  } else result.sort((a, b) => (order === 'date' ? a.file.lastModified - b.file.lastModified : 0) || a.file.name.localeCompare(b.file.name));
-  return result;
-}
-
 export function sampleHours(rows, now = Date.now()) {
   let next = now / 1000;
   return rows.filter((row) => { if (row.time < next || row.time > now / 1000 + 86400) return false; next = row.time + 10800; return true; }).slice(1, 8);

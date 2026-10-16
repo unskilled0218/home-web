@@ -8,6 +8,7 @@ import { initialWidgetProfile, defaultWidgetLayout, projectWidget } from '../pub
 import { encryptApiKey } from '../src/linkwarden-crypto.js';
 import { normalizeForecast } from '../public/weather-data.js';
 import { rawForecast } from '../test/fixtures/weather.js';
+import { mockSlideshow } from './photo-fixtures.js';
 
 async function environment(preferences = {}, services = {}) {
   const directory = mkdtempSync('/tmp/opencode/dashboard-layout-'); const filename = `${directory}/app.db`;
@@ -659,13 +660,13 @@ test('layout-only changes and caption callbacks retain clock/slideshow owners', 
   const env = await environment({ widgetLayout: layout(), imageInfo: true, interval: 5, order: 'name', animation: 'none' }); let manifests = 0;
   try {
     await page.clock.install(); await page.addInitScript(() => { window.layoutClockCalls = []; const original = window.setInterval; window.setInterval = (...args) => { const id = original(...args); window.layoutClockCalls.push({ id, delay: args[1] }); return id; }; });
-    await page.route('**/api/dashboard/photos', route => { manifests++; return route.fulfill({ json: { available: true, photos: [{ name: 'first.png', lastModified: 1, url: '/api/dashboard/photos/abcdefghijklmnop' }, { name: 'second.png', lastModified: 2, url: '/api/dashboard/photos/qrstuvwxyzabcdef' }] } }); });
+    const slideshow = await mockSlideshow(page, [{ name: 'first.png', lastModified: 1, url: '/api/dashboard/photos/abcdefghijklmnop' }, { name: 'second.png', lastModified: 2, url: '/api/dashboard/photos/qrstuvwxyzabcdef' }], () => { manifests++; });
     await page.route('**/api/dashboard/photos/*', route => route.fulfill({ contentType: 'image/png', body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64') }));
     await ready(page, env); await expect(page.locator('#photo-caption')).toHaveText('first.png');
     const timers = await page.evaluate(() => window.layoutClockCalls); await open(page); await pixel(page, 'w', 180); await save(page);
     expect(await page.evaluate(() => window.layoutClockCalls)).toEqual(timers);
     const revision = env.store.getDashboardPreferences().revision;
-    for (const caption of ['second.png', 'first.png', 'second.png']) { await page.clock.fastForward(5000); await expect(page.locator('#photo-caption')).toHaveText(caption); expect(await page.evaluate(() => window.layoutClockCalls)).toEqual(timers); expect(manifests).toBe(1); expect(env.store.getDashboardPreferences().revision).toBe(revision); }
+    for (const caption of ['second.png', 'first.png', 'second.png']) { slideshow.select(caption === 'first.png' ? 0 : 1); await page.clock.fastForward(5000); await expect(page.locator('#photo-caption')).toHaveText(caption); expect(await page.evaluate(() => window.layoutClockCalls)).toEqual(timers); expect(manifests).toBeGreaterThan(1); expect(env.store.getDashboardPreferences().revision).toBe(revision); }
   } finally { await page.goto('about:blank'); await env.close(); }
 });
 

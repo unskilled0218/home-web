@@ -6,11 +6,13 @@ import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { createDashboardServer } from '../src/app.js';
-import { MOBILE_MEDIA_QUERY, clockText, loadSettings, normalizeSettings, orderPhotos, resolveDisplayPreferences, sampleHours, temperatureRange, weatherIconFile } from '../public/dashboard-helpers.js';
+import { MOBILE_MEDIA_QUERY, clockText, loadSettings, normalizeSettings, resolveDisplayPreferences, sampleHours, temperatureRange, weatherIconFile } from '../public/dashboard-helpers.js';
 import { createWeatherController, requestJson, searchLocations } from '../public/dashboard-weather.js';
 import { formatWeatherUpdated, normalizeForecast, presentForecast, validateWeatherSnapshot } from '../public/weather-data.js';
 import { weatherUrls } from '../src/weather.js';
 import { createPhotoController } from '../public/dashboard-photos.js';
+import { photo, slideshowSnapshot, snapshotResponse, slideshowClock } from './fixtures/photo-slideshow.js';
+import { deferred } from './fixtures/lifecycle.js';
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 const settings = (extra = {}) => normalizeSettings({ location: { latitude: 51, longitude: 0, label: 'London' }, timezone: 'Europe/London', ...extra });
@@ -280,13 +282,6 @@ test('formats compact daily temperature ranges without unit spaces', () => {
   assert.equal(temperatureRange(-4, 7, '°F'), '-4°F/7°F');
 });
 
-test('provides deterministic photo ordering without mutating input', () => {
-  const file = (name, size = 1, type = 'image/png', lastModified = 0) => ({ name, size, type, lastModified });
-  const photos = [{ file: file('z', 1, 'image/png', 1) }, { file: file('a', 1, 'image/png', 2) }];
-  assert.equal(orderPhotos(photos, 'name')[0].file.name, 'a'); assert.equal(orderPhotos(photos, 'date')[0].file.name, 'z'); assert.equal(photos[0].file.name, 'z');
-  assert.equal(orderPhotos(photos, 'random', () => 0)[0].file.name, 'a');
-});
-
 test('samples future hours with gaps, exhausted forecasts, and daily offset dates', () => {
   const rows = [0, 3600, 7200, 14400, 25200, 90000].map((time, index) => ({ time, day: index % 2 }));
   assert.deepEqual(sampleHours(rows, 1000).map((row) => [row.time, row.day]), [[14400, 1], [25200, 0]]);
@@ -391,43 +386,78 @@ test('canonical conversions preserve missing values, daily dates, and original d
   assert.throws(() => validateWeatherSnapshot(weatherSnapshot({ forecast: {} })));
 });
 
-test('photo owner skips failed server images and cancels timers after replacement', async () => {
-  const timers = scheduler(); const events = []; const shown = [];
-  const client = createPhotoController({ ...timers, clear: () => events.push('clear'), report: (message) => events.push(message), show: (photo) => shown.push(photo.url), decode: async (url) => { if (url === 'bad') throw new Error('decode'); } });
-  const photo = (name) => ({ file: { name, lastModified: 1 }, url: name });
-  client.configure(settings({ order: 'name' })); client.replace([photo('bad'), photo('good'), photo('other')]); await tick();
-  assert.deepEqual(shown, ['good']); assert.equal(timers.tasks.size, 1);
-  client.setVisible(false); assert.equal(timers.tasks.size, 0);
-  client.setVisible(true); await tick(); assert.equal(timers.tasks.size, 1);
-  events.length = 0; client.replace([photo('single')]); await tick(); assert.equal(events[0], 'clear'); assert.equal(timers.tasks.size, 0);
-  client.dispose(); assert.equal(events.at(-1), 'clear');
+function photoFollower(extra = {}) {
+  const clock = slideshowClock(); const shown = []; const reports = []; const clears = []; const updates = []; let state = slideshowSnapshot();
+  const client = createPhotoController({ ...clock, requestSchedule: clock.schedule, requestCancel: clock.cancel, clear: () => clears.push(true), report: (message) => reports.push(message), show: (value) => shown.push(value.file.name), update: (value) => updates.push(value.file.name), decode: async () => {}, fetchImpl: async () => snapshotResponse(state), ...extra });
+  client.configure(settings()); return { client, clock, shown, reports, clears, updates, setState(value) { state = value; } };
+}
+
+test('photo follower renders only server selections and deduplicates repeated snapshots and presentation changes', async () => {
+  let reads = 0; let decodes = 0;
+  const env = photoFollower({ fetchImpl: async (url) => { assert.equal(url, '/api/dashboard/slideshow'); reads++; return snapshotResponse(slideshowSnapshot()); }, decode: async () => { decodes++; } });
+  await env.client.load(); await tick(); assert.deepEqual(env.shown, ['a.png']);
+  await env.clock.advance(15_000); assert.equal(reads, 4); assert.equal(decodes, 1); assert.deepEqual(env.shown, ['a.png']); assert.equal(env.clock.timers.size, 1);
+  const timers = [...env.clock.timers]; env.client.configure(settings({ imageInfo: true, interval: 5, order: 'random' })); assert.deepEqual([...env.clock.timers], timers); assert.deepEqual(env.updates, ['a.png']); env.client.dispose(); assert.equal(env.clock.timers.size, 0);
 });
 
-test('a photo decoding after replacement cannot be displayed', async () => {
-  const pending = []; const shown = [];
-  const client = createPhotoController({ clear() {}, report() {}, show: (photo) => shown.push(photo.url), decode: () => new Promise((resolve) => pending.push(resolve)) });
-  client.configure(settings()); client.replace([{ file: { name: 'old', lastModified: 1 }, url: 'old' }]); client.replace([{ file: { name: 'new', lastModified: 1 }, url: 'new' }]);
-  pending[1](); await tick(); pending[0](); await tick(); assert.deepEqual(shown, ['new']); client.dispose();
+test('unchanged snapshot cannot restart a pending decode; new selection retires late completion', async () => {
+  const pending = []; const env = photoFollower({ decode: () => { const work = deferred(); pending.push(work); return work.promise; } });
+  await env.client.load(); await tick(); await env.client.load(); assert.equal(pending.length, 1);
+  env.setState(slideshowSnapshot({ revision: 2, current: photo('b.png') })); await env.client.load(); await tick(); assert.equal(pending.length, 2);
+  pending[1].resolve(); await tick(); pending[0].resolve(); await tick(); assert.deepEqual(env.shown, ['b.png']); env.client.dispose();
 });
 
-test('loads normalized NFS records and ignores a late manifest response', async () => {
-  const requests = []; const shown = []; const reports = [];
-  const client = createPhotoController({ clear() {}, report: (message) => reports.push(message), show: (photo) => shown.push(photo.url), decode: async () => {}, fetchImpl: (_url, options) => new Promise((resolve) => requests.push({ resolve, signal: options.signal })) });
-  client.configure(settings({ order: 'name' }));
-  const first = client.load(); const second = client.load();
-  requests[1].resolve(response({ available: true, photos: [{ name: 'new.png', lastModified: 2, url: '/api/dashboard/photos/abcdefghijklmnop' }, { name: '../bad', lastModified: 1, url: '/outside' }] }));
-  await second; await tick();
-  requests[0].resolve(response({ available: true, photos: [{ name: 'old.png', lastModified: 1, url: '/api/dashboard/photos/ponmlkjihgfedcba' }] }));
-  await first; await tick();
-  assert.deepEqual(shown, ['/api/dashboard/photos/abcdefghijklmnop']);
-  assert.equal(reports.at(-1), '1 NFS backgrounds loaded.');
-  client.dispose();
+test('old revisions and retired instances cannot overwrite newer selection; new server instance is adopted', async () => {
+  const env = photoFollower(); await env.client.load(); await tick();
+  env.setState(slideshowSnapshot({ revision: 3, current: photo('b.png') })); await env.client.load(); await tick();
+  env.setState(slideshowSnapshot({ revision: 2 })); await env.client.load(); await tick(); assert.deepEqual(env.shown, ['a.png', 'b.png']);
+  env.setState(slideshowSnapshot({ instanceId: 'new', revision: 0, current: photo('new.png') })); await env.client.load(); await tick();
+  env.setState(slideshowSnapshot({ revision: 4 })); await env.client.load(); await tick(); assert.deepEqual(env.shown, ['a.png', 'b.png', 'new.png']); env.client.dispose();
 });
 
-test('bounds a stalled NFS manifest request and reports the fallback', async () => {
-  const reports = []; let abort;
-  const client = createPhotoController({ clear() {}, report: (message) => reports.push(message), show() {}, requestSchedule: (fn) => { abort = fn; return 1; }, requestCancel() {}, fetchImpl: (_url, { signal }) => new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })), { once: true })) });
-  client.configure(settings()); const pending = client.load(); abort(); await pending;
-  assert.equal(reports.at(-1), 'NFS backgrounds could not be loaded. The dashboard will continue without photos.');
-  client.dispose();
+test('visibility and persisted-page suspension abort old reads and resume with one immediate current read', async () => {
+  const pending = []; const env = photoFollower({ fetchImpl: (_url, options) => { const work = deferred(); pending.push({ ...work, signal: options.signal }); return work.promise; } });
+  const first = env.client.load(); assert.equal(first, env.client.load()); await tick(); assert.equal(pending.length, 1);
+  env.client.setVisible(false); assert.equal(pending[0].signal.aborted, true); assert.equal(env.clock.timers.size, 1, 'request deadline retires in finally'); await first; assert.equal(env.clock.timers.size, 0);
+  env.client.setVisible(true); await tick(); pending[1].resolve(snapshotResponse(slideshowSnapshot({ revision: 2, current: photo('b.png') }))); await tick();
+  pending[0].resolve(snapshotResponse(slideshowSnapshot())); await tick(); assert.deepEqual(env.shown, ['b.png']);
+  env.client.dispose(); assert.equal(env.clock.timers.size, 0);
+});
+
+test('metadata and image failure retain last-good background, retry boundedly, and authoritative empty clears', async () => {
+  let fail = false; let imageFail = false; let state = slideshowSnapshot(); let decodes = 0;
+  const env = photoFollower({ fetchImpl: async () => { if (fail) throw new Error('offline'); return snapshotResponse(state); }, decode: async () => { decodes++; if (imageFail) throw new Error('bad image'); } });
+  await env.client.load(); await tick(); fail = true; await env.client.load(); assert.equal(env.clears.length, 0); assert.deepEqual(env.shown, ['a.png']);
+  fail = false; imageFail = true; state = slideshowSnapshot({ revision: 2, current: photo('b.png') }); await env.client.load(); await tick(); assert.equal(decodes, 2); assert.equal(env.clears.length, 0);
+  await env.clock.advance(5000); assert.equal(decodes, 3); imageFail = false; await env.clock.advance(5000); assert.deepEqual(env.shown, ['a.png', 'b.png']);
+  state = slideshowSnapshot({ revision: 3, count: 0, current: null }); await env.client.load(); assert.equal(env.clears.length, 1); env.client.dispose();
+});
+
+test('metadata deadline covers a stalled fetch and body, even when transport ignores abort', async () => {
+  for (const bodyStalls of [false, true]) {
+    const env = photoFollower({ fetchImpl: async () => bodyStalls ? new Response(new ReadableStream({ start() {} })) : new Promise(() => {}) });
+    const pending = env.client.load(); await tick(); await env.clock.advance(10_000); await pending; assert.match(env.reports.at(-1), /unavailable/); assert.equal(env.clock.timers.size, 1); env.client.dispose();
+  }
+});
+
+test('response body byte cap accepts 8192 bytes and rejects 8193 bytes including multibyte input', async () => {
+  for (const bytes of [8192, 8193]) {
+    const raw = JSON.stringify(slideshowSnapshot({ current: photo('é".png') })); const body = raw + ' '.repeat(bytes - Buffer.byteLength(raw));
+    const env = photoFollower({ fetchImpl: async () => new Response(body) }); await env.client.load(); await tick();
+    assert.equal(env.shown.length, bytes === 8192 ? 1 : 0); env.client.dispose();
+  }
+});
+
+test('decode timeout and disposal reject late image completion without leaked timers', async () => {
+  const work = deferred(); const env = photoFollower({ decode: () => work.promise }); await env.client.load(); await tick(); await env.clock.advance(10_000);
+  env.client.dispose(); work.resolve(); await tick(); assert.deepEqual(env.shown, []); assert.equal(env.clock.timers.size, 0);
+});
+
+test('metadata wakes use server-relative deadlines with 250ms and five-second bounds, never local image choice', async () => {
+  const env = photoFollower();
+  for (const [deadline, delay] of [[999_000, 250], [1_000_100, 250], [1_002_000, 2000], [2_000_000, 5000]]) {
+    env.setState(slideshowSnapshot({ count: 2, nextChangeAt: deadline })); await env.client.load(); await tick();
+    assert.equal([...env.clock.timers.values()][0].due - env.clock.now(), delay); assert.deepEqual(env.shown, ['a.png']);
+  }
+  env.client.dispose();
 });

@@ -19,6 +19,7 @@ import { validateWeatherLocation, weatherTimezone } from '../public/weather-data
 import { validateDashboardPreferences } from '../public/dashboard-helpers.js';
 import { CONNECTION_SHUTDOWN_GRACE_MS } from './lifecycle-constants.js';
 import { safeBookmarkUrl } from '../public/bookmark-data.js';
+import { validateSlideshowSnapshot } from '../public/photo-slideshow-data.js';
 
 export const MAX_JSON_BODY_BYTES = 16_384;
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -99,7 +100,7 @@ function selectionFingerprint(settings) {
   return createHash('sha256').update(`${settings.baseUrl}\0${settings.username}\0${settings.accessToken}`).digest('base64url');
 }
 
-export function createDashboardServer({ runtimeConfig, store, linkwarden, homeAssistant, calDav, weather, photoLibrary = createUnavailablePhotoLibrary(), homeAssistantControls = createHomeAssistantControlStore(), wakeExecutor = executeWakeRequest, collectionSelections = createCollectionSelectionStore(), now = Date.now, publicRoot = defaultPublicRoot }) {
+export function createDashboardServer({ runtimeConfig, store, linkwarden, homeAssistant, calDav, weather, slideshow, photoLibrary = createUnavailablePhotoLibrary(), homeAssistantControls = createHomeAssistantControlStore(), wakeExecutor = executeWakeRequest, collectionSelections = createCollectionSelectionStore(), now = Date.now, publicRoot = defaultPublicRoot }) {
   const wakeRequests = new Map();
   const integrationEncryptionKey = runtimeConfig.integrationEncryptionKey ?? runtimeConfig.linkwardenEncryptionKey;
   let homeAssistantMutation = Promise.resolve();
@@ -342,6 +343,7 @@ export function createDashboardServer({ runtimeConfig, store, linkwarden, homeAs
       } catch (error) { return json(response, 400, { error: error.message }); }
       try {
         const saved = initialize ? store.initializeDashboardPreferences(input.preferences) : store.saveDashboardPreferences(input.preferences, input.revision);
+        if (saved && slideshow) { try { slideshow.configure(saved.preferences); } catch { /* Persistence already committed; do not report the save as failed. */ } }
         return saved ? json(response, 200, dashboardSnapshot(saved)) : json(response, 409, { error: 'Shared preferences changed in another browser. Reload shared preferences before reapplying changes.', snapshot: dashboardSnapshot() });
       } catch { return json(response, 503, { error: 'Shared preferences could not be saved.' }); }
     }
@@ -370,6 +372,13 @@ export function createDashboardServer({ runtimeConfig, store, linkwarden, homeAs
         const saved = weather.saveLocation(input.location, input.revision);
         return saved ? json(response, 200, saved) : json(response, 409, { error: 'Weather location changed on another device. Reload and select the location again.' });
       } catch { return json(response, 503, { error: 'Saved weather could not be loaded or updated.' }); }
+    }
+    if (pathname === '/api/dashboard/slideshow') {
+      if (request.method !== 'GET') return json(response, 405, { error: 'Method not allowed.' });
+      try {
+        if (!slideshow) throw new Error('Slideshow is unavailable.');
+        return json(response, 200, validateSlideshowSnapshot(slideshow.snapshot()));
+      } catch { return json(response, 503, { error: 'Slideshow is unavailable.' }); }
     }
     if (pathname === '/api/home/settings') {
       if (request.method === 'GET') {

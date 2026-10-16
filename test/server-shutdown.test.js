@@ -63,6 +63,18 @@ for (const dev of [false, true]) test(`${dev ? 'development' : 'normal'} launch 
   const f = await fixture(t); const run = await launch(t, f, dev); await until(() => run.output.includes('dashboard listening at'), run.error || 'No ready output'); run.child.send({ type: 'dashboard:shutdown' }, () => {}); run.child.send({ type: 'dashboard:shutdown' }, () => {}); await assertStopped(f, run);
 });
 
+for (const dev of [false, true]) test(`${dev ? 'development' : 'normal'} production owner rotates before the first HTTP read and drains its timers`, async (t) => {
+  const f = await fixture(t);
+  await writeFile(path.join(f.root, 'first.png'), 'first'); await writeFile(path.join(f.root, 'second.png'), 'second');
+  await writeFile(path.join(f.root, 'src/nfs.js'), `export async function prepareNfs() { return { available: true, root: ${JSON.stringify(f.root)}, reason: 'existing' }; }`);
+  await writeFile(path.join(f.root, '.env'), f.env(`NFS_MOUNT_MODE=existing\nNFS_MOUNT_PATH=${f.root}\n`));
+  const file = path.join(f.root, 'src/server.js'); const source = await readFile(file, 'utf8');
+  await writeFile(file, source.replace('createPhotoSlideshow({ photoLibrary,', "createPhotoSlideshow({ schedule: (fn, ms) => setTimeout(() => { fn(); if (ms === 5000) console.log('fixture-rotation'); }, ms === 5000 ? 20 : ms), photoLibrary,").replace('void slideshow.start();', "slideshow.configure({ order: 'name', interval: 5 }); void slideshow.start();"));
+  const run = await launch(t, f, dev); await until(() => (run.output.match(/fixture-rotation/g) ?? []).length >= 2, 'No background rotations before first browser request');
+  const snapshot = await (await fetch(`http://127.0.0.1:${f.port}/api/dashboard/slideshow`)).json(); assert.equal(snapshot.count, 2); assert.ok(snapshot.revision >= 3);
+  run.child.send({ type: 'dashboard:shutdown' }, () => {}); await assertStopped(f, run);
+});
+
 for (const dev of [false, true]) test(`${dev ? 'development' : 'normal'} owner IPC disconnect also closes its server and descendants`, async (t) => {
   const f = await fixture(t); const run = await launch(t, f, dev); await until(() => run.output.includes('dashboard listening at'), 'No ready output'); run.child.disconnect(); await assertStopped(f, run);
 });

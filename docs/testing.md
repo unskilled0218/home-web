@@ -3,6 +3,8 @@
 ## Table of Contents
 
 - [Checks](#checks)
+  - [Table of Contents](#table-of-contents)
+  - [Server photo rotation](#server-photo-rotation)
 - [Direct layout editing](#direct-layout-editing)
 
 ```sh
@@ -44,6 +46,14 @@ Fullscreen-reference tests cover pure estimate/fallback/confirmation state, safe
 Automatic-key checks cover pure no-write configuration, database-relative defaults, restricted parent/file creation, atomic winner races, partial-write/publication cleanup, explicit-secret precedence, restart credential continuity, and lost-key refusal. Home Assistant TLS checks use `HOME_ASSISTANT_CA_FILE` for real loopback registry/service sessions, hostname verification, unrelated HTTPS trust isolation, and actual development-child trust changes. No live account, key, database, mount, or user `.env` is used.
 
 Run `node scripts/check-production.js` for the opt-in packaging smoke. It copies only runtime/manifests into `/tmp/opencode`, installs locked production dependencies there, verifies local Undici resolution and absence of Playwright, then checks actual readiness/HTTP/automatic key/IPC shutdown with isolated storage and disabled NFS. It never replaces the working dependency tree. Registry/tooling failures are reported; a passing production-tree smoke is not built-image verification. Compose configuration parsing and actual image build/runtime checks remain separately recorded.
+
+## Server photo rotation
+
+Run `node --test test/photo-slideshow.test.js test/photo-slideshow-data.test.js test/photo-slideshow-api.test.js test/photo-library.test.js test/dashboard.test.js test/shutdown.test.js test/http-shutdown.test.js test/server-shutdown.test.js` for focused service, schema, filesystem, API, browser-controller, and lifecycle coverage. Injected clocks and randomness prove rotations occur with zero clients, reads never advance state, unchanged rescans/configuration preserve deadlines, random traversal boundaries avoid repeats, scans remain coalesced while rotation proceeds, and stop drains actual work. Real-library/API round trips cover deep/multibyte/quoted/control-character names, eligible-only counts, all-rejected empty states, legacy streams, and the 8 KiB metadata cap. Browser-controller tests include stalled fetch/body/decode deadlines, obsolete responses, restart identities, last-good retention, and visibility suspension without real-time sleeps.
+
+Run `npm run test:browser -- e2e/server-photo-rotation.spec.js` for real application/service/SQLite/image decoding with independent browser contexts. Server time/randomness and browser polling time advance separately: rotate before opening a page, close all pages and rotate again, then verify convergence, hidden/persisted-page resume, unchanged-layer identity, presentation saves, service restart, bad-image retention, and empty/single/disabled/unavailable fallbacks. These fixtures use temporary local PNGs and never mount NFS or depend on the NAS. Existing layout/caption/fullscreen fixtures now publish explicit server selections; metadata polling is expected, while extra scans, decodes, and unrelated request owners are not. If Chromium is absent, the operator must run `npx playwright install chromium`; record browser verification as blocked until executable dependencies exist.
+
+Syntax-check new browser/test files individually in addition to `npm run check`: the current glob-based command does not enumerate every input as a separate `node --check` invocation. Finish with `npm test`, `npm run test:browser`, and `git diff --check`.
 
 ## Direct layout editing
 
