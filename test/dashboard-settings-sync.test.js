@@ -50,6 +50,24 @@ test('old confirmed caches gain visibility defaults and remote profiles remain a
   await env.client.start(); assert.deepEqual(env.client.getState().snapshot.preferences, remote); assert.equal(env.calls.length, 1); assert.equal(env.tasks.size, 1);
 });
 
+test('old caches gain fullscreen and forecast defaults without writes and confirmed values replace them', async (t) => {
+  const keys = ['hideTimeFullscreen', 'hideWeatherFullscreen', 'hideCalendarFullscreen', 'hideHomeAssistantFullscreen', 'hideWolFullscreen', 'weatherHourlyVisible', 'weatherDailyVisible'];
+  const preferences = normalizeDashboardPreferences({ hideBookmarksFullscreen: true, mobileWeatherVisible: false });
+  const old = { ...preferences }; for (const key of keys) delete old[key];
+  const cached = JSON.stringify({ schema: 1, initialized: true, revision: 7, preferences: old });
+  const values = new Map([[SHARED_SETTINGS_KEY, cached]]);
+  const remote = normalizeDashboardPreferences({ hideTimeFullscreen: true, weatherHourlyVisible: false, weatherDailyVisible: false });
+  const env = setup(t, { values, handler: () => Response.json(snapshot({ revision: 8, preferences: remote })) });
+  assert.equal(env.client.getState().cache, true); assert.deepEqual(env.client.getState().snapshot.preferences, preferences);
+  assert.equal(values.get(SHARED_SETTINGS_KEY), cached);
+  await env.client.start(); assert.deepEqual(env.client.getState().snapshot.preferences, remote);
+  assert.equal(env.calls.length, 1); assert.equal(env.tasks.size, 1);
+  assert.deepEqual(JSON.parse(values.get(SHARED_SETTINGS_KEY)).preferences, remote);
+  const restored = setup(t, { values }); assert.deepEqual(restored.client.getState().snapshot.preferences, remote);
+  const corrupt = setup(t, { values: new Map([[SHARED_SETTINGS_KEY, JSON.stringify({ schema: 1, initialized: true, revision: 7, preferences: { ...old, weatherHourlyVisible: 'false' } })]]) });
+  assert.equal(corrupt.client.getState().cache, false, 'invalid cached booleans are not upgraded to defaults');
+});
+
 test('successful preference confirmation does not depend on cache writes or stale service observers', async (t) => {
   let finish; const env = setup(t, { brokenStorage: true, handler: (_url, options) => options.method === 'PUT' ? new Promise((resolve) => { finish = () => resolve(Response.json(snapshot({ revision: 2, preferences: normalizeDashboardPreferences({ color: '#123456' }) }))); }) : Response.json(snapshot()) });
   await env.client.start(); env.observed.length = 0;

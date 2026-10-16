@@ -37,7 +37,7 @@ test('all Settings categories share through a real server across isolated deskto
     await a.page.locator('[name="mobileTimeVisible"]').uncheck(); await a.page.getByRole('tab', { name: 'Time', exact: true }).click(); await a.page.getByLabel('Timezone', { exact: true }).fill('Asia/Tokyo'); await a.page.getByLabel('Show seconds', { exact: true }).uncheck();
     await a.page.getByRole('tab', { name: 'Weather', exact: true }).click(); await a.page.getByRole('combobox', { name: 'Temperature', exact: true }).selectOption('fahrenheit'); await a.page.getByLabel('Weather scale on mobile', { exact: true }).fill('1.3');
     await a.page.getByRole('tab', { name: 'Calendar', exact: true }).click(); await a.page.getByLabel('Calendar scale', { exact: true }).fill('1.2');
-    await a.page.getByRole('tab', { name: 'Bookmarks', exact: true }).click(); await a.page.getByLabel('Hide bookmarks in fullscreen', { exact: true }).check();
+    await a.page.getByRole('tab', { name: 'General', exact: true }).click(); await a.page.getByLabel('Hide bookmarks in fullscreen', { exact: true }).check();
     await a.page.getByRole('tab', { name: 'Images', exact: true }).click(); await a.page.getByLabel('Background color', { exact: true }).fill('#123456'); await a.page.getByLabel('Interval (seconds)', { exact: true }).fill('120'); await save(a.page);
     await tick(b.page); await expect(b.page.locator('body')).toHaveCSS('background-color', 'rgb(18, 52, 86)'); await expect(b.page.locator('#clock')).toBeHidden(); await expect(b.page.locator('#weather')).toHaveCSS('font-size', '20.8px');
     expect(await preferences(b.page)).toEqual(env.store.getDashboardPreferences().preferences);

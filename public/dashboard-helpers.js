@@ -40,6 +40,8 @@ export function normalizeSettings(input = {}, fallbackZone = Intl.DateTimeFormat
     timeVisible: boolean(value.timeVisible, true), timeScale: number(value.timeScale, 0.5, 2, 1), weatherVisible: boolean(value.weatherVisible, true), weatherScale: number(value.weatherScale, 0.5, 2, 1), calendarVisible: boolean(value.calendarVisible, true), calendarScale: number(value.calendarScale, 0.5, 2, 1),
     mobileTimeVisible: boolean(value.mobileTimeVisible, true), mobileTimeScale: mobileScale(value.mobileTimeScale), mobileWeatherVisible: boolean(value.mobileWeatherVisible, true), mobileWeatherScale: mobileScale(value.mobileWeatherScale), mobileCalendarVisible: boolean(value.mobileCalendarVisible, true), mobileCalendarScale: mobileScale(value.mobileCalendarScale),
     mobileBookmarksMode: choice(value.mobileBookmarksMode, ['compact', 'expanded'], 'compact'), hideBookmarksFullscreen: boolean(value.hideBookmarksFullscreen, false),
+    hideTimeFullscreen: boolean(value.hideTimeFullscreen, false), hideWeatherFullscreen: boolean(value.hideWeatherFullscreen, false), hideCalendarFullscreen: boolean(value.hideCalendarFullscreen, false), hideHomeAssistantFullscreen: boolean(value.hideHomeAssistantFullscreen, false), hideWolFullscreen: boolean(value.hideWolFullscreen, false),
+    weatherHourlyVisible: boolean(value.weatherHourlyVisible, true), weatherDailyVisible: boolean(value.weatherDailyVisible, true),
     bookmarksVisible: boolean(value.bookmarksVisible, true), homeAssistantVisible: boolean(value.homeAssistantVisible, true), wolVisible: boolean(value.wolVisible, true),
     mobileBookmarksVisible: boolean(value.mobileBookmarksVisible, true), mobileHomeAssistantVisible: boolean(value.mobileHomeAssistantVisible, true), mobileWolVisible: boolean(value.mobileWolVisible, true),
     homeAssistantDeviceSelections: normalizeDeviceSelections(value.homeAssistantDeviceSelections),
@@ -69,7 +71,7 @@ export function validateDashboardPreferences(value) {
   return canonical;
 }
 export function decodeStoredDashboardPreferences(value) {
-  if (value && typeof value === 'object' && !Array.isArray(value)) return validateDashboardPreferences({ homeAssistantDeviceSelections: [], bookmarkLinkSelections: null, bookmarksVisible: true, homeAssistantVisible: true, wolVisible: true, mobileBookmarksVisible: true, mobileHomeAssistantVisible: true, mobileWolVisible: true, ...value, widgetLayout: Object.hasOwn(value, 'widgetLayout') ? decodeStoredWidgetLayout(value.widgetLayout) : defaultWidgetLayout() });
+  if (value && typeof value === 'object' && !Array.isArray(value)) return validateDashboardPreferences({ homeAssistantDeviceSelections: [], bookmarkLinkSelections: null, bookmarksVisible: true, homeAssistantVisible: true, wolVisible: true, mobileBookmarksVisible: true, mobileHomeAssistantVisible: true, mobileWolVisible: true, hideTimeFullscreen: false, hideWeatherFullscreen: false, hideCalendarFullscreen: false, hideHomeAssistantFullscreen: false, hideWolFullscreen: false, weatherHourlyVisible: true, weatherDailyVisible: true, ...value, widgetLayout: Object.hasOwn(value, 'widgetLayout') ? decodeStoredWidgetLayout(value.widgetLayout) : defaultWidgetLayout() });
   return validateDashboardPreferences(value);
 }
 export function legacyDashboardPreferences(value) {

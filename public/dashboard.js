@@ -105,7 +105,8 @@ function renderWeather(state = weatherState) {
   const icon = $('weather-icon');
   icon.hidden = true; icon.removeAttribute('src');
   $('current-weather-values').replaceChildren(); currentWeatherSubValues.replaceChildren(); $('hourly').replaceChildren(); $('daily').replaceChildren();
-  $('forecast-details').hidden = !forecast;
+  $('hourly').hidden = !settings.weatherHourlyVisible; $('daily').hidden = !settings.weatherDailyVisible;
+  $('forecast-details').hidden = !forecast || !(settings.weatherHourlyVisible || settings.weatherDailyVisible);
   if (forecast) {
     const current = forecast.current; const units = forecast.units;
     icon.src = `/weather-icons/${weatherIconFile(current.weather_code, current.is_day)}`; icon.hidden = false;
@@ -211,7 +212,7 @@ const settingsSync = createSettingsSync({ storage,
     const first = !servicesStarted;
     if (first || changed(['position', 'scale', 'timeVisible', 'timeScale', 'weatherVisible', 'weatherScale', 'calendarVisible', 'calendarScale', 'mobileTimeVisible', 'mobileTimeScale', 'mobileWeatherVisible', 'mobileWeatherScale', 'mobileCalendarVisible', 'mobileCalendarScale'])) applyPresentation();
     else if (changed(['timezone', 'dateStyle', 'hour12', 'seconds'])) startClock();
-    if (first || changed(['mobileBookmarksMode', 'hideBookmarksFullscreen', 'bookmarksVisible', 'mobileBookmarksVisible', 'homeAssistantVisible', 'mobileHomeAssistantVisible', 'wolVisible', 'mobileWolVisible'])) applyBookmarkPresentation();
+    if (first || changed(['mobileBookmarksMode', 'hideBookmarksFullscreen', 'hideTimeFullscreen', 'hideWeatherFullscreen', 'hideCalendarFullscreen', 'hideHomeAssistantFullscreen', 'hideWolFullscreen', 'bookmarksVisible', 'mobileBookmarksVisible', 'homeAssistantVisible', 'mobileHomeAssistantVisible', 'wolVisible', 'mobileWolVisible'])) applyBookmarkPresentation();
     if (changed(['widgetLayout'])) applyVisibilityLayout();
     if (first || changed(['homeAssistantDeviceSelections'])) deviceIntegrations.configure(settings.homeAssistantDeviceSelections);
     if (first || changed(['bookmarkLinkSelections'])) bookmarks.configure(settings.bookmarkLinkSelections);
@@ -228,7 +229,7 @@ const settingsSync = createSettingsSync({ storage,
     const enabled = settings.calendarVisible || settings.mobileCalendarVisible;
     if (!observers.calendar?.(snapshot.integrations.calendar, enabled) && changed(['calendarVisible', 'mobileCalendarVisible'])) calendar.configure({ calendarVisible: enabled });
     observers.linkwarden?.(snapshot.integrations.linkwarden);
-    if (changed(['hour12'])) renderWeather();
+    if (changed(['hour12', 'weatherHourlyVisible', 'weatherDailyVisible'])) renderWeather();
     if (changed(['timezone', 'hour12'])) renderCalendar();
     if (changed(PREFERENCE_KEYS)) preferenceMessage = '';
     if (!dialog.open || !draftDirty) { fillForm(); draftRevision = snapshot.revision; }

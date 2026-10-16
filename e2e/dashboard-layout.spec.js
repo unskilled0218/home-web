@@ -6,6 +6,8 @@ import { createDashboardServer } from '../src/app.js';
 import { normalizeDashboardPreferences } from '../public/dashboard-helpers.js';
 import { initialWidgetProfile, defaultWidgetLayout, projectWidget } from '../public/dashboard-layout.js';
 import { encryptApiKey } from '../src/linkwarden-crypto.js';
+import { normalizeForecast } from '../public/weather-data.js';
+import { rawForecast } from '../test/fixtures/weather.js';
 
 async function environment(preferences = {}, services = {}) {
   const directory = mkdtempSync('/tmp/opencode/dashboard-layout-'); const filename = `${directory}/app.db`;
@@ -24,6 +26,37 @@ async function open(page) { await enter(page); await details(page); }
 async function save(page) { await page.locator('#layout-save').click(); await expect(page.locator('#layout-toolbar')).toBeHidden(); }
 async function pixel(page, key, value) { await page.locator(`#layout-${key}`).fill(String(value)); await page.locator(`#layout-${key}`).press('Tab'); }
 const storedLayout = env => env.store.getDashboardPreferences().preferences.widgetLayout;
+
+test('Custom fullscreen hiding and forecast toggles retain both profile geometries and layers', async ({ page }) => {
+  const widgetLayout = layout(); const env = await environment({ widgetLayout });
+  try {
+    await page.clock.install({ time: new Date('2026-10-11T12:00:00Z') });
+    const location = { label: 'London', latitude: 51, longitude: 0 }; env.store.saveWeatherLocation(location, 0);
+    await page.route('**/api/weather?*', route => route.fulfill({ json: { configured: true, revision: 1, location, timezone: 'UTC', forecastRegistered: true, forecast: normalizeForecast(rawForecast()), air: { aqi: 20 }, forecastUpdated: Date.parse('2026-10-11T12:00:00Z'), airUpdated: Date.parse('2026-10-11T12:00:00Z'), forecastError: false, airError: false, refreshing: false } }));
+    await page.route('**/api/weather/refresh', route => route.fulfill({ status: 202, json: { scheduled: false, refreshing: false } }));
+    await ready(page, env); await expect(page.locator('#daily .forecast-item')).toHaveCount(7);
+    for (const width of [1200, 600]) {
+      await page.setViewportSize({ width, height: 900 }); await settleFrames(page);
+      const mode = width <= 600 ? 'mobile' : 'desktop';
+      await page.locator('#open-settings').click(); await page.locator('#settings-tab-general').click();
+      for (const name of ['Time', 'Weather', 'Calendar', 'Bookmarks', 'HomeAssistant', 'Wol']) await page.locator(`[name="hide${name}Fullscreen"]`).check();
+      await page.locator('#settings-tab-weather').click();
+      await page.locator('[name="weatherHourlyVisible"]').uncheck(); await page.locator('[name="weatherDailyVisible"]').uncheck();
+      await page.locator('#save-preferences').click(); await expect(page.locator('#settings-status')).toHaveText('Preferences saved for all browsers.'); await page.locator('#close-settings').click();
+      await expect(page.locator('#forecast-details')).toBeHidden(); await expect(page.locator('#current-weather-values .temperature')).toHaveText('12 °C');
+      await page.locator('#fullscreen').click(); await expect(page.locator('#widget-surface')).toBeHidden(); await expect(page.locator('#open-settings')).toBeVisible();
+      expect(storedLayout(env)).toEqual(widgetLayout);
+      await page.locator('#fullscreen').click(); await settleFrames(page);
+      await assertProjectedBoxes(page, widgetLayout, mode);
+      await page.locator('#open-settings').click(); await page.locator('#settings-tab-weather').click();
+      await page.locator('[name="weatherHourlyVisible"]').check(); await page.locator('[name="weatherDailyVisible"]').check();
+      await page.locator('#save-preferences').click(); await expect(page.locator('#settings-status')).toHaveText('Preferences saved for all browsers.'); await page.locator('#close-settings').click();
+      await expect(page.locator('#hourly')).toBeVisible(); await expect(page.locator('#daily')).toBeVisible();
+      await settleFrames(page); await assertProjectedBoxes(page, widgetLayout, mode); expect(storedLayout(env)).toEqual(widgetLayout);
+    }
+  } finally { await page.goto('about:blank'); await env.close(); }
+});
+
 async function backgroundPoint(page, id = 'clock') { return page.locator(`#${id}`).evaluate(node => { const box = node.getBoundingClientRect(); return { x: box.x + 3, y: box.y + 3 }; }); }
 // Only viewport measurement is controlled; CSS, DOM, observers, and the app remain real.
 async function controlledViewport(page, screenSize = { width: 1600, height: 1000 }) {

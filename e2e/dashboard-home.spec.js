@@ -47,6 +47,7 @@ async function mockSharedSettings(page) {
     }
     return route.fulfill({ json: snapshot() });
   });
+  return { setPreferences(next) { preferences = normalizeDashboardPreferences({ ...preferences, ...next }); revision++; } };
 }
 
 async function mockWeather(page, { configured = true } = {}) {
@@ -526,6 +527,7 @@ for (const width of [390, 1200]) test(`fullscreen bookmark hiding releases space
   await page.locator('#open-settings').click(); await page.getByRole('tab', { name: 'Bookmarks', exact: true }).click();
   const child = page.locator(`details[data-selection-id="${mock.ids[1]}"]`); await child.locator(':scope > summary').click();
   const openBefore = await child.evaluate((node) => node.open);
+  await page.getByRole('tab', { name: 'General', exact: true }).click();
   await page.getByLabel('Hide bookmarks in fullscreen', { exact: true }).check(); await savePreferences(page); await page.locator('#close-settings').click();
   const requests = mock.requests.folders.length; await page.locator('#fullscreen').click(); await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(true); await expect(page.locator('#bookmarks')).toBeHidden();
   await expect(page.locator('body')).not.toHaveClass(/bookmarks-shown/);
@@ -535,7 +537,7 @@ for (const width of [390, 1200]) test(`fullscreen bookmark hiding releases space
   await page.evaluate(() => document.exitFullscreen());
   await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(false);
   await expect(page.locator('#bookmarks')).toBeVisible(); await expect(child).toHaveJSProperty('open', openBefore); expect(mock.requests.folders.length).toBe(requests);
-  await page.locator('#open-settings').click(); await page.getByRole('tab', { name: 'Bookmarks', exact: true }).click(); await page.getByLabel('Hide bookmarks in fullscreen', { exact: true }).uncheck(); await savePreferences(page); await page.locator('#close-settings').click();
+  await page.locator('#open-settings').click(); await page.getByLabel('Hide bookmarks in fullscreen', { exact: true }).uncheck(); await savePreferences(page); await page.locator('#close-settings').click();
   await page.locator('#fullscreen').click(); await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(true); await expect(page.locator('#bookmarks')).toBeVisible(); await page.evaluate(() => document.exitFullscreen());
 });
 
@@ -546,7 +548,7 @@ test('bookmark-only preference saves and fullscreen keep the photo and unrelated
   await page.route('**/api/dashboard/photos', (route) => route.fulfill({ json: { available: true, photos: [{ name: 'photo.png', lastModified: 1, url: photoUrl }] } }));
   await page.route(`**${photoUrl}`, (route) => route.fulfill({ contentType: 'image/png', body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64') }));
   await page.goto('/'); await expect(page.getByRole('link', { name: 'Deep bookmark', exact: true })).toBeVisible(); await expect(page.locator('#photos .photo-layer img')).toBeVisible();
-  await page.locator('#open-settings').click(); await page.getByRole('tab', { name: 'Bookmarks', exact: true }).click();
+  await page.locator('#open-settings').click();
   await page.evaluate(() => { window.savedPhoto = document.querySelector('.photo-layer'); }); const before = calls.length;
   await page.getByLabel('Hide bookmarks in fullscreen', { exact: true }).check(); await savePreferences(page); await page.locator('#close-settings').click();
   await page.locator('#fullscreen').click(); await expect(page.locator('#bookmarks')).toBeHidden(); await page.evaluate(() => document.exitFullscreen()); await expect(page.locator('#bookmarks')).toBeVisible();
@@ -879,6 +881,57 @@ test('fresh browsers show server location and ignore a conflicting local locatio
   await page.locator('#open-settings').click();
   await page.getByRole('tab', { name: 'Weather', exact: true }).click();
   await expect(page.locator('#current-location')).toHaveText('Current location: London');
+});
+
+for (const width of [601, 600]) test(`hourly and daily visibility save independently without weather requests at ${width}px`, async ({ page }) => {
+  await page.clock.install({ time: instant }); await page.setViewportSize({ width, height: 900 });
+  const mock = await mockWeather(page); await page.goto('/');
+  await expect(page.locator('#current-weather-values .temperature')).toHaveText('12 °C');
+  await expect(page.locator('#daily .forecast-item')).toHaveCount(7);
+  await expect.poll(() => mock.requests.refresh).toBe(1);
+  const requests = { ...mock.requests };
+  for (const [hourly, daily] of [[false, true], [true, false], [false, false], [true, true]]) {
+    const before = await page.locator('#hourly').evaluate(node => node.hidden);
+    await page.locator('#open-settings').click(); await page.locator('#settings-tab-weather').click();
+    await page.locator('[name="weatherHourlyVisible"]').setChecked(hourly); await page.locator('[name="weatherDailyVisible"]').setChecked(daily);
+    expect(await page.locator('#hourly').evaluate(node => node.hidden)).toBe(before);
+    await page.locator('#save-preferences').click(); await expect(page.locator('#settings-status')).toHaveText('Preferences saved for all browsers.');
+    await page.locator('#close-settings').click();
+    await expect(page.locator('#hourly')).toBeVisible({ visible: hourly }); await expect(page.locator('#daily')).toBeVisible({ visible: daily });
+    await expect(page.locator('#forecast-details')).toBeVisible({ visible: hourly || daily });
+    await expect(page.locator('#current-weather-values .temperature')).toHaveText('12 °C');
+    await expect(page.locator('#current-weather-subvalues')).toContainText('US AQI: 20'); await expect(page.locator('#weather-updated')).toBeVisible();
+    await page.locator('#fullscreen').click();
+    await expect(page.locator('#hourly')).toBeVisible({ visible: hourly }); await expect(page.locator('#daily')).toBeVisible({ visible: daily });
+    await expect(page.locator('#current-weather-values .temperature')).toHaveText('12 °C'); await page.evaluate(() => document.exitFullscreen());
+    expect(mock.requests).toEqual(requests);
+  }
+  await page.reload(); await expect(page.locator('#hourly')).toBeVisible(); await expect(page.locator('#daily')).toBeVisible();
+});
+
+test('remote forecast changes retain dirty drafts and survive empty, stale, and later weather snapshots', async ({ page }) => {
+  await page.clock.install({ time: instant });
+  const remote = await mockSharedSettings(page); const mock = await mockWeather(page); await page.goto('/');
+  await expect(page.locator('#hourly')).toBeVisible();
+  await page.locator('#open-settings').click(); await page.locator('#settings-tab-weather').click(); await page.locator('[name="weatherDailyVisible"]').uncheck();
+  remote.setPreferences({ weatherHourlyVisible: false, weatherDailyVisible: false }); await page.clock.fastForward(5000);
+  await expect(page.locator('#forecast-details')).toBeHidden(); await expect(page.locator('[name="weatherHourlyVisible"]')).toBeChecked();
+  await page.locator('#save-preferences').click(); await expect(page.locator('#settings-status')).toContainText('changed');
+  await page.locator('#reload-shared-preferences').click(); await expect(page.locator('[name="weatherHourlyVisible"]')).not.toBeChecked();
+  await page.locator('#close-settings').click();
+  const empty = normalizeForecast(rawForecast(18)); empty.hourly = []; empty.daily = [];
+  mock.setState({ forecast: empty, forecastError: true }); await page.clock.fastForward(60000);
+  await expect(page.locator('#current-weather-values .temperature')).toHaveText('18 °C'); await expect(page.locator('#forecast-details')).toBeHidden();
+  remote.setPreferences({ weatherDailyVisible: true }); await page.clock.fastForward(5000);
+  await expect(page.locator('#daily')).toHaveText('Daily forecast unavailable.'); await expect(page.locator('#hourly')).toBeHidden();
+  await expect(page.locator('#weather-status')).toContainText('stale');
+  mock.setState({ forecast: normalizeForecast(rawForecast(21)), forecastError: false }); await page.clock.fastForward(60000);
+  await expect(page.locator('#daily .forecast-item')).toHaveCount(7); await expect(page.locator('#hourly')).toBeHidden();
+  mock.setState({ forecast: null, forecastUpdated: null, forecastError: true }); await page.clock.fastForward(60000);
+  await expect(page.locator('#forecast-details')).toBeHidden();
+  await page.reload(); await expect(page.locator('#forecast-details')).toBeHidden();
+  await page.locator('#open-settings').click(); await page.locator('#settings-tab-weather').click();
+  await expect(page.locator('[name="weatherHourlyVisible"]')).not.toBeChecked(); await expect(page.locator('[name="weatherDailyVisible"]')).toBeChecked();
 });
 
 test('successful air quality remains visible when the first forecast fails', async ({ page }) => {

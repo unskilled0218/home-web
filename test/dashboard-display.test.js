@@ -6,6 +6,28 @@ import { dashboardDisplay, applyDashboardDisplay } from '../public/dashboard-dis
 const sections = ['time', 'weather', 'calendar', 'bookmarks', 'homeAssistant', 'wol'];
 const allHidden = Object.fromEntries(sections.flatMap((name) => [[`${name}Visible`, false], [`mobile${name[0].toUpperCase()}${name.slice(1)}Visible`, false]]));
 
+test('every fullscreen hide mask combines with each active profile without mutating preferences', () => {
+  for (const mobile of [false, true]) for (let mask = 0; mask < 64; mask++) {
+    const hide = Object.fromEntries(sections.map((name, index) => [`hide${name[0].toUpperCase()}${name.slice(1)}Fullscreen`, Boolean(mask & (1 << index))]));
+    const settings = normalizeDashboardPreferences(hide); const before = structuredClone(settings);
+    const normal = dashboardDisplay(settings, { mobile });
+    const view = dashboardDisplay(settings, { mobile, fullscreen: true });
+    for (const [index, name] of sections.entries()) {
+      assert.equal(normal[`${name}Visible`], true, `${name} outside fullscreen`);
+      assert.equal(view[`${name}Visible`], !(mask & (1 << index)), `${name}, mobile=${mobile}, mask=${mask}`);
+      const key = `${mobile ? `mobile${name[0].toUpperCase()}${name.slice(1)}` : name}Visible`;
+      for (const fullscreen of [false, true]) assert.equal(dashboardDisplay({ ...settings, [key]: false }, { mobile, fullscreen })[`${name}Visible`], false, `${name} stays disabled`);
+    }
+    const groups = Number(view.information) + Number(view.devices) + Number(view.bookmarksVisible);
+    assert.equal((view.columns.match(/minmax|clamp/g) ?? []).length, groups);
+    assert.equal(view.devices, view.homeAssistantVisible || view.wolVisible);
+    assert.equal(view.content, mask !== 63); assert.equal(view.backgroundOnly, mask === 63);
+    const caption = dashboardDisplay(settings, { mobile, fullscreen: true, caption: true });
+    assert.equal(caption.information, true); assert.equal(caption.content, true); assert.equal(caption.backgroundOnly, mask === 63);
+    assert.deepEqual(settings, before);
+  }
+});
+
 test('all overlay combinations project without empty tracks or profile mutation', () => {
   for (let mask = 0; mask < 64; mask++) for (const mobile of [false, true]) {
     const flags = Object.fromEntries(sections.map((name, index) => [`${mobile ? `mobile${name[0].toUpperCase()}${name.slice(1)}` : name}Visible`, Boolean(mask & (1 << index))]));

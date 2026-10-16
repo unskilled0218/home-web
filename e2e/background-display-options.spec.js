@@ -7,6 +7,7 @@ import { normalizeDashboardPreferences } from '../public/dashboard-helpers.js';
 
 const sections = { time: 'clock', weather: 'weather', calendar: 'calendar', bookmarks: 'bookmarks', homeAssistant: 'dashboard-ha', wol: 'dashboard-wol' };
 const field = (name, mobile) => `${mobile ? `mobile${name[0].toUpperCase()}${name.slice(1)}` : name}Visible`;
+const fullscreenField = name => `hide${name[0].toUpperCase()}${name.slice(1)}Fullscreen`;
 const hidden = Object.fromEntries(Object.keys(sections).flatMap((name) => [[field(name, false), false], [field(name, true), false]]));
 async function environment() {
   const directory = mkdtempSync('/tmp/opencode/background-display-'); const filename = `${directory}/app.db`;
@@ -50,6 +51,50 @@ test('each checkbox affects only its profile after save, preserves choices, and 
     await page.reload(); await expect(page.locator('#dashboard-content')).toBeHidden();
     await env.restart(); await ready(page, env); expect(env.store.getDashboardPreferences().preferences).toEqual(saved); await expect(page.locator('#dashboard-content')).toBeHidden();
   } finally { await page.goto('about:blank'); await env.close(); }
+});
+
+for (const width of [1200, 601, 600]) test(`fullscreen visibility controls affect only their widget and survive restart at ${width}px`, async ({ page }) => {
+  const env = await environment();
+  try {
+    await page.setViewportSize({ width, height: 900 }); await ready(page, env);
+    const flags = Object.fromEntries(Object.keys(sections).map(name => [fullscreenField(name), false]));
+    for (const [name, id] of Object.entries(sections)) {
+      await page.locator('#open-settings').click(); await page.locator(`[name="${fullscreenField(name)}"]`).check();
+      expect(env.store.getDashboardPreferences().preferences[fullscreenField(name)]).toBe(false);
+      await save(page); await page.locator('#close-settings').click(); await expect(page.locator(`#${id}`)).toBeVisible();
+      await page.locator('#fullscreen').click(); await expect(page.locator(`#${id}`)).toBeHidden();
+      for (const other of Object.values(sections).filter(value => value !== id)) await expect(page.locator(`#${other}`)).toBeVisible();
+      await page.evaluate(() => document.exitFullscreen()); await expect(page.locator(`#${id}`)).toBeVisible();
+      await setFlags(page, flags);
+    }
+    const allFullscreenHidden = Object.fromEntries(Object.keys(sections).map(name => [fullscreenField(name), true]));
+    await setFlags(page, { ...allFullscreenHidden, timeVisible: false, mobileCalendarVisible: false });
+    await page.locator('#fullscreen').click(); await expect(page.locator('#dashboard-content')).toBeHidden();
+    await expect(page.locator('#open-settings')).toBeVisible(); await expect(page.locator('#fullscreen')).toBeVisible();
+    await page.locator('#fullscreen').click();
+    await expect(page.locator(width <= 600 ? '#calendar' : '#clock')).toBeHidden();
+    const saved = env.store.getDashboardPreferences(); await page.reload(); await env.restart(); await ready(page, env);
+    expect(env.store.getDashboardPreferences()).toEqual(saved);
+    await page.locator('#fullscreen').click(); await expect(page.locator('#dashboard-content')).toBeHidden();
+    await page.locator('#fullscreen').click(); await expect(page.locator(width <= 600 ? '#calendar' : '#clock')).toBeHidden();
+  } finally { await page.goto('about:blank'); await env.close(); }
+});
+
+test('remote fullscreen flags apply immediately without rebasing dirty drafts', async ({ browser }) => {
+  const env = await environment(); const a = await browser.newPage(); const b = await browser.newPage();
+  try {
+    await b.clock.install(); await ready(a, env); await ready(b, env);
+    await b.locator('#fullscreen').click();
+    await setFlags(a, Object.fromEntries(Object.keys(sections).map(name => [fullscreenField(name), true])));
+    await b.clock.fastForward(5000); await expect(b.locator('#dashboard-content')).toBeHidden(); await expect(b.locator('#open-settings')).toBeVisible();
+    await b.locator('#open-settings').click(); await b.locator('[name="hideTimeFullscreen"]').uncheck();
+    await setFlags(a, { hideWeatherFullscreen: false }); await b.clock.fastForward(5000);
+    await expect(b.locator('#weather')).toBeVisible(); await expect(b.locator('[name="hideWeatherFullscreen"]')).toBeChecked();
+    await b.locator('#save-preferences').click(); await expect(b.locator('#settings-status')).toContainText('changed in another browser');
+    expect(env.store.getDashboardPreferences().preferences.hideTimeFullscreen).toBe(true);
+    await b.locator('#reload-shared-preferences').click(); await expect(b.locator('[name="hideWeatherFullscreen"]')).not.toBeChecked();
+    await b.locator('#close-settings').click(); await b.evaluate(() => document.exitFullscreen()); await expect(b.locator('#clock')).toBeVisible();
+  } finally { await a.close(); await b.close(); await env.close(); }
 });
 
 test('mixed layouts collapse absent groups at profile and stacking boundaries', async ({ page }) => {
@@ -99,7 +144,7 @@ test('background-only fullscreen tools remain reachable and exit never restores 
   const env = await environment();
   try {
     await ready(page, env); await setFlags(page, { ...hidden, bookmarksVisible: true });
-    await page.locator('#open-settings').click(); await page.locator('#settings-tab-bookmarks').click(); await page.locator('[name="hideBookmarksFullscreen"]').check(); await save(page); await page.locator('#close-settings').click();
+    await page.locator('#open-settings').click(); await page.locator('[name="hideBookmarksFullscreen"]').check(); await save(page); await page.locator('#close-settings').click();
     await page.locator('#fullscreen').click(); await expect(page.locator('#fullscreen')).toHaveText('Exit fullscreen'); await expect(page.locator('#bookmarks')).toBeHidden(); await expect(page.locator('#open-settings')).toBeVisible();
     await setFlags(page, { bookmarksVisible: false }); await page.locator('#fullscreen').click(); await expect(page.locator('#bookmarks')).toBeHidden();
     await page.locator('#fullscreen').click(); await expect(page.locator('#open-settings')).toBeVisible(); await expect(page.locator('#fullscreen')).toBeVisible(); await page.locator('#fullscreen').click();
@@ -124,6 +169,11 @@ test('slideshow captions update geometry without resetting clock timers or addin
       await page.clock.fastForward(5000); await expect(page.locator('#photo-caption')).toHaveText(caption);
       expect(await page.evaluate(() => window.clockIntervalCalls)).toEqual(timers); expect(manifests).toBe(1); expect(folders).toBe(0); expect(env.store.getDashboardPreferences().revision).toBe(revision);
     }
+    await setFlags(page, { hideTimeFullscreen: true });
+    const beforeFullscreen = await page.evaluate(() => window.clockIntervalCalls);
+    await page.locator('#fullscreen').click(); await expect(page.locator('#clock')).toBeHidden(); await expect(page.locator('#open-settings')).toBeVisible();
+    await page.locator('#fullscreen').click(); await expect(page.locator('#clock')).toBeVisible();
+    expect(await page.evaluate(() => window.clockIntervalCalls)).toEqual(beforeFullscreen); expect(manifests).toBe(1); expect(folders).toBe(0);
     await setFlags(page, { timeVisible: false }); await expect(page.locator('#information')).toBeVisible(); await expect(page.locator('body')).toHaveClass('background-only');
     await page.locator('#fullscreen').click(); await expect(page.locator('#open-settings')).toBeVisible(); await page.locator('#fullscreen').click();
     const stable = await page.evaluate(() => window.clockIntervalCalls);
