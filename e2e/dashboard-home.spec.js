@@ -1,4 +1,5 @@
-import { expect, test as base } from '@playwright/test';
+import { expect } from '@playwright/test';
+import { globalTest as base } from './global-fixtures.js';
 import { normalizeForecast } from '../public/weather-data.js';
 import { rawForecast } from '../test/fixtures/weather.js';
 import { normalizeDashboardPreferences, validateDashboardPreferences } from '../public/dashboard-helpers.js';

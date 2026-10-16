@@ -19,7 +19,8 @@ import { validateWeatherLocation, weatherTimezone } from '../public/weather-data
 import { validateDashboardPreferences } from '../public/dashboard-helpers.js';
 import { CONNECTION_SHUTDOWN_GRACE_MS } from './lifecycle-constants.js';
 import { safeBookmarkUrl } from '../public/bookmark-data.js';
-import { validateSlideshowSnapshot } from '../public/photo-slideshow-data.js';
+import { validateSlideshowSnapshot, validateSlideshowPhoto, validateLocalPhotoManifest } from '../public/photo-slideshow-data.js';
+import { exactFields, MAX_SETTINGS_TRANSFER_BYTES, validateSettingsTransfer } from '../public/dashboard-settings-data.js';
 
 export const MAX_JSON_BODY_BYTES = 16_384;
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -100,7 +101,7 @@ function selectionFingerprint(settings) {
   return createHash('sha256').update(`${settings.baseUrl}\0${settings.username}\0${settings.accessToken}`).digest('base64url');
 }
 
-export function createDashboardServer({ runtimeConfig, store, linkwarden, homeAssistant, calDav, weather, slideshow, photoLibrary = createUnavailablePhotoLibrary(), homeAssistantControls = createHomeAssistantControlStore(), wakeExecutor = executeWakeRequest, collectionSelections = createCollectionSelectionStore(), now = Date.now, publicRoot = defaultPublicRoot }) {
+export function createDashboardServer({ runtimeConfig, store, linkwarden, homeAssistant, calDav, weather, localWeather, slideshow, photoSourceEnabled = false, photoLibrary = createUnavailablePhotoLibrary(), homeAssistantControls = createHomeAssistantControlStore(), wakeExecutor = executeWakeRequest, collectionSelections = createCollectionSelectionStore(), now = Date.now, publicRoot = defaultPublicRoot }) {
   const wakeRequests = new Map();
   const integrationEncryptionKey = runtimeConfig.integrationEncryptionKey ?? runtimeConfig.linkwardenEncryptionKey;
   let homeAssistantMutation = Promise.resolve();
@@ -328,6 +329,47 @@ export function createDashboardServer({ runtimeConfig, store, linkwarden, homeAs
     if (!isTrustedAddress(request.socket.remoteAddress)) return json(response, 403, { error: 'This service only accepts local-network requests.' });
     if (!apiRequestAllowed(request, runtimeConfig.allowedHosts)) return json(response, 403, { error: 'Request host or origin is not allowed.' });
     if (request.method === 'GET' && pathname === '/api/health') return json(response, 200, { status: 'ok' });
+    if (pathname === '/api/dashboard/configuration') {
+      if (request.method !== 'GET') return json(response, 405, { error: 'Method not allowed.' });
+      const observe = load => { try { return { ...load(), available: true }; } catch { return { available: false }; } };
+      return json(response, 200, { calendar: observe(calDavStatus), linkwarden: observe(linkwardenStatus) });
+    }
+    if (['/api/dashboard/settings/export', '/api/dashboard/settings/import'].includes(pathname)) {
+      const exporting = pathname.endsWith('/export');
+      if (request.method !== (exporting ? 'GET' : 'POST')) return json(response, 405, { error: 'Method not allowed.' });
+      let input;
+      if (!exporting) {
+        try {
+          input = await readJson(request, MAX_SETTINGS_TRANSFER_BYTES);
+          if (!exactFields(input, ['settings', 'preferencesRevision', 'weatherRevision']) || !['preferencesRevision', 'weatherRevision'].every(key => Number.isSafeInteger(input[key]) && input[key] >= 0)) throw new Error('Invalid settings import revisions.');
+          input.settings = validateSettingsTransfer(input.settings);
+        } catch (error) { return json(response, 400, { error: error.message }); }
+      }
+      try {
+        if (exporting) { response.setHeader('Content-Disposition', 'attachment; filename="dashboard-global-settings.json"'); return json(response, 200, store.exportDashboardSettings().settings); }
+        const result = store.importDashboardSettings(input.settings, input.preferencesRevision, input.weatherRevision);
+        if (!result) return json(response, 409, { error: 'Global settings changed. Reload before importing.' });
+        try { slideshow?.configure(result.preferences.preferences); } catch { /* The settings transaction is already committed. */ }
+        try { weather?.reloadLocation(result.weather); } catch { /* A later service refresh can recover committed configuration. */ }
+        return json(response, 200, { snapshot: dashboardSnapshot(result.preferences), weatherRevision: result.weatherRevision });
+      } catch { return json(response, 503, { error: 'Global settings transfer is unavailable.' }); }
+    }
+    if (pathname === '/api/weather/local') {
+      if (request.method !== 'POST') return json(response, 405, { error: 'Method not allowed.' });
+      let input;
+      try { input = await readJson(request, 2048); if (!exactFields(input, ['location', 'timezone'])) throw new Error('Invalid Local weather query.'); input.location = validateWeatherLocation(input.location); input.timezone = weatherTimezone(input.timezone); }
+      catch (error) { return json(response, 400, { error: error.message }); }
+      try { if (!localWeather) throw new Error('Unavailable service.'); return json(response, 200, localWeather.query(input.location, input.timezone)); }
+      catch (error) { return json(response, error.status === 429 ? 429 : 503, { error: 'Local weather is unavailable. Retry later.' }); }
+    }
+    if (pathname === '/api/dashboard/photos/local') {
+      if (request.method !== 'GET') return json(response, 405, { error: 'Method not allowed.' });
+      try {
+        const result = photoSourceEnabled ? await photoLibrary.list() : { available: false, photos: [] };
+        const photos = result.available ? result.photos.slice(0, 100).flatMap(photo => { try { return [validateSlideshowPhoto(photo)]; } catch { return []; } }) : [];
+        return json(response, 200, validateLocalPhotoManifest({ version: 1, enabled: photoSourceEnabled, available: Boolean(result.available), count: photos.length, photos }));
+      } catch { return json(response, 503, { error: 'Local photos are unavailable.' }); }
+    }
     if (['/api/dashboard/settings', '/api/dashboard/settings/initialize'].includes(pathname)) {
       const initialize = pathname.endsWith('/initialize');
       if (!(initialize ? request.method === 'POST' : ['GET', 'PUT'].includes(request.method))) return json(response, 405, { error: 'Method not allowed.' });

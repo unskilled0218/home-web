@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createShutdownCoordinator } from '../src/shutdown.js';
 import { FakeChild, deferred, fakeClock, tick } from './fixtures/lifecycle.js';
 import { createPhotoSlideshow } from '../src/photo-slideshow.js';
+import { createLocalWeatherService } from '../src/local-weather.js';
 import { photo } from './fixtures/photo-slideshow.js';
 
 test('shutdown is shared and waits for startup, HTTP and weather before closing SQLite exactly once', async () => {
@@ -96,4 +97,13 @@ test('slideshow attached after the startup shutdown deadline is still stopped be
   const stopping = owner.shutdown(); clock.fire(30); assert.equal((await stopping).forced, true);
   let scans = 0; const service = createPhotoSlideshow({ ...clock, photoLibrary: { list() { scans++; return { available: true, photos: [photo()] }; } }, preferences: { order: 'name', interval: 5 } });
   owner.attach('slideshow', service); await service.start(); owner.startupFinished(); await tick(); assert.equal(scans, 0); assert.equal(clock.timers.size, 0);
+});
+
+for (const forced of [false, true]) test(`Local weather actual provider work remains owned before SQLite cleanup (forced: ${forced})`, async () => {
+  const clock = fakeClock(); const work = deferred(); let closed = 0;
+  const localWeather = createLocalWeatherService({ ...clock, fetchImpl: () => work.promise }); localWeather.start(); localWeather.query({ latitude: 1, longitude: 2, label: 'Local' }, 'UTC'); await tick();
+  const owner = createShutdownCoordinator({ ...clock, timeoutMs: 30, report() {} }); owner.attach('localWeather', localWeather); owner.attach('store', { close() { closed++; } }); owner.startupFinished();
+  const stopping = owner.shutdown(); await tick(); assert.equal(closed, 0); assert.equal(clock.timers.size, 1, 'only coordinator deadline remains');
+  if (forced) { clock.fire(30); assert.equal((await stopping).cleanupSafe, false); }
+  work.resolve(Response.json({})); const result = await stopping; await tick(); assert.equal(closed, forced ? 0 : 1); assert.equal(result.code, forced ? 1 : 0); assert.equal(clock.timers.size, 0);
 });

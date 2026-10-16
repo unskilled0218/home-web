@@ -1,6 +1,6 @@
 import { homeAssistantOrigin } from './dashboard-home-assistant.js';
 
-export function createIntegrationSettings({ document, homeAssistant, wol, confirm = (message) => window.confirm(message) }) {
+export function createIntegrationSettings({ document, homeAssistant, wol, confirm = (message) => window.confirm(message), canMutate = () => true, beginMutation = () => () => {} }) {
   const $ = (id) => document.getElementById(id);
   const haForm = $('home-assistant-connection'); const wolForm = $('wol-device-form');
   const events = new AbortController();
@@ -21,9 +21,9 @@ export function createIntegrationSettings({ document, homeAssistant, wol, confir
     const saved = !state.discovered ? 'Loading saved Home Assistant connection…' : state.needsReauthentication ? 'Home Assistant needs re-authentication. Enter a new token.' : !state.encryptionReady ? 'Home Assistant credential encryption is unavailable on this server.' : state.configured ? `Saved connection: ${state.baseUrl}` : 'Home Assistant is not connected.';
     $('home-assistant-status').textContent = state.error ? `${saved} ${state.error}` : saved;
     if (opened && !haDirty && state.discovered) $('home-assistant-url').value = state.baseUrl;
-    for (const control of haForm.elements) control.disabled = state.mutationPending;
-    $('connect-home-assistant').disabled = state.mutationPending || !state.discovered || !state.encryptionReady;
-    $('disconnect-home-assistant').disabled = state.mutationPending || !state.accessTokenPresent;
+    for (const control of haForm.elements) control.disabled = state.mutationPending || !canMutate();
+    $('connect-home-assistant').disabled = state.mutationPending || !state.discovered || !state.encryptionReady || !canMutate();
+    $('disconnect-home-assistant').disabled = state.mutationPending || !state.accessTokenPresent || !canMutate();
     tokenGuidance();
   }
   function changeEditor(device) {
@@ -34,6 +34,8 @@ export function createIntegrationSettings({ document, homeAssistant, wol, confir
     $('wol-editor-status').textContent = ''; $('wol-settings-status').textContent = '';
   }
   async function action(controller, work, message, statusId, success = () => {}) {
+    if (!canMutate()) return;
+    const release = beginMutation('installation');
     const owner = session; const selection = editor;
     $(statusId).textContent = 'Saving server settings…';
     try {
@@ -41,16 +43,16 @@ export function createIntegrationSettings({ document, homeAssistant, wol, confir
       if (!disposed && opened && owner === session && (controller !== wol || selection === editor)) { success(); $(statusId).textContent = message; }
     } catch (failure) {
       if (!disposed && opened && owner === session && (controller !== wol || selection === editor)) $(statusId).textContent = failure.status === 404 ? 'This device was removed in another browser. Your draft is kept; cancel editing to add a new device.' : failure.message;
-    }
+    } finally { release(); }
   }
   function makeRow(device) {
     const node = document.createElement('li'); const title = document.createElement('strong'); const details = document.createElement('p'); const actions = document.createElement('div'); actions.className = 'integration-actions';
     const edit = document.createElement('button'); edit.type = 'button'; edit.textContent = 'Edit';
     const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = 'Delete';
-    listen(edit, 'click', () => { const saved = wol.getState().devices.find((item) => item.id === device.id); if (saved && !wol.getState().mutationPending) { changeEditor(saved); $('wol-name').focus(); } });
+    listen(edit, 'click', () => { const saved = wol.getState().devices.find((item) => item.id === device.id); if (canMutate() && saved && !wol.getState().mutationPending) { changeEditor(saved); $('wol-name').focus(); } });
     listen(remove, 'click', () => {
       const saved = wol.getState().devices.find((item) => item.id === device.id);
-      if (!saved || wol.getState().mutationPending || !confirm(`Delete ${saved.name}? Its saved wake audit records will also be deleted.`)) return;
+      if (!canMutate() || !saved || wol.getState().mutationPending || !confirm(`Delete ${saved.name}? Its saved wake audit records will also be deleted.`)) return;
       void action(wol, () => wol.remove(saved.id), 'Device deleted.', 'wol-settings-status', () => { if (editingId === saved.id) changeEditor(null); $('wol-name').focus(); });
     });
     actions.append(edit, remove); node.append(title, details, actions);
@@ -66,11 +68,11 @@ export function createIntegrationSettings({ document, homeAssistant, wol, confir
       retained.add(device.id); row.title.textContent = device.name;
       row.details.textContent = `${device.macAddress} · Broadcast ${device.broadcastAddress}${device.ipAddress ? ` · IP ${device.ipAddress}` : ''}${device.group ? ` · ${device.group}` : ''}`;
       row.edit.setAttribute('aria-label', `Edit ${device.name}`); row.remove.setAttribute('aria-label', `Delete ${device.name}`);
-      row.edit.disabled = state.mutationPending; row.remove.disabled = state.mutationPending;
+      row.edit.disabled = state.mutationPending || !canMutate(); row.remove.disabled = state.mutationPending || !canMutate();
     }
     for (const [id, row] of rows) if (!retained.has(id)) { row.node.remove(); rows.delete(id); }
-    for (const control of wolForm.elements) control.disabled = state.mutationPending;
-    $('save-wol-device').disabled = state.mutationPending || !state.discovered;
+    for (const control of wolForm.elements) control.disabled = state.mutationPending || !canMutate();
+    $('save-wol-device').disabled = state.mutationPending || !state.discovered || !canMutate();
     if (editingId !== null && state.discovered) {
       const saved = state.devices.find((device) => device.id === editingId);
       $('wol-editor-status').textContent = !saved ? 'This device was removed in another browser. Your draft is kept; cancel editing to add a new device.' : baseline !== values(saved) ? 'Saved values changed. Cancel and select Edit again to reload, or explicitly save your draft.' : '';
@@ -85,7 +87,7 @@ export function createIntegrationSettings({ document, homeAssistant, wol, confir
     void action(homeAssistant, () => homeAssistant.connect({ url: $('home-assistant-url').value, accessToken: $('home-assistant-token').value }), 'Home Assistant connected.', 'home-assistant-settings-status', () => { $('home-assistant-token').value = ''; haDirty = false; renderHomeAssistant(homeAssistant.getState()); });
   });
   listen($('disconnect-home-assistant'), 'click', () => {
-    if (homeAssistant.getState().mutationPending || !confirm('Disconnect Home Assistant and delete its saved access token?')) return;
+    if (!canMutate() || homeAssistant.getState().mutationPending || !confirm('Disconnect Home Assistant and delete its saved access token?')) return;
     void action(homeAssistant, () => homeAssistant.disconnect(), 'Home Assistant disconnected.', 'home-assistant-settings-status', () => { $('home-assistant-token').value = ''; haDirty = false; renderHomeAssistant(homeAssistant.getState()); });
   });
   listen(wolForm, 'input', () => { wolDirty = true; });
@@ -96,6 +98,7 @@ export function createIntegrationSettings({ document, homeAssistant, wol, confir
   });
   listen($('cancel-wol-edit'), 'click', () => { if (!wol.getState().mutationPending) { changeEditor(null); $('wol-name').focus(); } });
   return {
+    updateScope() { session++; renderHomeAssistant(homeAssistant.getState()); renderWol(wol.getState()); },
     open() { if (disposed) return; session++; opened = true; $('home-assistant-settings-status').textContent = ''; $('wol-settings-status').textContent = ''; renderHomeAssistant(homeAssistant.getState()); renderWol(wol.getState()); void homeAssistant.refresh(); void wol.refresh(); },
     close() { session++; opened = false; $('home-assistant-token').value = ''; },
     suspend() { session++; $('home-assistant-token').value = ''; },

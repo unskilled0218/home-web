@@ -4,6 +4,7 @@ import path from 'node:path';
 import { defaultHomeSettings, normalizeHomeSettings } from './home-settings.js';
 import { createWeatherStore } from './weather-store.js';
 import { createDashboardPreferenceStore } from './dashboard-preferences.js';
+import { createSettingsTransfer } from './dashboard-settings-transfer.js';
 
 export function createStore(databasePath) {
   mkdirSync(path.dirname(databasePath), { recursive: true });
@@ -153,9 +154,11 @@ export function createStore(databasePath) {
   const mapLinkwarden = (row) => row && ({ baseUrl: row.base_url, username: row.username, encryptedAccessToken: { ciphertext: row.key_ciphertext, iv: row.key_iv, tag: row.key_tag }, updatedAt: row.updated_at });
   const mapHomeAssistant = (row) => row && ({ baseUrl: row.base_url, encryptedAccessToken: { ciphertext: row.token_ciphertext, iv: row.token_iv, tag: row.token_tag }, updatedAt: row.updated_at });
   const mapCalDav = (row) => row && ({ serverUrl: row.base_url, username: row.username, encryptedPassword: { ciphertext: row.password_ciphertext, iv: row.password_iv, tag: row.password_tag }, updatedAt: row.updated_at });
+  const weather = createWeatherStore(db); const preferences = createDashboardPreferenceStore(db);
   return {
-    ...createWeatherStore(db),
-    ...createDashboardPreferenceStore(db),
+    ...weather,
+    ...preferences,
+    ...createSettingsTransfer(db, preferences, weather),
     getHomeSettings() {
       queries.initializeHomeSettings.run(JSON.stringify(defaultHomeSettings()));
       const row = queries.getHomeSettings.get();

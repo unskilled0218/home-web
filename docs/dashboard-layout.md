@@ -49,13 +49,13 @@ Mobile applies up to and including 600px. Entry selects the actual viewport prof
 
 ## Save, cancel, and recovery
 
-- **Save layout** publishes a changed canonical layout through the existing shared preference transaction with the complete entry preferences and captured revision. No-op Save exits without a request. No autosave occurs on entry, gestures, resizing, fullscreen, or exit.
+- **Save layout** persists a changed canonical layout to the captured settings scope: the browser-local record in Local, or the shared SQLite preference transaction in Global. Complete entry preferences, source identity, and revision are retained. No-op Save exits without a write. No autosave occurs on entry, gestures, resizing, fullscreen, or exit.
 - While a write is pending, editing, Save, Cancel, Toolbar/Close, Reload, and competing entry are disabled until it settles. Saving and failure/offline/conflict feedback stay visible even with details closed. An uncertain request cannot safely be treated as uncommitted merely because a client aborted it.
 - A successful Save exits. A failed or stale save retains the local draft and action blocking. Remote polls do not reset raw numeric input, cancel held gestures, or silently advance the captured revision.
 - **Cancel** discards both local profile drafts and restores the latest confirmed layout, including updates accepted from other browsers during editing. Focus returns to the original visible focusable entry/target, otherwise Edit layout. Non-focusable widget anchors are removed immediately; focus uses Edit layout because engines can drop focus after anchor removal.
 - **Reset selected profile**, or selecting Automatic, changes only that draft profile to Automatic. Save to publish the reset.
-- **Reload shared layout (discard edits)** explicitly discards both profile drafts and raw inputs, adopting the newest complete confirmed preferences and revision. It does not publish anything. After conflict, reapply changes to that baseline rather than silently merging unrelated preferences.
-- Offline cached layouts remain locally editable but cannot supply a writable server revision. After confirmation returns, explicit Reload is required before saving; background confirmation alone never rebases your draft.
+- **Reload local/shared layout (discard edits)** discards both profile drafts/raw inputs and adopts the current source baseline. A mode change in another tab blocks old-source Save until reload/discard. It does not publish anything. Reapply changes explicitly rather than merging unrelated preferences.
+- Local layouts can save without a server when browser storage is writable. Global offline caches cannot supply a writable server revision; explicit Reload after confirmation is required before saving. Background confirmation never rebases a draft.
 - Unsaved changed drafts use the browser's supported unload warning. Persisted-page suspension retains completed local edits and blocking; it never autosaves. Browser/OS navigation policies cannot guarantee recovery after closing a tab.
 
 Unrelated Settings saves retain the complete layout from their own matching baseline and revision. Dirty Settings sessions conflict rather than overwriting newer layouts. Integration credential drafts and providers remain separately owned.

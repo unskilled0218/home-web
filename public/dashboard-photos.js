@@ -29,7 +29,7 @@ function decodeImage(url, { signal }) {
   return image.decode().finally(() => signal.removeEventListener('abort', abort));
 }
 
-export function createPhotoController({ show, clear, report, update = () => {}, fetchImpl = fetch, decode = decodeImage, schedule = setTimeout, cancel = clearTimeout, requestSchedule = setTimeout, requestCancel = clearTimeout }) {
+export function createPhotoController({ show, clear, report, update = () => {}, fetchImpl = fetch, decode = decodeImage, schedule = setTimeout, cancel = clearTimeout, requestSchedule = setTimeout, requestCancel = clearTimeout, autoPoll = true }) {
   let settings; let visible = true; let disposed = false; let started = false; let epoch = 0; let timer; let read; let decoding;
   let snapshot; let desired; let displayed; const retired = new Set();
   const photoKey = (photo) => photo ? JSON.stringify(photo) : null;
@@ -38,7 +38,7 @@ export function createPhotoController({ show, clear, report, update = () => {}, 
   function pause() { epoch++; cancel(timer); timer = undefined; read?.controller.abort(); read = undefined; retireDecode(); }
   function arm(delay = 5000) {
     cancel(timer); timer = undefined;
-    if (visible && !disposed && started) timer = schedule(() => { timer = undefined; void load(); }, delay);
+    if (autoPoll && visible && !disposed && started) timer = schedule(() => { timer = undefined; void load(); }, delay);
   }
   function render(photo) {
     const key = photoKey(photo);

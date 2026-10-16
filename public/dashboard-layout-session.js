@@ -5,7 +5,7 @@ export function createLayoutSession() {
   let baseline; let draft; let revision; let mode; let selected = 'time';
   const equal = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   return {
-    load(state, profile, widget = selected) { baseline = structuredClone(state.snapshot.preferences); draft = normalizeWidgetLayout(baseline.widgetLayout); revision = state.confirmed ? state.snapshot.revision : null; mode = profile; selected = widget; },
+    load(state, profile, widget = selected) { baseline = structuredClone(state.snapshot.preferences); draft = normalizeWidgetLayout(baseline.widgetLayout); revision = state.confirmed ? state.saveToken ?? state.snapshot.revision : null; mode = profile; selected = widget; },
     get mode() { return mode; }, set mode(value) { mode = value; },
     get selected() { return selected; }, set selected(value) { selected = value; },
     get draft() { return draft; }, get revision() { return revision; },

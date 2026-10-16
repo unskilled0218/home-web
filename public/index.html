@@ -70,6 +70,13 @@
         <div class="settings-panels">
           <section id="settings-panel-general" role="tabpanel" aria-labelledby="settings-tab-general" tabindex="0">
             <h3>General</h3><p class="settings-description">Position and overall scale apply to desktop. Choose which sections appear over the background without changing connections or selections.</p>
+            <fieldset id="settings-scope-controls"><legend>Settings scope</legend>
+              <label>Use settings for<select id="settings-scope"><option value="local">Local — this browser</option><option value="global">Global — all Global browsers</option></select></label>
+              <p class="settings-description">This choice belongs to this browser profile only. Other browsers keep their own mode. Shared connections and device management can be changed in Global mode.</p>
+              <p id="scope-status" role="status"></p>
+              <div class="integration-actions"><button id="export-global-settings" type="button">Export global settings</button><label>Global settings file<input id="global-settings-file" type="file" accept="application/json,.json"></label><button id="import-global-settings" type="button" disabled>Import global settings</button></div>
+              <p id="settings-transfer-status" role="status"></p>
+            </fieldset>
             <fieldset id="background-display"><legend>Display on background</legend>
               <fieldset><legend>Desktop</legend>
                 <label class="toggle"><input name="timeVisible" form="preferences" type="checkbox">Time</label>
@@ -202,7 +209,7 @@
               <label>Background<select name="background" form="preferences"><option value="color">Solid color</option><option value="blur">Blurred image</option></select></label>
               <label>Background color<input name="color" form="preferences" type="color"></label><label>Background blur (pixels)<input name="blur" form="preferences" type="number" min="0" max="100"></label>
             </fieldset>
-            <section class="settings-section" aria-labelledby="photos-title"><h4 id="photos-title">NFS backgrounds</h4><p>The server loads JPEG, PNG, WebP, and GIF backgrounds from its configured read-only NFS share. Reload this page after changing files on the share.</p><p id="photo-status" role="status">Loading NFS backgrounds…</p></section>
+            <section class="settings-section" aria-labelledby="photos-title"><h4 id="photos-title">NFS backgrounds</h4><p>The server discovers images on its read-only NFS share. Local mode plays an independent browser sequence; Global mode follows the server's shared selection. Files refresh automatically.</p><p id="photo-status" role="status">Loading NFS backgrounds…</p></section>
           </section>
         </div>
       </div>

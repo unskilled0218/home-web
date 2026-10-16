@@ -23,15 +23,14 @@ test('one settings owner coalesces reads, polls at five seconds, pauses, and res
   env.run(5000); release(); await settle(); assert.equal(env.calls.length, 3); assert.equal(env.tasks.size, 1);
 });
 
-test('legacy migration uses the server winner and cache cannot initialize or override the server', async (t) => {
+test('Global reads preserve legacy Local data and never publish it to an uninitialized server', async (t) => {
   const values = new Map([['dashboard.preferences.v1', JSON.stringify({ color: '#123456', timeScale: 1.25 })]]);
   const winner = snapshot({ preferences: normalizeDashboardPreferences({ color: '#abcdef' }) });
   const env = setup(t, { values, handler: (url) => Response.json(url.endsWith('/initialize') ? { ...winner, created: false } : snapshot({ initialized: false, revision: 0 })) });
-  await env.client.start(); assert.equal(env.calls.length, 2); assert.equal(env.applied[0].preferences.color, '#abcdef'); assert.equal(values.has('dashboard.preferences.v1'), false);
-  const payload = JSON.parse(env.calls[1].options.body); assert.equal(payload.preferences.timeScale, 1.3); assert.equal(Object.hasOwn(payload.preferences, 'location'), false);
-  const cached = JSON.parse(values.get(SHARED_SETTINGS_KEY)); assert.equal(cached.preferences.color, '#abcdef');
+  await env.client.start(); assert.equal(env.calls.length, 1); assert.equal(env.applied[0].preferences.color, '#000000'); assert.equal(values.has('dashboard.preferences.v1'), true);
+  assert.equal(values.has(SHARED_SETTINGS_KEY), false); assert.equal(env.client.getState().snapshot.initialized, false);
   const fresh = setup(t, { values, handler: () => Response.json(snapshot({ preferences: normalizeDashboardPreferences({ color: '#987654' }) })) });
-  assert.equal(fresh.client.getState().cache, true); await fresh.client.start(); assert.equal(fresh.calls.length, 1); assert.equal(fresh.client.getState().snapshot.preferences.color, '#987654');
+  assert.equal(fresh.client.getState().cache, false); await fresh.client.start(); assert.equal(fresh.calls.length, 1); assert.equal(fresh.client.getState().snapshot.preferences.color, '#987654');
 });
 
 test('fresh uninitialized preview leaves storage unchanged and reset authority clears an older cache', async (t) => {
@@ -102,9 +101,9 @@ test('per-service metadata deferral leaves preference polling live and discards 
   pending = false; response?.(); await settle(); finishBook(); await settle(); assert.equal(env.tasks.size, 1);
 });
 
-test('snapshot guards also protect initialization and conflict metadata', async (t) => {
+test('snapshot guards protect Global read metadata without initializing legacy Local preferences', async (t) => {
   let release;
-  const migration = setup(t, { values: new Map([['dashboard.preferences.v1', JSON.stringify({ color: '#123456' })]]), handler: (url) => url.endsWith('/initialize') ? new Promise((resolve) => { release = () => resolve(Response.json(snapshot())); }) : Response.json(snapshot({ initialized: false, revision: 0 })) });
+  const migration = setup(t, { values: new Map([['dashboard.preferences.v1', JSON.stringify({ color: '#123456' })]]), handler: () => new Promise((resolve) => { release = () => resolve(Response.json(snapshot())); }) });
   const loading = migration.client.start(); await settle(); migration.epochs.linkwarden++; release(); await loading;
   assert.equal(migration.client.getState().confirmed, true); assert.equal(migration.observed.some((event) => event.name === 'linkwarden'), false);
 });

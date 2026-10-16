@@ -1,4 +1,5 @@
-import { test, expect, firefox } from '@playwright/test';
+import { expect } from '@playwright/test';
+import { globalTest as test, globalFirefox as firefox } from './global-fixtures.js';
 import { once } from 'node:events';
 import { createStore } from '../src/db.js';
 import { createDashboardServer } from '../src/app.js';
@@ -42,7 +43,7 @@ test('all Settings categories share through a real server across isolated deskto
     await tick(b.page); await expect(b.page.locator('body')).toHaveCSS('background-color', 'rgb(18, 52, 86)'); await expect(b.page.locator('#clock')).toBeHidden(); await expect(b.page.locator('#weather')).toHaveCSS('font-size', '20.8px');
     expect(await preferences(b.page)).toEqual(env.store.getDashboardPreferences().preferences);
     const fresh = await client(browser, env, { legacy: { color: '#abcdef', timezone: 'UTC' } });
-    try { expect(await preferences(fresh.page)).toEqual(await preferences(b.page)); expect(await fresh.page.evaluate(() => localStorage.getItem('dashboard.preferences.v1'))).toBeNull(); } finally { await fresh.close(); }
+    try { expect(await preferences(fresh.page)).toEqual(await preferences(b.page)); expect(await fresh.page.evaluate(() => localStorage.getItem('dashboard.preferences.v1'))).not.toBeNull(); } finally { await fresh.close(); }
   } finally { await a.close(); await b.close(); await env.close(); }
 });
 
@@ -61,10 +62,10 @@ test('concurrent dialogs preserve drafts, reject stale saves, and explicitly rel
   } finally { await a.close(); await b.close(); await env.close(); }
 });
 
-test('one-time legacy migration converges independently stored clients on the winning record', async ({ browser }) => {
+test('Global startup never publishes either browser legacy record into uninitialized shared settings', async ({ browser }) => {
   const env = await environment();
   const [a, b] = await Promise.all([client(browser, env, { legacy: { color: '#123456', timeScale: 1.25 } }), client(browser, env, { legacy: { color: '#abcdef', timezone: 'Europe/London' } })]);
-  try { await tick(a.page); await tick(b.page); await expect.poll(() => preferences(a.page)).toEqual(env.store.getDashboardPreferences().preferences); expect(await preferences(b.page)).toEqual(await preferences(a.page)); expect(env.store.getDashboardPreferences().revision).toBe(1); }
+  try { await tick(a.page); await tick(b.page); await expect(a.page.locator('body')).toHaveCSS('background-color', 'rgb(0, 0, 0)'); await expect(b.page.locator('body')).toHaveCSS('background-color', 'rgb(0, 0, 0)'); expect(env.store.getDashboardPreferences().revision).toBe(0); expect(await a.page.evaluate(() => localStorage.getItem('dashboard.preferences.v1'))).not.toBeNull(); expect(await b.page.evaluate(() => localStorage.getItem('dashboard.preferences.v1'))).not.toBeNull(); }
   finally { await a.close(); await b.close(); await env.close(); }
 });
 

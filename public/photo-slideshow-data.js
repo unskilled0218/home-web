@@ -1,5 +1,6 @@
 export const MAX_PHOTO_NAME_BYTES = 1024;
 export const MAX_SLIDESHOW_BYTES = 8192;
+export const MAX_LOCAL_PHOTO_MANIFEST_BYTES = 262144;
 const encoder = new TextEncoder();
 const PHOTO_FIELDS = ['name', 'lastModified', 'url'];
 const SNAPSHOT_FIELDS = ['version', 'instanceId', 'revision', 'serverTime', 'enabled', 'available', 'loading', 'stale', 'count', 'current', 'nextChangeAt'];
@@ -25,4 +26,12 @@ export function validateSlideshowSnapshot(value) {
   if ((value.count > 0) !== (current !== null) || (value.count > 1) !== (value.nextChangeAt !== null)) throw new Error('Inconsistent slideshow selection or deadline.');
   if (slideshowBytes(value) > MAX_SLIDESHOW_BYTES) throw new Error('Slideshow snapshot too large.');
   return { ...value, current };
+}
+
+export function validateLocalPhotoManifest(value) {
+  if (!fields(value, ['version', 'enabled', 'available', 'count', 'photos']) || value.version !== 1 || typeof value.enabled !== 'boolean' || typeof value.available !== 'boolean' || !Array.isArray(value.photos) || value.photos.length > 100 || value.count !== value.photos.length) throw new Error('Invalid Local photo manifest.');
+  if ((!value.enabled && value.available) || (!value.available && value.photos.length)) throw new Error('Inconsistent Local photo source.');
+  const photos = value.photos.map(validateSlideshowPhoto);
+  if (slideshowBytes(value) > MAX_LOCAL_PHOTO_MANIFEST_BYTES) throw new Error('Local photo manifest exceeds limits.');
+  return { ...value, photos };
 }

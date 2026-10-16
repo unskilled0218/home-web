@@ -1,4 +1,5 @@
-import { expect, test as base } from '@playwright/test';
+import { expect } from '@playwright/test';
+import { globalTest as base } from './global-fixtures.js';
 import { once } from 'node:events';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { createStore } from '../src/db.js';

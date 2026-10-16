@@ -1,4 +1,4 @@
-import { decodeStoredDashboardPreferences, legacyDashboardPreferences, normalizeDashboardPreferences, SETTINGS_KEY, validateDashboardPreferences, validateDashboardSnapshot } from './dashboard-helpers.js';
+import { decodeStoredDashboardPreferences, normalizeDashboardPreferences, validateDashboardPreferences, validateDashboardSnapshot } from './dashboard-helpers.js';
 
 export const SHARED_SETTINGS_KEY = 'dashboard.shared-settings.v1';
 export const SETTINGS_POLL_MS = 5000;
@@ -6,13 +6,12 @@ const unavailable = () => ({ weather: { available: false }, calendar: { availabl
 
 export function createSettingsSync({ onSnapshot, onState = () => {}, captureObservers = () => ({}), storage, fetchImpl = fetch, schedule = setTimeout, cancel = clearTimeout, timeoutMs = 10000 }) {
   let snapshot = { initialized: false, revision: 0, preferences: normalizeDashboardPreferences(), integrations: unavailable() };
-  let candidate; let cache = false; let confirmed = false; let error = ''; let generation = 0; let timer; let read; let readController; let write; let visible = true; let disposed = false; let queuedRefresh = false;
+  let cache = false; let confirmed = false; let error = ''; let generation = 0; let timer; let read; let readController; let write; let visible = true; let disposed = false; let queuedRefresh = false;
   const deferrals = new Map(['weather', 'calendar', 'linkwarden'].map((name) => [name, { count: 0, epoch: 0 }]));
   try {
     const value = JSON.parse(storage?.getItem(SHARED_SETTINGS_KEY));
     if (value?.schema === 1 && value.initialized === true && Number.isSafeInteger(value.revision) && value.revision > 0) { snapshot = { ...snapshot, initialized: true, revision: value.revision, preferences: decodeStoredDashboardPreferences(value.preferences) }; cache = true; }
   } catch { /* A bad cache is not authority. */ }
-  try { candidate = legacyDashboardPreferences(JSON.parse(storage?.getItem(SETTINGS_KEY))); } catch { /* Invalid legacy data cannot initialize global settings. */ }
   const state = () => ({ snapshot, confirmed, cache, error, pending: Boolean(write), loading: Boolean(read) });
   const emit = () => { if (!disposed) onState(state()); };
   function arm() { cancel(timer); timer = undefined; if (!disposed && visible && !write) timer = schedule(() => { timer = undefined; void refresh(); }, SETTINGS_POLL_MS); }
@@ -55,7 +54,6 @@ export function createSettingsSync({ onSnapshot, onState = () => {}, captureObse
       if (value.initialized) {
         const serialized = JSON.stringify({ schema: 1, initialized: true, revision: value.revision, preferences: value.preferences });
         if (storage?.getItem(SHARED_SETTINGS_KEY) !== serialized) storage?.setItem(SHARED_SETTINGS_KEY, serialized);
-        storage?.removeItem(SETTINGS_KEY); candidate = null;
       } else storage?.removeItem(SHARED_SETTINGS_KEY);
     } catch { /* Server confirmation does not depend on local caching. */ }
     onSnapshot(value, captured); emit();
@@ -70,11 +68,6 @@ export function createSettingsSync({ onSnapshot, onState = () => {}, captureObse
         let value = await api('/api/dashboard/settings', { controller: readController });
         if (request !== generation || disposed) return;
         let appliedObservers = captured;
-        if (!value.initialized && candidate) {
-          appliedObservers = observers();
-          value = await api('/api/dashboard/settings/initialize', { method: 'POST', body: { preferences: candidate }, controller: readController });
-          if (request !== generation || disposed) return;
-        }
         accept(value, appliedObservers);
       } catch (failure) { if (request === generation && !disposed) { error = failure.message; emit(); } }
       finally { if (read === operation) { read = undefined; emit(); if (queuedRefresh) { queuedRefresh = false; void refresh(); } else arm(); } }
@@ -84,6 +77,7 @@ export function createSettingsSync({ onSnapshot, onState = () => {}, captureObse
   return {
     getState: state,
     start: refresh, refresh,
+    adoptCommittedSnapshot(value) { if (disposed || write) throw new Error('Global settings are busy.'); invalidate(); accept(validateDashboardSnapshot(value), observers()); arm(); },
     async save(preferences, revision) {
       if (write || disposed) throw new Error('A shared preference save is already pending.');
       validateDashboardPreferences(preferences); invalidate(); const request = generation; const owner = { controller: new AbortController() }; write = owner; emit();

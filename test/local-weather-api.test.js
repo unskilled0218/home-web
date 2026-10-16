@@ -1,0 +1,31 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { once } from 'node:events';
+import { createStore } from '../src/db.js';
+import { createDashboardServer } from '../src/app.js';
+import { createWeatherService } from '../src/weather.js';
+import { createLocalWeatherService } from '../src/local-weather.js';
+import { createPhotoSlideshow } from '../src/photo-slideshow.js';
+import { validateLocalWeatherSnapshot } from '../public/local-weather-data.js';
+import { rawForecast } from './fixtures/weather.js';
+import { photo, slideshowClock } from './fixtures/photo-slideshow.js';
+import { tick } from './fixtures/lifecycle.js';
+
+test('Local query API leaves Global weather rows, registrations, preferences and slideshow timing unchanged', async t => {
+  const store = createStore(':memory:'); const clock = slideshowClock(); let globalCalls = 0; let localCalls = 0;
+  const provider = url => Response.json(url.hostname.startsWith('air-') ? { current: { us_aqi: 20 } } : rawForecast());
+  store.saveWeatherLocation({ latitude: 51, longitude: 0, label: 'Global city' }, 0);
+  const weather = createWeatherService({ store, ...clock, fetchImpl: async url => { globalCalls++; return provider(url); } }); weather.start(); await tick();
+  const localWeather = createLocalWeatherService({ ...clock, fetchImpl: async url => { localCalls++; return provider(url); } }); localWeather.start();
+  const slideshow = createPhotoSlideshow({ ...clock, photoLibrary: { list: async () => ({ available: true, photos: [photo(), photo('b.png')] }) }, preferences: { order: 'name', interval: 5 } }); await slideshow.start();
+  const server = createDashboardServer({ runtimeConfig: { allowedHosts: ['127.0.0.1'] }, store, weather, localWeather, slideshow }); server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  t.after(async () => { await Promise.all([server.lifecycle.shutdown(), weather.stop(), localWeather.stop(), slideshow.stop()]); store.close(); });
+  const base = `http://127.0.0.1:${server.address().port}`; const globalState = () => structuredClone({ preferences: store.getDashboardPreferences(), location: store.getWeatherLocation(), forecasts: store.listWeatherVariants(), air: store.getWeatherPart('air'), photo: slideshow.snapshot() }); const before = globalState();
+  const location = { latitude: 35, longitude: 139, label: 'Tokyo' }; const input = { location, timezone: 'Asia/Tokyo' };
+  const query = body => fetch(`${base}/api/weather/local`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  assert.equal((await query(input)).status, 200); await tick(); const cached = await query(input); validateLocalWeatherSnapshot(await cached.json(), location, input.timezone); assert.equal(localCalls, 2); assert.equal(globalCalls, 2); assert.deepEqual(globalState(), before);
+  assert.equal((await fetch(`${base}/api/weather/local`)).status, 405); assert.equal((await query({ ...input, force: true })).status, 400); assert.equal((await query({ ...input, location: { ...location, latitude: 999 } })).status, 400);
+  assert.equal((await fetch(`${base}/api/weather/local`, { method: 'POST', headers: { Origin: 'https://evil.test' }, body: JSON.stringify(input) })).status, 403);
+  store.getDashboardPreferences = () => { throw new Error('fixture corrupt global preferences'); };
+  assert.equal((await fetch(`${base}/api/dashboard/settings`)).status, 503); assert.equal((await fetch(`${base}/api/dashboard/configuration`)).status, 200); assert.equal((await query(input)).status, 200);
+});

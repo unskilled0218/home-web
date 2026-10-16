@@ -5,6 +5,7 @@
 - [Checks](#checks)
   - [Table of Contents](#table-of-contents)
   - [Server photo rotation](#server-photo-rotation)
+  - [Local and Global settings](#local-and-global-settings)
 - [Direct layout editing](#direct-layout-editing)
 
 ```sh
@@ -54,6 +55,12 @@ Run `node --test test/photo-slideshow.test.js test/photo-slideshow-data.test.js 
 Run `npm run test:browser -- e2e/server-photo-rotation.spec.js` for real application/service/SQLite/image decoding with independent browser contexts. Server time/randomness and browser polling time advance separately: rotate before opening a page, close all pages and rotate again, then verify convergence, hidden/persisted-page resume, unchanged-layer identity, presentation saves, service restart, bad-image retention, and empty/single/disabled/unavailable fallbacks. These fixtures use temporary local PNGs and never mount NFS or depend on the NAS. Existing layout/caption/fullscreen fixtures now publish explicit server selections; metadata polling is expected, while extra scans, decodes, and unrelated request owners are not. If Chromium is absent, the operator must run `npx playwright install chromium`; record browser verification as blocked until executable dependencies exist.
 
 Syntax-check new browser/test files individually in addition to `npm run check`: the current glob-based command does not enumerate every input as a separate `node --check` invocation. Finish with `npm test`, `npm run test:browser`, and `git diff --check`.
+
+## Local and Global settings
+
+Run `node --test test/dashboard-settings-scope.test.js test/dashboard-settings-transfer.test.js test/local-weather.test.js test/local-photo-manifest-api.test.js test/dashboard-settings-sync.test.js` for scope/storage/epoch races, atomic import/export, Local weather admission/retries/drainage, and the real eligible-manifest projection. Global controller tests now assert that legacy Local values never initialize shared preferences automatically. Provider retrieval is shared between the persisted Global owner and bounded volatile Local service. No test contacts a live provider or mounts NFS.
+
+New `e2e/settings-scope.spec.js` and `e2e/global-settings-transfer.spec.js` use Playwright's base fixture and default-Local contexts against a real app/store with injected provider/time and temporary PNGs. They cover A-local/B-C-global isolation, source switching/reload/restart, independent Local city/playback, same-profile dirty drafts, and actual settings downloads/uploads/conflicts. Existing shared-behavior specs explicitly opt into `e2e/global-fixtures.js`, including independent Chromium/Firefox contexts, so their shared assumptions do not suppress the new Local default. Listing scenarios is not proof they ran; missing browser executables must remain an explicit blocker.
 
 ## Direct layout editing
 

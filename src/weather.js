@@ -1,46 +1,8 @@
 import { normalizeAir, normalizeForecast, validateForecast, validTimestamp, weatherTimezone } from '../public/weather-data.js';
+import { weatherUrls, retrieve } from './weather-provider.js';
+export { weatherUrls } from './weather-provider.js';
 
 export const WEATHER_REFRESH_MS = 3600000;
-const MAX_PROVIDER_BYTES = 1024 * 1024;
-
-export function weatherUrls(location, timezone = 'UTC') {
-  const common = { latitude: location.latitude, longitude: location.longitude, timezone, timeformat: 'unixtime' };
-  const forecast = new URL('https://api.open-meteo.com/v1/forecast');
-  forecast.search = new URLSearchParams({ ...common, temperature_unit: 'celsius', wind_speed_unit: 'kmh', precipitation_unit: 'mm', forecast_days: 7, current: 'temperature_2m,relative_humidity_2m,is_day,precipitation,weather_code,wind_speed_10m', hourly: 'temperature_2m,weather_code,is_day', daily: 'weather_code,temperature_2m_max,temperature_2m_min' });
-  const air = new URL('https://air-quality-api.open-meteo.com/v1/air-quality');
-  air.search = new URLSearchParams({ ...common, timezone: 'UTC', current: 'us_aqi' });
-  return { forecast, air };
-}
-
-async function providerJson(url, signal, fetchImpl) {
-  const response = await fetchImpl(url, { signal, redirect: 'error' });
-  if (!response.ok || Number(response.headers.get('content-length')) > MAX_PROVIDER_BYTES) throw new Error('Weather provider unavailable');
-  const reader = response.body.getReader(); const chunks = []; let length = 0;
-  try {
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      length += value.byteLength;
-      if (length > MAX_PROVIDER_BYTES || signal.aborted) throw new Error('Weather response exceeds limits');
-      chunks.push(Buffer.from(value));
-    }
-  } catch (error) { await reader.cancel().catch(() => {}); throw error; }
-  finally { reader.releaseLock(); }
-  const data = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-  if (!data || typeof data !== 'object' || Array.isArray(data) || data.error) throw new Error('Invalid weather provider response');
-  return data;
-}
-
-async function retrieve(url, controller, options) {
-  let timer; let abort;
-  const interrupted = new Promise((_resolve, reject) => {
-    abort = () => reject(new Error('Weather request canceled'));
-    controller.signal.addEventListener('abort', abort, { once: true });
-    timer = options.schedule(() => controller.abort(), options.timeoutMs);
-  });
-  try { return await Promise.race([providerJson(url, controller.signal, options.fetchImpl), interrupted]); }
-  finally { options.cancel(timer); controller.signal.removeEventListener('abort', abort); }
-}
 
 function cachedPart(row) {
   if (!row?.payload || !validTimestamp(row.updated)) return null;
@@ -127,9 +89,22 @@ export function createWeatherService({ store, fetchImpl = fetch, now = Date.now,
     return { ...saved, configured: Boolean(saved.location), timezone: zone, forecastRegistered: Boolean(forecastRow), forecast, air, forecastUpdated: forecast ? forecastRow.updated : null, airUpdated: air ? airRow.updated : null, forecastError: Boolean(forecastRow?.failed), airError: Boolean(airRow?.failed), refreshing: pending(forecastRow) || pending(airRow) };
   }
 
+  function reloadLocation(saved) {
+    if (!saved?.changed) return snapshot();
+    generation++; queue.length = 0;
+    if (active) {
+      active.controller.abort();
+      if (!saved.coordinatesChanged && active.attemptStarted) {
+        const retagged = store.getWeatherPart(active.row.part, active.row.timezone);
+        if (retagged?.registration === active.row.registration) store.resetWeatherAttempt(retagged);
+      }
+    }
+    refreshRetained(saved.coordinatesChanged); return snapshot();
+  }
   return {
     start() { if (running) return; running = true; refreshRetained(true); },
     snapshot,
+    reloadLocation,
     ensureFresh(timezone = 'UTC') {
       const zone = weatherTimezone(timezone);
       if (!running) throw new Error('Weather service is stopped');
@@ -146,17 +121,8 @@ export function createWeatherService({ store, fetchImpl = fetch, now = Date.now,
     saveLocation(location, revision) {
       const saved = store.saveWeatherLocation(location, revision);
       if (!saved || !saved.changed) return saved ? snapshot() : null;
-      generation++; queue.length = 0;
-      if (active) {
-        active.controller.abort();
-        if (!saved.coordinatesChanged && active.attemptStarted) {
-          const retagged = store.getWeatherPart(active.row.part, active.row.timezone);
-          if (retagged?.registration === active.row.registration) store.resetWeatherAttempt(retagged);
-        }
-      }
       // Failed scheduling must not turn a committed location save into a failed save.
-      refreshRetained(saved.coordinatesChanged);
-      return snapshot();
+      return reloadLocation(saved);
     },
     async stop() {
       running = false; generation++; cancel(timer); timer = undefined; queue.length = 0;

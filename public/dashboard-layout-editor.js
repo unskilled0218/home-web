@@ -45,7 +45,7 @@ export function createDashboardLayoutEditor({ document, window, view, getState, 
     if (!active) return;
     const state = getState(); const { reference, fit } = currentFrame();
     const rect = projectWidget(session.effective().items.find(item => item.id === session.selected), reference);
-    let text = message || (!fit ? 'Window area unavailable. Enlarge the window; Cancel remains available.' : session.revision === null ? 'Offline preview. Reload shared layout after the server connects before saving.' : state.snapshot.revision !== session.revision ? 'Preferences changed in another browser. Save reports a conflict; Reload shared layout discards edits.' : !session.draft[session.mode] ? 'Automatic profile: temporary template shown. Moving or resizing creates Custom; no-op Save keeps Automatic.' : `${DASHBOARD_WIDGETS[session.selected]}: ${rect.w} × ${rect.h} reference pixels, X ${rect.x}, Y ${rect.y}, layer ${session.effective().items.findIndex(item => item.id === session.selected) + 1} of 6. Actions are blocked until Save or Cancel.`);
+    let text = message || (!fit ? 'Window area unavailable. Enlarge the window; Cancel remains available.' : session.revision === null ? 'Offline preview. Reload layout after the server connects before saving.' : (state.saveToken ?? state.snapshot.revision) !== session.revision ? 'Preferences or settings scope changed. Reload layout before saving this draft.' : !session.draft[session.mode] ? 'Automatic profile: temporary template shown. Moving or resizing creates Custom; no-op Save keeps Automatic.' : `${DASHBOARD_WIDGETS[session.selected]}: ${rect.w} × ${rect.h} reference pixels, X ${rect.x}, Y ${rect.y}, layer ${session.effective().items.findIndex(item => item.id === session.selected) + 1} of 6. Actions are blocked until Save or Cancel.`);
     if (session.mode !== activeProfile()) text += ' Editing inactive profile geometry only.';
     if (status.textContent !== text) status.textContent = text;
   }
@@ -60,7 +60,7 @@ export function createDashboardLayoutEditor({ document, window, view, getState, 
       button.disabled = busy || Boolean(gesture) || (['front', 'forward'].includes(button.dataset.layer) ? targetIndex === 5 : targetIndex === 0);
     }
     toggle.disabled = busy; close.disabled = busy;
-    get('save').disabled = busy || !state.confirmed || session.revision === null || Boolean(gesture);
+    get('save').disabled = busy || !state.confirmed || session.revision === null || Boolean(gesture) || (state.saveToken && state.saveToken.split(':').slice(0, 2).join(':') !== String(session.revision).split(':').slice(0, 2).join(':'));
     get('cancel').disabled = busy; get('reload').disabled = busy || !state.confirmed || Boolean(gesture); get('reset').disabled = busy || Boolean(gesture) || !session.draft[session.mode]; get('fullscreen').disabled = busy || !document.fullscreenEnabled;
   }
   function render(preserveRaw = true) {
@@ -140,8 +140,8 @@ export function createDashboardLayoutEditor({ document, window, view, getState, 
     event.preventDefault(); if (!active || pending || gesture || !commitRaw()) return;
     if (!session.changed()) { exit(); return; }
     if (session.revision === null || !getState().confirmed || getState().pending) return;
-    const owner = generation; const payload = session.payload(); pending = true; message = 'Saving shared layout…'; controls(); announce();
-    try { await save(payload.preferences, payload.revision); if (!disposed && owner === generation) { pending = false; exit(); } }
+    const owner = generation; const source = getState().source; const payload = session.payload(); pending = true; message = getState().mode === 'local' ? 'Saving local layout…' : 'Saving shared layout…'; controls(); announce();
+    try { await save(payload.preferences, payload.revision); if (!disposed && owner === generation) { pending = false; if (source === getState().source) exit(); else message = 'Settings scope changed. Reload layout before saving this draft.'; } }
     catch (error) { if (!disposed && owner === generation) { message = error.message || 'Shared layout could not be saved.'; } }
     finally { pending = false; if (!disposed && active && owner === generation) { render(); announce(); } }
   }

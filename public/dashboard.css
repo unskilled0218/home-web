@@ -85,6 +85,8 @@ label { display: flex; flex-direction: column; gap: .3rem; }
 .toggle { flex-direction: row; align-items: center; }
 input, select { max-width: 100%; min-width: 0; padding: .5rem; border: 1px solid #8ca0b5; border-radius: .3rem; background: #091421; color: white; }
 input[type=color] { min-height: 2.5rem; }
+#settings-scope-controls { grid-template-columns: minmax(0, 1fr); }
+#settings-scope-controls .integration-actions label { min-width: 0; flex: 1 1 12rem; }
 #location-search { display: flex; flex-wrap: wrap; align-items: end; gap: .5rem; }
 #location-results { list-style: none; padding: 0; }
 #location-results button { margin: .3rem 0; text-align: left; }

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { validateWeatherLocation, weatherTimezone } from '../public/weather-data.js';
+import { sqliteTransaction } from './sqlite-transaction.js';
 
 // Weather transactions share the application's SQLite connection and lifecycle.
 export function createWeatherStore(db) {
@@ -23,9 +24,7 @@ export function createWeatherStore(db) {
   const resetQuery = db.prepare(`UPDATE weather_cache SET attempted = NULL WHERE ${guard}`);
   const key = (row) => [row.part, row.timezone, row.revision, row.registration];
   function transaction(operation) {
-    db.exec('BEGIN IMMEDIATE');
-    try { const result = operation(); db.exec('COMMIT'); return result; }
-    catch (error) { db.exec('ROLLBACK'); throw error; }
+    return sqliteTransaction(db, operation);
   }
   function getWeatherLocation() {
     const row = locationQuery.get();
@@ -50,13 +49,13 @@ export function createWeatherStore(db) {
   return {
     getWeatherLocation,
     saveWeatherLocation(location, revision) {
-      const next = validateWeatherLocation(location);
+      const next = location === null ? null : validateWeatherLocation(location);
       return transaction(() => {
         const saved = getWeatherLocation();
         if (saved.revision !== revision) return null;
         if (JSON.stringify(saved.location) === JSON.stringify(next)) return { ...saved, changed: false, coordinatesChanged: false };
-        const coordinatesChanged = !saved.location || saved.location.latitude !== next.latitude || saved.location.longitude !== next.longitude;
-        db.prepare('UPDATE weather_location SET location = ?, revision = revision + 1 WHERE id = 1').run(JSON.stringify(next));
+        const coordinatesChanged = !saved.location || !next || saved.location.latitude !== next.latitude || saved.location.longitude !== next.longitude;
+        db.prepare('UPDATE weather_location SET location = ?, revision = revision + 1 WHERE id = 1').run(next === null ? null : JSON.stringify(next));
         if (coordinatesChanged) db.prepare('DELETE FROM weather_cache').run();
         else db.prepare('UPDATE weather_cache SET revision = ?').run(revision + 1);
         return { location: next, revision: revision + 1, changed: true, coordinatesChanged };

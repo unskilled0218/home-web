@@ -1,6 +1,7 @@
 import { MOBILE_MEDIA_QUERY, PREFERENCE_KEYS, clockText, normalizeDashboardPreferences, preferencesEqual, resolveDisplayPreferences, sampleHours, temperatureRange, weatherDescription, weatherIconFile } from './dashboard-helpers.js';
-import { createWeatherController, searchLocations } from './dashboard-weather.js';
-import { createPhotoController } from './dashboard-photos.js';
+import { searchLocations } from './dashboard-weather.js';
+import { createScopedPhotoController } from './dashboard-photo-scope.js';
+import { createScopedWeatherController } from './dashboard-weather-scope.js';
 import { createCalendarController, formatCalendarEvent } from './dashboard-calendar.js';
 import { createSettingsTabs } from './dashboard-settings.js';
 import { formatWeatherUpdated } from './weather-data.js';
@@ -8,7 +9,8 @@ import { createBookmarkController } from './dashboard-bookmarks.js';
 import { createBookmarkList } from './dashboard-bookmark-list.js';
 import { createBookmarkSelection } from './dashboard-bookmark-selection.js';
 import { safeBookmarkUrl } from './bookmark-data.js';
-import { createSettingsSync } from './dashboard-settings-sync.js';
+import { createSettingsScope } from './dashboard-settings-scope.js';
+import { createSettingsTransferControls } from './dashboard-settings-transfer.js';
 import { createIntegrationSettings } from './dashboard-integration-settings.js';
 import { createDashboardDevices } from './dashboard-devices.js';
 import { createDeviceSelection } from './dashboard-device-selection.js';
@@ -26,6 +28,8 @@ let storage;
 try { storage = window.localStorage; } catch { /* Defaults work when browser storage is blocked. */ }
 let settings = { ...normalizeDashboardPreferences(), location: null };
 let servicesStarted = false; let draftRevision = null; let draftDirty = false; let preferenceMessage = '';
+let activeMode = 'local'; let activeSource; let settingsTransfer;
+const globalMode = () => activeMode === 'global';
 let clockTimer; let searchController; let searchGeneration = 0; let weatherState = {}; let calendarState = {}; let animations = [];
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 const mobileViewport = matchMedia(MOBILE_MEDIA_QUERY);
@@ -39,18 +43,18 @@ layoutActivation = createLayoutActivation({ document, window, canEnter: () => !l
 $('edit-layout').addEventListener('click', () => layoutEditor.enter());
 const settingsTabs = createSettingsTabs(dialog, { onSelect: (id) => { deviceIntegrations.setPickerOpen(dialog.open && id === 'settings-tab-home-assistant'); bookmarks.setPickerOpen(dialog.open && id === 'settings-tab-bookmarks'); } });
 const deviceView = createDashboardDeviceView({ document, wake: (id) => { if (!layoutEditor.active) return deviceIntegrations.wake(id); } });
-const deviceSelection = createDeviceSelection({ document, root: $('home-assistant-device-picker'), status: $('home-assistant-selection-status'), onChange: () => { draftDirty = true; } });
+const deviceSelection = createDeviceSelection({ document, root: $('home-assistant-device-picker'), status: $('home-assistant-selection-status'), onChange: () => { draftDirty = true; settingsTransfer?.update(); } });
 const deviceIntegrations = createDashboardDevices({ onChange: (state) => { deviceView.render(state); deviceSelection.update(state); } });
-const integrationSettings = createIntegrationSettings({ document, homeAssistant: deviceIntegrations.homeAssistant, wol: deviceIntegrations.wol });
+const integrationSettings = createIntegrationSettings({ document, homeAssistant: deviceIntegrations.homeAssistant, wol: deviceIntegrations.wol, canMutate: globalMode, beginMutation: name => settingsSync.beginIntegrationAction(name) });
 const bookmarkList = createBookmarkList({ root: $('bookmark-tree'), status: $('bookmarks-status'), onRetry: (id) => bookmarks.retryFolder(id) });
-const bookmarkSelection = createBookmarkSelection({ document, root: $('bookmark-link-picker'), foldersRoot: $('bookmark-picker-folders'), status: $('bookmark-selection-status'), selectNone: $('bookmark-select-none'), reload: $('bookmark-reload-folders'), onChange: () => { draftDirty = true; }, onToggle: (id, open) => bookmarks.setPickerFolderOpen(id, open), onReload: () => bookmarks.reloadPickerFolders() });
+const bookmarkSelection = createBookmarkSelection({ document, root: $('bookmark-link-picker'), foldersRoot: $('bookmark-picker-folders'), status: $('bookmark-selection-status'), selectNone: $('bookmark-select-none'), reload: $('bookmark-reload-folders'), onChange: () => { draftDirty = true; settingsTransfer?.update(); }, onToggle: (id, open) => bookmarks.setPickerFolderOpen(id, open), onReload: () => bookmarks.reloadPickerFolders() });
 const bookmarks = createBookmarkController({ onChange(state) {
   bookmarkList.render(state.dashboard); bookmarkSelection.update(state);
   const link = $('open-linkwarden'); const url = safeBookmarkUrl(state.baseUrl);
   link.hidden = !url; if (url) { link.href = url; link.target = '_blank'; link.rel = 'noopener noreferrer'; } else link.removeAttribute('href');
-  $('connect-linkwarden').disabled = state.mutationPending || (state.discovered && !state.encryptionReady);
+  $('connect-linkwarden').disabled = !globalMode() || state.mutationPending || (state.discovered && !state.encryptionReady);
   $('linkwarden-token').required = state.needsReauthentication || !state.accessTokenPresent;
-  $('disconnect-linkwarden').disabled = state.mutationPending || (!state.configured && !state.accessTokenPresent);
+  $('disconnect-linkwarden').disabled = !globalMode() || state.mutationPending || (!state.configured && !state.accessTokenPresent);
 } });
 
 function fillForm() {
@@ -127,7 +131,7 @@ function renderWeather(state = weatherState) {
   $('current-weather-values').append(currentWeatherSubValues);
 }
 
-const weather = createWeatherController({ onChange: renderWeather, autoStart: false });
+const weather = createScopedWeatherController({ onChange: renderWeather, saveLocalLocation(location) { settingsSync.saveLocalLocation(location); return location; } });
 function renderCalendar(state = calendarState) {
   calendarState = state;
   const list = $('calendar-events');
@@ -177,7 +181,7 @@ function updatePhotoPresentation(photo, options) {
   } else background?.remove();
   $('photo-caption').textContent = options.imageInfo ? photo.file.name : ''; applyVisibilityLayout();
 }
-const photos = createPhotoController({
+const photos = createScopedPhotoController({
   clear: clearPhotos,
   update: updatePhotoPresentation,
   report: (message) => { $('photo-status').textContent = message; },
@@ -219,11 +223,14 @@ function applyBookmarkPresentation() {
   bookmarks.setPresentation({ mobile: mobileViewport.matches, mode: settings.mobileBookmarksMode, hidden });
 }
 
-const settingsSync = createSettingsSync({ storage,
+const settingsSync = createSettingsScope({ storage,
   captureObservers: () => ({ weather: weather.captureConfigurationObserver(), calendar: calendar.captureConfigurationObserver(), linkwarden: bookmarks.captureConfigurationObserver() }),
   onSnapshot(snapshot, observers) {
     const previous = settings;
-    settings = { ...snapshot.preferences, location: settings.location };
+    const scope = settingsSync.getState(); const sourceChanged = activeSource !== scope.source;
+    activeMode = scope.mode; activeSource = scope.source;
+    if (sourceChanged) { preferenceMessage = ''; settingsSession++; cancelSearch(); layoutEditor.cancelGesture(); $('location-settings-status').textContent = ''; }
+    settings = { ...snapshot.preferences, location: scope.mode === 'local' ? scope.weatherLocation : sourceChanged ? null : settings.location };
     const changed = (keys) => keys.some((key) => !preferencesEqual(settings[key], previous[key]));
     const first = !servicesStarted;
     if (first || changed(['position', 'scale', 'timeVisible', 'timeScale', 'weatherVisible', 'weatherScale', 'calendarVisible', 'calendarScale', 'mobileTimeVisible', 'mobileTimeScale', 'mobileWeatherVisible', 'mobileWeatherScale', 'mobileCalendarVisible', 'mobileCalendarScale'])) applyPresentation();
@@ -233,11 +240,10 @@ const settingsSync = createSettingsSync({ storage,
     if (first || changed(['homeAssistantDeviceSelections'])) deviceIntegrations.configure(settings.homeAssistantDeviceSelections);
     if (first || changed(['bookmarkLinkSelections'])) bookmarks.configure(settings.bookmarkLinkSelections);
     document.body.style.backgroundColor = settings.color;
-    if (first || changed(['order', 'interval', 'duration', 'animation', 'opacity', 'background', 'color', 'blur', 'imageInfo'])) photos.configure(settings);
-    if (first || changed(['timezone', 'temperature', 'wind', 'precipitation'])) weather.configure(settings);
+    if (first || sourceChanged || changed(['order', 'interval', 'duration', 'animation', 'opacity', 'background', 'color', 'blur', 'imageInfo'])) photos.configure(settings, scope.mode, scope.source);
+    if (first || sourceChanged || changed(['timezone', 'temperature', 'wind', 'precipitation', 'location'])) weather.configure(settings, scope.mode, scope.source, scope.weatherLocation);
     if (first) {
       servicesStarted = true; void photos.load();
-      if (!snapshot.integrations.weather.available) void weather.refresh();
       if (!snapshot.integrations.calendar.available) void calendar.start();
       if (!snapshot.integrations.linkwarden.available) void bookmarks.start();
     }
@@ -248,45 +254,67 @@ const settingsSync = createSettingsSync({ storage,
     if (changed(['hour12', 'weatherHourlyVisible', 'weatherDailyVisible'])) renderWeather();
     if (changed(['timezone', 'hour12'])) renderCalendar();
     if (changed(PREFERENCE_KEYS)) preferenceMessage = '';
-    if (!dialog.open || !draftDirty) { fillForm(); draftRevision = snapshot.revision; }
+    if (!dialog.open || !draftDirty) { fillForm(); draftRevision = scope.saveToken; }
+    if (sourceChanged) { applyConnectionScope(); integrationSettings.updateScope(); }
   },
   onState(state) {
     const saving = state.pending;
+    $('settings-scope').value = state.mode;
+    $('settings-scope').disabled = saving || state.mutating;
+    $('scope-status').textContent = state.mode === 'local' ? 'Local settings apply to this browser profile only.' : 'Global settings are shared by browsers using Global mode.';
     if (saving) layoutActivation.cancel();
     for (const control of preferences.elements) if (PREFERENCE_KEYS.includes(control.name)) control.disabled = saving;
     deviceSelection.setSaving(saving);
     bookmarkSelection.setSaving(saving);
     layoutEditor.observe();
     $('edit-layout').disabled = saving || layoutEditor.active || dialog.open;
-    $('save-preferences').disabled = saving || !state.confirmed || (dialog.open && draftRevision === null);
+    const staleSource = draftRevision && String(draftRevision).split(':').slice(0, 2).join(':') !== state.source;
+    $('save-preferences').disabled = saving || !state.confirmed || (dialog.open && (draftRevision === null || staleSource));
     $('reload-shared-preferences').disabled = saving || !state.confirmed;
-    $('settings-status').textContent = saving ? 'Saving shared preferences…' : state.error ? state.error : preferenceMessage || (state.confirmed ? 'Preferences are shared across all browsers.' : state.cache ? 'Using cached shared preferences while loading the server.' : 'Loading shared preferences…');
+    $('reload-shared-preferences').textContent = state.mode === 'local' ? 'Reload local preferences' : 'Reload shared preferences';
+    $('layout-reload').textContent = state.mode === 'local' ? 'Reload local layout (discard edits)' : 'Reload shared layout (discard edits)';
+    $('settings-status').textContent = staleSource ? 'Settings scope changed. Reload preferences before saving this draft.' : saving ? 'Saving preferences…' : state.error ? state.error : preferenceMessage || (state.mode === 'local' ? 'Preferences apply to this browser only.' : state.confirmed ? 'Preferences are shared across all browsers.' : state.cache ? 'Using cached shared preferences while loading the server.' : 'Loading shared preferences…');
+    settingsTransfer?.update();
   }
 });
 
-dialog.addEventListener('input', (event) => { if (event.target.form === preferences) draftDirty = true; });
+function applyConnectionScope() {
+  for (const id of ['calendar-connection', 'linkwarden-connection']) for (const control of $(id).elements) control.disabled = !globalMode();
+  setCalendarMutationPending(false);
+  const state = bookmarks.getState(); $('connect-linkwarden').disabled = !globalMode() || state.mutationPending || !state.encryptionReady; $('disconnect-linkwarden').disabled = !globalMode() || state.mutationPending || !state.accessTokenPresent;
+}
+settingsTransfer = createSettingsTransferControls({ document, window, coordinator: settingsSync, canImport: () => !draftDirty && !layoutEditor.active });
+$('settings-scope').addEventListener('change', async () => {
+  try { preferenceMessage = ''; await settingsSync.changeScope($('settings-scope').value, { canChange: !draftDirty && !layoutEditor.active }); }
+  catch (error) { $('settings-scope').value = settingsSync.getState().mode; $('settings-status').textContent = error.message; }
+});
+window.addEventListener('storage', event => settingsSync.storageChanged(event));
+
+dialog.addEventListener('input', (event) => { if (event.target.form === preferences) { draftDirty = true; settingsTransfer.update(); } });
 preferences.addEventListener('submit', async (event) => {
   event.preventDefault();
   const invalid = [...preferences.elements].find((control) => control.willValidate && !control.validity.valid);
   if (invalid) { settingsTabs.reveal(invalid); invalid.reportValidity(); return; }
   const session = settingsSession;
+  const source = settingsSync.getState().source;
   try {
     const next = readPreferenceDraft(); draftDirty = true;
     const saved = await settingsSync.save(next, draftRevision);
-    if (session !== settingsSession) return;
-    draftRevision = saved.revision; draftDirty = false; fillForm(); preferenceMessage = 'Preferences saved for all browsers.';
+    if (session !== settingsSession || source !== settingsSync.getState().source) return;
+    draftRevision = settingsSync.getState().saveToken; draftDirty = false; fillForm(); preferenceMessage = globalMode() ? 'Preferences saved for all browsers.' : 'Preferences saved for this browser.';
     $('settings-status').textContent = preferenceMessage;
   } catch (error) { if (session === settingsSession) $('settings-status').textContent = error.message || 'Shared preferences could not be saved.'; }
 });
-$('reload-shared-preferences').addEventListener('click', () => {
-  fillForm(); draftRevision = settingsSync.getState().snapshot.revision; draftDirty = false; preferenceMessage = 'Shared preferences reloaded. Reapply your changes before saving.'; $('settings-status').textContent = preferenceMessage;
+$('reload-shared-preferences').addEventListener('click', async () => {
+  await settingsSync.refresh();
+  fillForm(); draftRevision = settingsSync.getState().saveToken; draftDirty = false; settingsTransfer.rebase(); settingsTransfer.update(); preferenceMessage = globalMode() ? 'Shared preferences reloaded. Reapply your changes before saving.' : 'Local preferences reloaded. Reapply your changes before saving.'; $('settings-status').textContent = preferenceMessage; $('save-preferences').disabled = false;
 });
 function fillCalendarForm() {
   const state = calendar.getState();
   $('calendar-url').value = state.serverUrl ?? '';
   $('calendar-username').value = state.username ?? '';
   $('calendar-password').value = '';
-  $('disconnect-calendar').disabled = !state.configured && !state.needsReauthentication;
+  $('disconnect-calendar').disabled = !globalMode() || !state.configured && !state.needsReauthentication;
 }
 function fillLinkwardenForm() {
   const state = bookmarks.getState();
@@ -294,20 +322,21 @@ function fillLinkwardenForm() {
   $('linkwarden-settings-status').textContent = state.needsReauthentication ? 'Linkwarden needs re-authentication. Enter an access token.' : !state.encryptionReady && state.discovered ? 'Configure the server encryption key before connecting Linkwarden.' : '';
 }
 function setCalendarMutationPending(pending) {
-  $('connect-calendar').disabled = pending;
-  $('disconnect-calendar').disabled = pending || (!calendar.getState().configured && !calendar.getState().needsReauthentication);
+  $('connect-calendar').disabled = !globalMode() || pending;
+  $('disconnect-calendar').disabled = !globalMode() || pending || (!calendar.getState().configured && !calendar.getState().needsReauthentication);
 }
 $('open-settings').addEventListener('click', () => {
   if (layoutEditor.active || settingsSync.getState().pending) return;
   layoutActivation.cancel();
   settingsSession++;
-  draftDirty = false; draftRevision = settingsSync.getState().confirmed ? settingsSync.getState().snapshot.revision : null;
+  draftDirty = false; draftRevision = settingsSync.getState().confirmed ? settingsSync.getState().saveToken : null;
   fillForm(); fillCalendarForm(); fillLinkwardenForm(); $('calendar-settings-status').textContent = '';
   settingsTabs.select('settings-tab-general');
   void settingsSync.refresh();
   dialog.showModal();
   $('edit-layout').disabled = true;
   integrationSettings.open();
+  applyConnectionScope(); settingsTransfer.update();
   $('settings-tab-general').focus();
 });
 $('close-settings').addEventListener('click', () => dialog.close());
@@ -325,12 +354,15 @@ $('location-search').addEventListener('submit', async (event) => {
       const item = document.createElement('li'); const button = element('button', location.label); button.type = 'button';
       button.disabled = Boolean(weatherState.mutationPending) || !weatherState.discovered;
       button.addEventListener('click', async () => {
+        if (settingsSync.getState().pending) return;
+        const source = settingsSync.getState().source;
         const release = settingsSync.beginIntegrationAction('weather');
         const resultGeneration = searchGeneration;
         $('location-settings-status').textContent = 'Saving weather location…';
         try {
           const saved = await weather.saveLocation(location);
-          $('location-settings-status').textContent = `Saved ${saved.label} on this server.`;
+          if (source !== settingsSync.getState().source) return;
+          $('location-settings-status').textContent = globalMode() ? `Saved ${saved.label} on this server.` : `Saved ${saved.label} for this browser.`;
           if (resultGeneration === searchGeneration) $('search-status').textContent = `Selected ${saved.label}.`;
         } catch (error) { $('location-settings-status').textContent = error.message || 'Weather location could not be saved.'; }
         finally { release(); }
@@ -343,16 +375,20 @@ $('clear-location').addEventListener('click', () => { cancelSearch(); $('locatio
 
 $('calendar-connection').addEventListener('submit', async (event) => {
   event.preventDefault();
+  if (!globalMode()) return;
+  const source = settingsSync.getState().source;
   const release = settingsSync.beginIntegrationAction('calendar');
   setCalendarMutationPending(true); $('calendar-settings-status').textContent = 'Connecting to Baikal…';
   try {
     await calendar.connect({ serverUrl: $('calendar-url').value, username: $('calendar-username').value, password: $('calendar-password').value });
+    if (source !== settingsSync.getState().source) return;
     const state = calendar.getState();
     if (state.configured && !state.error) { $('calendar-settings-status').textContent = 'Calendar connected.'; fillCalendarForm(); dialog.close(); }
     else $('calendar-settings-status').textContent = state.error || 'Calendar could not be connected.';
   } finally { setCalendarMutationPending(false); release(); }
 });
 $('disconnect-calendar').addEventListener('click', async () => {
+  if (!globalMode()) return;
   if (!confirm('Disconnect the Baikal calendar and delete its saved credentials?')) return;
   const release = settingsSync.beginIntegrationAction('calendar');
   setCalendarMutationPending(true); $('calendar-settings-status').textContent = 'Disconnecting calendar…';
@@ -365,15 +401,18 @@ $('disconnect-calendar').addEventListener('click', async () => {
 });
 
 $('linkwarden-connection').addEventListener('submit', async (event) => {
-  event.preventDefault(); $('linkwarden-settings-status').textContent = 'Connecting to Linkwarden…';
+  event.preventDefault(); if (!globalMode()) return; $('linkwarden-settings-status').textContent = 'Connecting to Linkwarden…';
+  const source = settingsSync.getState().source;
   const release = settingsSync.beginIntegrationAction('linkwarden');
   try {
     await bookmarks.connect({ url: $('linkwarden-url').value, username: $('linkwarden-username').value, accessToken: $('linkwarden-token').value });
+    if (source !== settingsSync.getState().source) return;
     $('linkwarden-token').value = ''; $('linkwarden-settings-status').textContent = 'Linkwarden connected.';
   } catch (error) { $('linkwarden-settings-status').textContent = error.message || 'Linkwarden could not be connected.'; }
   finally { release(); }
 });
 $('disconnect-linkwarden').addEventListener('click', async () => {
+  if (!globalMode()) return;
   if (!confirm('Disconnect Linkwarden and delete its saved access token?')) return;
   const release = settingsSync.beginIntegrationAction('linkwarden');
   $('linkwarden-settings-status').textContent = 'Disconnecting Linkwarden…';
@@ -391,11 +430,11 @@ async function toggleFullscreen() {
 $('fullscreen').addEventListener('click', toggleFullscreen);
 document.addEventListener('fullscreenchange', fullscreenState);
 document.addEventListener('visibilitychange', () => { startClock(); photos.setVisible(!document.hidden); weather.setVisible(!document.hidden); calendar.setVisible(!document.hidden); bookmarks.setVisible(!document.hidden); settingsSync.setVisible(!document.hidden); deviceIntegrations.setVisible(!document.hidden); if (document.hidden) stopAnimations(); });
-reducedMotion.addEventListener('change', () => { stopAnimations(); photos.configure(settings); });
+reducedMotion.addEventListener('change', stopAnimations);
 mobileViewport.addEventListener('change', applyPresentation);
-window.addEventListener('pagehide', (event) => { clearInterval(clockTimer); cancelSearch(); layoutActivation.cancel(); layoutEditor.cancelGesture(); weather.dispose(); if (event.persisted) { photos.setVisible(false); bookmarks.setVisible(false); settingsSync.setVisible(false); deviceIntegrations.setVisible(false); integrationSettings.suspend(); } else { photos.dispose(); layoutActivation.dispose(); layoutEditor.dispose(); layoutView.dispose(); calendar.dispose(); bookmarks.dispose(); settingsSync.dispose(); integrationSettings.dispose(); deviceIntegrations.dispose(); } });
-window.addEventListener('pageshow', (event) => { if (event.persisted) { photos.setVisible(!document.hidden); applyPresentation(); weather.configure(settings); void weather.refresh(); void calendar.refresh(); bookmarks.setVisible(!document.hidden); settingsSync.setVisible(!document.hidden); deviceIntegrations.setVisible(!document.hidden); } });
-window.addEventListener('online', () => { if (servicesStarted) void photos.load(); });
+window.addEventListener('pagehide', (event) => { clearInterval(clockTimer); cancelSearch(); layoutActivation.cancel(); layoutEditor.cancelGesture(); weather.dispose(); if (event.persisted) { photos.setVisible(false); bookmarks.setVisible(false); settingsSync.setVisible(false); deviceIntegrations.setVisible(false); integrationSettings.suspend(); } else { settingsTransfer.dispose(); photos.dispose(); layoutActivation.dispose(); layoutEditor.dispose(); layoutView.dispose(); calendar.dispose(); bookmarks.dispose(); settingsSync.dispose(); integrationSettings.dispose(); deviceIntegrations.dispose(); } });
+window.addEventListener('pageshow', (event) => { if (event.persisted) { photos.setVisible(!document.hidden); applyPresentation(); const scope = settingsSync.getState(); weather.configure(settings, scope.mode, scope.source, scope.weatherLocation); void weather.refresh(); void calendar.refresh(); bookmarks.setVisible(!document.hidden); settingsSync.setVisible(!document.hidden); deviceIntegrations.setVisible(!document.hidden); } });
+window.addEventListener('online', () => { if (servicesStarted) { void photos.load(); void settingsSync.refresh(); void weather.refresh(); } });
 photos.setVisible(!document.hidden); weather.setVisible(!document.hidden); calendar.setVisible(!document.hidden);
 bookmarks.setVisible(!document.hidden);
 deviceIntegrations.setVisible(!document.hidden);

@@ -1,4 +1,5 @@
 import { decodeStoredDashboardPreferences, normalizeDashboardPreferences, validateDashboardPreferences } from '../public/dashboard-helpers.js';
+import { sqliteTransaction } from './sqlite-transaction.js';
 
 export function createDashboardPreferenceStore(db) {
   db.exec('CREATE TABLE IF NOT EXISTS dashboard_preferences (id INTEGER PRIMARY KEY CHECK (id = 1), configuration TEXT NOT NULL, revision INTEGER NOT NULL, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)');
@@ -6,8 +7,7 @@ export function createDashboardPreferenceStore(db) {
   const insert = db.prepare('INSERT OR IGNORE INTO dashboard_preferences (id, configuration, revision) VALUES (1, ?, 1)');
   const update = db.prepare('UPDATE dashboard_preferences SET configuration = ?, revision = revision + 1, updated_at = CURRENT_TIMESTAMP WHERE id = 1 AND revision = ?');
   function transaction(operation) {
-    db.exec('BEGIN IMMEDIATE');
-    try { const result = operation(); db.exec('COMMIT'); return result; } catch (error) { db.exec('ROLLBACK'); throw error; }
+    return sqliteTransaction(db, operation);
   }
   function getDashboardPreferences() {
     const row = read.get();

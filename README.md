@@ -16,7 +16,7 @@ Open [http://127.0.0.1:3000](http://127.0.0.1:3000). A clock and dark background
 
 ## Settings
 
-Use the **General**, **Time**, **Weather**, **Calendar**, **Bookmarks**, **Home Assistant**, **Wake-on-LAN**, and **Images** tabs to customize the dashboard. Settings are saved on the server and synchronize across browsers every five seconds while visible. **Clear results** clears weather search results while keeping the selected location. See [dashboard preferences](docs/dashboard.md) and [Linkwarden setup](docs/linkwarden.md).
+Use the **General**, **Time**, **Weather**, **Calendar**, **Bookmarks**, **Home Assistant**, **Wake-on-LAN**, and **Images** tabs to customize the dashboard. **General → Settings scope** defaults to Local for this browser; choose Global to share preferences with other Global browsers. See [settings scope](docs/settings-scope.md), [global import/export](docs/settings-import-export.md), and [dashboard preferences](docs/dashboard.md). **Clear results** keeps the selected weather location.
 
 ## Documentation
 
