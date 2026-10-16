@@ -41,10 +41,11 @@ export function createPhotoLibrary({ root, available = Boolean(root), token, now
         const handle = await opendir(`/proc/self/fd/${directoryHandle.fd}`);
         for await (const entry of handle) {
           checkDeadline(); entries++;
-          if (entries > MAX_ENTRIES) break;
           children.push(entry);
+          if (entries >= MAX_ENTRIES) break;
         }
         children.sort((left, right) => left.name.localeCompare(right.name));
+        // Exhaustion stops new enumeration, not processing of this admitted batch.
         for (const entry of children) {
           checkDeadline();
           const relative = path.join(relativeDirectory, entry.name);
@@ -58,7 +59,6 @@ export function createPhotoLibrary({ root, available = Boolean(root), token, now
               if (metadata.isFile() && metadata.size > 0 && metadata.size <= MAX_FILE_BYTES) candidates.push({ absolute: path.join(realRoot, relative), relative, size: metadata.size, mtimeMs: metadata.mtimeMs, mime: TYPES.get(path.extname(entry.name).toLowerCase()) });
             } finally { await fileHandle?.close(); }
           }
-          if (entries >= MAX_ENTRIES) break;
         }
       } finally { await directoryHandle?.close(); }
     }

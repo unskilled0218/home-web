@@ -2,6 +2,7 @@
 
 - [NFS backgrounds](#nfs-backgrounds)
   - [Server slideshow and filename eligibility](#server-slideshow-and-filename-eligibility)
+  - [Scan limits and photo counts](#scan-limits-and-photo-counts)
   - [TrueNAS host mount example](#truenas-host-mount-example)
   - [Diagnose by stage](#diagnose-by-stage)
 
@@ -44,6 +45,19 @@ Image data stays streamed on demand rather than preloaded into server memory. Sh
 
 Local playback reads `GET /api/dashboard/photos/local`, a version-1 `{ version, enabled, available, count, photos }` manifest capped at 256 KiB of serialized UTF-8 JSON. The server filters records with the shared photo validator before serialization, so oversized/control-character legacy names cannot prevent an eligible photo from being read. `count` is eligible-only and matches the array length. Disabled sources return `enabled: false`, `available: false`, and an empty array without scanning; failed enabled sources keep `enabled: true`, `available: false`. Successful empty/all-rejected scans are `available: true`, `count: 0`. Local browsers clear confirmed disabled/empty sources and retain last-good state on outages. The legacy `/api/dashboard/photos` response remains unfiltered and can report different counts; opaque image streaming is unchanged. Local manifest reads use the same coalesced library but never configure/advance the Global sequence.
 
+## Scan limits and photo counts
+
+The number of files on the NAS is not a value these bounded APIs inventory. Keep the following counts separate:
+
+- **Admitted scan entries:** at most 5,000 across the recursive scan, with depth capped at eight directory levels. Directories, unsupported files, and symlinks consume this admission budget too. Exhaustion stops new enumeration/descent, but already-collected file candidates and parent siblings are still processed while the cooperative deadline permits.
+- **Accepted library pool:** at most 100 supported regular files, excluding empty/oversized files, with 20 MiB per image and 200 MiB total. The legacy `/api/dashboard/photos` array describes this pool, not all files on the export.
+- **Eligible playback pool:** Local and Global additionally apply filename/metadata validation, so their counts may be lower than the library pool. Settings says “Using N NFS backgrounds from the bounded photo pool”; no eligible results within that scan do not establish that the entire share is empty.
+- **Current image:** one selected image is displayed/decoded at a time. Global snapshots contain one `current` record even when `count` is 100. Seeing one initial image-byte request is normal; check the pool count and later rotation before concluding only one image was discovered.
+
+For a directory with over 7,000 small supported images, discovery can supply a 100-photo pool from the admitted subset; it does not promise that all 7,000 are examined or become playable. Each admitted batch and the resulting candidates are sorted, but filesystem iteration order can determine membership before the cap. Random mode shuffles the accepted eligible pool, not a uniform sample of every file on an unlimited export. A capped scan can miss deeper files when no enumeration budget remains.
+
+The scan deadline remains ten seconds and cooperative between filesystem operations. A genuine I/O failure/deadline expiry is unavailable and retains the existing last-good behavior; it is not relabeled a successful capped scan. Images remain streamed on demand, token history is capped at 1,000 entries, and admission remains eight concurrent image streams.
+
 ## TrueNAS host mount example
 
 For Docker/Compose, use **existing** mode. Mount the share on the Docker host, not inside the dashboard container. For example, the operator can configure an existing mount directory in `/etc/fstab`:
@@ -77,8 +91,8 @@ Compose keeps `NFS_MOUNT_PATH=/photos` inside the container; `NFS_HOST_MOUNT_PAT
 2. Check name resolution and NFS service reachability from the relevant host/container. DNS success and TCP port 2049 access establish only transport reachability, not export authorization, a valid NFSv4 export path, readable photos, or a mounted share. `showmount` may not establish NFSv4-only export availability.
 3. Inspect mount identity/options on the host and inside the application namespace. A generic unavailable warning can result from missing safety options or no exact mount at the configured path, even when the NAS is reachable. Do not remove the checks or accept an arbitrary directory to bypass a rejected mount.
 4. Only after safe topology and a bounded cleanup mechanism are established, check directory enumeration and a small supported-image read as the application identity. `stat()` alone proves neither traversal nor file readability. Do not chmod/chown, write to the export, or run a recursive inventory merely to diagnose access.
-5. Check the manifest and image separately. `/api/dashboard/photos` returning `available: false` means the photo source/scan is unavailable; `available: true` with `photos: []` means no accepted files were found. Supported types are JPEG, PNG, WebP, and GIF; limits include 100 accepted files, 20 MiB per file, 200 MiB total, 5,000 scanned entries, and eight directory levels. Symbolic links and unsupported/empty/oversized files are excluded. Retrieve one returned opaque image URL before testing browser display.
-6. Inspect `/api/dashboard/slideshow` for `enabled`, `available`, `loading`, `stale`, eligible `count`, and `current`, then confirm browser decoding and a visible photo layer, not just an HTTP 200. “No supported photos were found” differs from “NFS backgrounds are unavailable”; image-decode failures preserve the previous good image rather than skip the server selection. Keep the solid-background fallback and unrelated overlays usable.
+5. Check the manifest and image separately. `/api/dashboard/photos` returning `available: false` means the source/scan is unavailable; `available: true` with `photos: []` means no files were accepted within the bounded scan. Supported types are JPEG, PNG, WebP, and GIF. A capped pool is not a complete export inventory; see [scan limits and photo counts](#scan-limits-and-photo-counts). Retrieve one returned opaque image URL before testing browser display.
+6. Inspect `/api/dashboard/slideshow` for `enabled`, `available`, `loading`, `stale`, eligible `count`, `current`, and the rotation deadline, or inspect `/api/dashboard/photos/local` for the Local eligible array. Confirm actual decoding and later playback, not just HTTP 200 or one startup image request. “No eligible photos were found within the bounded scan” differs from an unavailable/stale source. Keep the solid fallback and unrelated overlays usable.
 
 Use explicit deadlines for network probes and verified owned-process cleanup for live filesystem checks. Photo scan deadlines are cooperative checks between filesystem awaits, not guaranteed cancellation of a stuck kernel NFS operation. A shell timeout, client HTTP timeout, or JavaScript promise race cannot prove filesystem cleanup. If safe cleanup is unavailable (including signal-denied environments), stop before file access and request operator-run checks. Keep live stage results separate from mocked unit tests; never report a working export based only on DNS, mount metadata, or simulated fixtures.
 

@@ -209,7 +209,7 @@
               <label>Background<select name="background" form="preferences"><option value="color">Solid color</option><option value="blur">Blurred image</option></select></label>
               <label>Background color<input name="color" form="preferences" type="color"></label><label>Background blur (pixels)<input name="blur" form="preferences" type="number" min="0" max="100"></label>
             </fieldset>
-            <section class="settings-section" aria-labelledby="photos-title"><h4 id="photos-title">NFS backgrounds</h4><p>The server discovers images on its read-only NFS share. Local mode plays an independent browser sequence; Global mode follows the server's shared selection. Files refresh automatically.</p><p id="photo-status" role="status">Loading NFS backgrounds…</p></section>
+            <section class="settings-section" aria-labelledby="photos-title"><h4 id="photos-title">NFS backgrounds</h4><p>The server examines up to 5,000 directory entries per scan and accepts at most 100 images within file-size and total-byte limits. Filename eligibility can reduce the playable pool further. The pool count is not the total number of images on the NAS; only the current image is displayed at a time. Local mode plays an independent browser sequence; Global mode follows the server's shared selection. Files refresh automatically.</p><p id="photo-status" role="status">Loading NFS backgrounds…</p></section>
           </section>
         </div>
       </div>

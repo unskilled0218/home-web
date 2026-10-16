@@ -65,7 +65,7 @@ export function createPhotoController({ show, clear, report, update = () => {}, 
     snapshot = next;
     const key = photoKey(next.current);
     if (desired !== key) { desired = key; retireDecode(); }
-    report(!next.enabled ? 'NFS backgrounds are disabled.' : next.stale ? 'NFS backgrounds are stale. Retrying automatically.' : next.loading && !next.current ? 'Loading NFS backgrounds…' : !next.available ? 'NFS backgrounds are unavailable. Retrying automatically.' : next.count ? `${next.count} NFS backgrounds loaded.` : 'No supported photos were found on the NFS share.');
+    report(!next.enabled ? 'NFS backgrounds are disabled.' : next.stale ? 'NFS backgrounds are stale. Retrying automatically.' : next.loading && !next.current ? 'Loading NFS backgrounds…' : !next.available ? 'NFS backgrounds are unavailable. Retrying automatically.' : next.count ? `Using ${next.count} NFS background${next.count === 1 ? '' : 's'} from the bounded photo pool.` : 'No eligible photos were found within the bounded scan.');
     if (next.current) render(next.current);
     else if (!next.enabled || next.available && next.count === 0) { displayed = undefined; clear(); }
   }

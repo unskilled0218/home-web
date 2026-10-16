@@ -4,6 +4,7 @@ import { mkdtempSync, mkdirSync, rmSync, symlinkSync, truncateSync, writeFileSyn
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import { createPhotoLibrary, createUnavailablePhotoLibrary } from '../src/photo-library.js';
+import { SMALL_PNG, photoFixture, populatePhotoFiles, readLibraryPhoto } from './fixtures/large-photo-library.js';
 
 test('returns unavailable state without a configured photo root', async () => {
   const library = createUnavailablePhotoLibrary();
@@ -101,4 +102,37 @@ test('observed replacement metadata changes the opaque URL while unchanged scans
   writeFileSync(file, 'second-image'); utimesSync(file, 100, 100);
   const second = await library.list(); assert.notEqual(second.photos[0].url, first.photos[0].url); assert.deepEqual(await library.list(), second);
   const opened = await library.open(first.photos[0].url.split('/').at(-1)); assert.ok(opened); let content = ''; for await (const chunk of opened.stream) content += chunk; assert.equal(content, 'second-image');
+});
+
+for (const count of [4999, 5000, 5001, 7001]) test(`processes admitted images from a ${count}-entry directory without truncating to the first file`, { timeout: 30000 }, async context => {
+  const root = photoFixture(context); populatePhotoFiles(root, count);
+  const library = createPhotoLibrary({ root, now: () => 1000 }); const result = await library.list();
+  assert.equal(result.available, true); assert.equal(result.photos.length, 100);
+  const names = result.photos.map(photo => photo.name); assert.equal(new Set(names).size, 100); assert.deepEqual(names, [...names].sort((a, b) => a.localeCompare(b)));
+  assert.ok(result.photos.every(photo => /^\/api\/dashboard\/photos\/[A-Za-z0-9_-]{16,128}$/.test(photo.url)));
+  for (const photo of [result.photos[0], result.photos.at(-1)]) assert.deepEqual(await readLibraryPhoto(library, photo), { mime: 'image/png', content: SMALL_PNG });
+});
+
+test('an unsupported first entry does not discard images in an exactly-full admitted directory', { timeout: 30000 }, async context => {
+  const root = photoFixture(context); writeFileSync(path.join(root, '000-note.txt'), 'unsupported'); populatePhotoFiles(root, 4999, { prefix: 'photo-' });
+  const result = await createPhotoLibrary({ root, now: () => 1000 }).list(); assert.equal(result.available, true); assert.equal(result.photos.length, 100); assert.ok(result.photos.every(photo => photo.name.startsWith('photo-')));
+});
+
+test('nested enumeration exhaustion still processes admitted parent sibling images', { timeout: 30000 }, async context => {
+  const root = photoFixture(context); const nested = path.join(root, 'a-nested'); mkdirSync(nested);
+  populatePhotoFiles(nested, 4997, { extension: 'txt', content: 'unsupported' });
+  writeFileSync(path.join(root, 'z-first.png'), SMALL_PNG); writeFileSync(path.join(root, 'z-last.png'), SMALL_PNG);
+  const result = await createPhotoLibrary({ root, now: () => 1000 }).list(); assert.equal(result.available, true); assert.deepEqual(result.photos.map(photo => photo.name), ['z-first.png', 'z-last.png']);
+});
+
+test('finishing an admitted root batch does not bypass exhaustion to enumerate a child directory', { timeout: 30000 }, async context => {
+  const root = photoFixture(context); const nested = path.join(root, 'a-nested'); mkdirSync(nested); writeFileSync(path.join(nested, 'excluded.png'), SMALL_PNG);
+  populatePhotoFiles(root, 4999, { extension: 'txt', content: 'unsupported' });
+  assert.deepEqual(await createPhotoLibrary({ root, now: () => 1000 }).list(), { available: true, photos: [] });
+});
+
+test('concurrent large-directory readers share the actual scan promise and result', { timeout: 30000 }, async context => {
+  const root = photoFixture(context); populatePhotoFiles(root, 7001); const library = createPhotoLibrary({ root, now: () => 1000 });
+  const first = library.list(); const second = library.list(); assert.equal(first, second);
+  const [a, b] = await Promise.all([first, second]); assert.equal(a, b); assert.equal(a.photos.length, 100);
 });

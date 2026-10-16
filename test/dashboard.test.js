@@ -461,3 +461,15 @@ test('metadata wakes use server-relative deadlines with 250ms and five-second bo
   }
   env.client.dispose();
 });
+
+test('photo status describes a bounded pool and distinguishes confirmed empty from unavailable scans', async () => {
+  const env = photoFollower(); await env.client.load(); await tick();
+  assert.equal(env.reports.at(-1), 'Using 1 NFS background from the bounded photo pool.');
+  env.setState(slideshowSnapshot({ count: 100, nextChangeAt: 1_005_000 })); await env.client.load();
+  assert.equal(env.reports.at(-1), 'Using 100 NFS backgrounds from the bounded photo pool.'); assert.deepEqual(env.shown, ['a.png'], 'pool metadata does not decode 100 images');
+  env.setState(slideshowSnapshot({ revision: 2, count: 0, current: null })); await env.client.load();
+  assert.equal(env.reports.at(-1), 'No eligible photos were found within the bounded scan.'); assert.equal(env.clears.length, 1);
+  env.setState(slideshowSnapshot({ revision: 2, count: 0, current: null, available: false })); await env.client.load();
+  assert.match(env.reports.at(-1), /unavailable/); assert.equal(env.clears.length, 1);
+  env.client.dispose();
+});
