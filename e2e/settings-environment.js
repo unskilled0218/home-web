@@ -12,11 +12,11 @@ import { rawForecast } from '../test/fixtures/weather.js';
 import { slideshowClock } from '../test/fixtures/photo-slideshow.js';
 import { tick } from '../test/fixtures/lifecycle.js';
 
-export async function settingsEnvironment() {
+export async function settingsEnvironment({ photoCount = 2 } = {}) {
   const directory = await mkdtemp('/tmp/opencode/settings-scope-browser-'); const photos = path.join(directory, 'photos'); await mkdir(photos);
   const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64');
-  for (let i = 0; i < 2; i++) await writeFile(path.join(photos, `${i}.png`), png);
-  const clock = slideshowClock(); let store; let server; let weather; let localWeather; let slideshow; let base;
+  for (let i = 0; i < photoCount; i++) await writeFile(path.join(photos, `${i}.png`), png);
+  const clock = slideshowClock(); let store; let server; let weather; let localWeather; let slideshow; let base; let port = 0;
   const provider = async url => Response.json(url.hostname.startsWith('air-') ? { current: { us_aqi: 20 } } : rawForecast(Number(url.searchParams.get('latitude'))));
   async function start() {
     store = createStore(path.join(directory, 'app.db'));
@@ -25,7 +25,7 @@ export async function settingsEnvironment() {
     weather = createWeatherService({ store, ...clock, fetchImpl: provider }); localWeather = createLocalWeatherService({ ...clock, fetchImpl: provider });
     const photoLibrary = createPhotoLibrary({ root: photos }); slideshow = createPhotoSlideshow({ ...clock, photoLibrary, preferences: store.getDashboardPreferences().preferences });
     server = createDashboardServer({ store, weather, localWeather, slideshow, photoLibrary, photoSourceEnabled: true, runtimeConfig: { allowedHosts: ['127.0.0.1'] } });
-    server.listen(0, '127.0.0.1'); await once(server, 'listening'); base = `http://127.0.0.1:${server.address().port}`; weather.start(); localWeather.start(); await slideshow.start(); await tick();
+    server.listen(port, '127.0.0.1'); await once(server, 'listening'); port = server.address().port; base = `http://127.0.0.1:${port}`; weather.start(); localWeather.start(); await slideshow.start(); await tick();
   }
   async function stop() { await Promise.all([server.lifecycle.shutdown(), weather.stop(), localWeather.stop(), slideshow.stop()]); store.close(); }
   await start();

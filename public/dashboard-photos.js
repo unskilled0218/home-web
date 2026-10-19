@@ -30,15 +30,18 @@ function decodeImage(url, { signal }) {
 }
 
 export function createPhotoController({ show, clear, report, update = () => {}, fetchImpl = fetch, decode = decodeImage, schedule = setTimeout, cancel = clearTimeout, requestSchedule = setTimeout, requestCancel = clearTimeout, autoPoll = true }) {
-  let settings; let visible = true; let disposed = false; let started = false; let epoch = 0; let timer; let read; let decoding;
+  let settings; let visible = true; let disposed = false; let started = false; let epoch = 0; let timer; let retryTimer; let read; let decoding;
   let snapshot; let desired; let displayed; const retired = new Set();
   const photoKey = (photo) => photo ? JSON.stringify(photo) : null;
   const displayPhoto = (photo) => ({ file: { name: photo.name, lastModified: photo.lastModified }, url: photo.url });
-  function retireDecode() { decoding?.abort(); decoding = undefined; }
+  function retireDecode() { cancel(retryTimer); retryTimer = undefined; decoding?.abort(); decoding = undefined; }
   function pause() { epoch++; cancel(timer); timer = undefined; read?.controller.abort(); read = undefined; retireDecode(); }
   function arm(delay = 5000) {
     cancel(timer); timer = undefined;
     if (autoPoll && visible && !disposed && started) timer = schedule(() => { timer = undefined; void load(); }, delay);
+  }
+  function reportSource(next) {
+    report(!next.enabled ? 'NFS backgrounds are disabled.' : next.stale ? 'NFS backgrounds are stale. Retrying automatically.' : next.loading && !next.current ? 'Loading NFS backgrounds…' : !next.available ? 'NFS backgrounds are unavailable. Retrying automatically.' : next.count ? `Using ${next.count} NFS background${next.count === 1 ? '' : 's'} from the bounded photo pool.` : 'No eligible photos were found within the bounded scan.');
   }
   function render(photo) {
     const key = photoKey(photo);
@@ -49,9 +52,13 @@ export function createPhotoController({ show, clear, report, update = () => {}, 
     deadline = requestSchedule(() => controller.abort(), 10_000);
     void Promise.race([Promise.resolve().then(() => decode(photo.url, { signal: controller.signal })), aborted]).then(() => {
       if (disposed || !visible || desired !== key || controller.signal.aborted) return;
-      displayed = photo; show(displayPhoto(photo), settings);
+      displayed = photo; show(displayPhoto(photo), settings); reportSource(snapshot);
     }).catch(() => {
-      if (!disposed && visible && desired === key) report('The selected background could not be displayed. Retrying automatically.');
+      if (!disposed && visible && desired === key && decoding === controller) {
+        report('The selected background could not be displayed. Retrying automatically.');
+        // Image recovery must not depend on metadata polling or Local rotation.
+        retryTimer = schedule(() => { retryTimer = undefined; if (!disposed && visible && desired === key) render(photo); }, 5000);
+      }
     }).finally(() => { requestCancel(deadline); if (decoding === controller) decoding = undefined; });
   }
   function accept(next) {
@@ -65,7 +72,7 @@ export function createPhotoController({ show, clear, report, update = () => {}, 
     snapshot = next;
     const key = photoKey(next.current);
     if (desired !== key) { desired = key; retireDecode(); }
-    report(!next.enabled ? 'NFS backgrounds are disabled.' : next.stale ? 'NFS backgrounds are stale. Retrying automatically.' : next.loading && !next.current ? 'Loading NFS backgrounds…' : !next.available ? 'NFS backgrounds are unavailable. Retrying automatically.' : next.count ? `Using ${next.count} NFS background${next.count === 1 ? '' : 's'} from the bounded photo pool.` : 'No eligible photos were found within the bounded scan.');
+    reportSource(next);
     if (next.current) render(next.current);
     else if (!next.enabled || next.available && next.count === 0) { displayed = undefined; clear(); }
   }

@@ -453,6 +453,28 @@ test('decode timeout and disposal reject late image completion without leaked ti
   env.client.dispose(); work.resolve(); await tick(); assert.deepEqual(env.shown, []); assert.equal(env.clock.timers.size, 0);
 });
 
+test('a timed-out first decode retries within five seconds without polling or overlapping attempts', async () => {
+  const pending = deferred(); let attempts = 0; let firstSignal;
+  const env = photoFollower({ autoPoll: false, decode: (_url, { signal }) => { attempts++; if (attempts === 1) { firstSignal = signal; return pending.promise; } return Promise.resolve(); } });
+  try {
+    await env.client.load(); await tick(); await env.clock.advance(10_000);
+    assert.equal(firstSignal.aborted, true); assert.equal(attempts, 1); assert.deepEqual(env.shown, []);
+    await env.clock.advance(5000); assert.equal(attempts, 2); assert.deepEqual(env.shown, ['a.png']);
+    pending.resolve(); await tick(); assert.deepEqual(env.shown, ['a.png']);
+  } finally { env.client.dispose(); await tick(); }
+  assert.equal(env.clock.timers.size, 0);
+});
+
+test('image recovery proceeds even when the next Global metadata request stalls', async () => {
+  let reads = 0; let attempts = 0;
+  const env = photoFollower({ fetchImpl: async () => { if (++reads === 1) return snapshotResponse(slideshowSnapshot()); return new Promise(() => {}); }, decode: async () => { if (++attempts === 1) throw new Error('Temporary image failure.'); } });
+  try {
+    await env.client.load(); await tick(); await env.clock.advance(5000);
+    assert.equal(reads, 2); assert.equal(attempts, 2); assert.deepEqual(env.shown, ['a.png']);
+  } finally { env.client.dispose(); await tick(); }
+  assert.equal(env.clock.timers.size, 0);
+});
+
 test('metadata wakes use server-relative deadlines with 250ms and five-second bounds, never local image choice', async () => {
   const env = photoFollower();
   for (const [deadline, delay] of [[999_000, 250], [1_000_100, 250], [1_002_000, 2000], [2_000_000, 5000]]) {

@@ -34,7 +34,7 @@ test('Local weather city and photo timing affect only that browser, including in
     await a.page.locator('#open-settings').click(); await a.page.locator('#settings-tab-images').click(); await a.page.locator('[name="order"]').selectOption('name'); await a.page.locator('[name="interval"]').fill('5'); await a.page.locator('[name="imageInfo"]').check(); await a.page.locator('[name="animation"]').selectOption('none'); await a.page.locator('#save-preferences').click(); await a.page.locator('#close-settings').click();
     await expect(a.page.locator('#photo-caption')).toHaveText('0.png'); await a.page.clock.fastForward(5000); await expect(a.page.locator('#photo-caption')).toHaveText('1.png'); await expect(global.page.locator('#photo-caption')).toHaveText(selected.current.name);
     expect(env.store.exportDashboardSettings()).toEqual(before); expect(env.slideshow.snapshot()).toEqual(selected);
-    await a.page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }))); await a.page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }))); await expect(a.page.locator('#settings-status')).toHaveText('Preferences apply to this browser only.');
+    await a.page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }))); await a.page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }))); await expect(a.page.locator('#settings-scope')).toHaveValue('local'); await expect(a.page.locator('#photo-caption')).toHaveText('1.png');
   } finally { await a.close(); await b.close(); await global.close(); await env.close(); }
 });
 
