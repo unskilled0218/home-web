@@ -8,6 +8,7 @@ button:hover, .page-tools a:hover { background: #30475c; }
 [hidden] { display: none !important; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 .page-tools { position: relative; z-index: 2; display: flex; justify-content: flex-end; flex-wrap: wrap; gap: .5rem; padding: 1rem; }
+:fullscreen, :fullscreen * { cursor: none !important; }
 :fullscreen .page-tools { display: none; }
 :fullscreen .background-only .page-tools { display: flex; }
 #page-status { position: relative; z-index: 2; margin: 0 1rem; text-align: right; }
