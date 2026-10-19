@@ -30,6 +30,7 @@ Restore dashboard photo backgrounds and rotation for the configured image source
 - Create the smallest failing regression at the responsible boundary using existing test fixtures and temporary local images. Keep ordinary tests independent of the live NAS.
 - Check browser compatibility of `String.prototype.isWellFormed()` in `public/photo-slideshow-data.js` if valid metadata is rejected only in the affected browser. Its unconditional use is an investigation lead, not a confirmed cause; any compatibility fix must retain rejection of unpaired surrogates.
 - Check first-load and later image failures in Local mode as well as Global mode. Local delegates decoding to a follower with `autoPoll: false` and refreshes manifests every 60 seconds, whereas Global normally retries through metadata polling within five seconds.
+- If decoding/retry is implicated, reproduce first-load failure with exactly one eligible photo in each scope. Fail the initial image request/decode, then restore valid bytes at the same opaque URL without changing metadata, selection, scope, or page lifecycle. This case must recover without rotation or reload.
 - Extend the relevant existing suite: `test/photo-library.test.js` for discovery/streams, `test/photo-slideshow-data.test.js` for validation, `test/local-photo-manifest-api.test.js` for Local behavior, or `test/dashboard.test.js` for the shared follower. Use `test/nfs.test.js` only if preparation is implicated.
 
 ### 3. Restore display and playback
@@ -37,6 +38,7 @@ Restore dashboard photo backgrounds and rotation for the configured image source
 - Apply the smallest correction supported by the reproduction. If the failure is deployment configuration, document the exact required correction and verify it with the operator instead of introducing an unrelated code change.
 - Preserve eligible filename rules, opaque image URLs, bounded discovery, streamed image delivery, Local/Global settings isolation, and the server's shared rotation ownership.
 - If decoding or controller lifecycle is responsible, ensure valid selections render, transient failures recover automatically, and obsolete scope/visibility/decode completions cannot overwrite the active image. Retain the last decoded background during transient failures and clear only on confirmed disabled or empty state.
+- For a confirmed image-retry defect, require the next attempt to begin within five seconds after the previous attempt fails or times out while the page remains visible, in both scopes. Retain the existing ten-second decode deadline, avoid overlapping attempts, and stop any retry owner on hiding, disposal, or scope replacement. Resume current-selection work when visible again.
 - If metadata succeeds but rendering fails, correct the demonstrated presentation problem in `public/dashboard.js` or `public/dashboard.css`; preserve intentional opacity settings, solid/blurred backgrounds, transitions, captions, and widget layout.
 - Update `docs/nfs-backgrounds.md` or `docs/testing.md` only for a changed diagnostic instruction, behavior, or regression command.
 
@@ -45,6 +47,7 @@ Restore dashboard photo backgrounds and rotation for the configured image source
 - Run the affected focused unit/API suites, then `npm run check` and `npm test`. Syntax-check each changed JavaScript file individually because the current glob-based check does not check every file separately.
 - Extend `e2e/settings-scope.spec.js` or add a focused photo-display spec using `e2e/settings-environment.js` for default Local first-load, actual image decoding, later rotation, and switching to/from Global. Assert `complete && naturalWidth > 0` and visible presentation, not just captions or an HTTP 200.
 - Run `npm run test:browser -- e2e/settings-scope.spec.js e2e/server-photo-rotation.spec.js e2e/dashboard-home.spec.js e2e/background-display-options.spec.js`, including any new focused spec. Add a recovery scenario at the confirmed failing stage and verify the last-good background remains during a transient outage.
+- For a confirmed decoding/retry defect, reuse `test/dashboard.test.js`'s unchanged-selection retry coverage and add the missing Local controller and real-browser evidence. In the one-photo scenario for each scope, settle the first failure, restore a promptly responding valid image at the unchanged URL, and advance controlled time by at most five seconds to start the retry. Await actual decoded visible display within the ten-second decode deadline; assert no selection/revision change, reload, or scope change. Verify hiding/disposal cancels retry ownership and prevents late rendering, with visibility resume tested separately.
 - If the defect depends on a specific browser/version, reproduce and verify there in addition to the repository's Chromium checks. Record missing browser prerequisites as blockers.
 - Recheck the affected deployment when accessible, confirming initial display and at least one later rotation with multiple eligible photos. Record fixture evidence separately from live deployment evidence, then run `git diff --check`.
 
@@ -55,11 +58,13 @@ Restore dashboard photo backgrounds and rotation for the configured image source
 - Multiple eligible photos rotate according to the active scope's order and interval; a single eligible photo remains displayed without requiring rotation.
 - Local playback and scope switching do not change Global preferences or advance the shared cursor; late work from the previous scope cannot replace the active image.
 - Transient source/image failures retain the last-good background and recover automatically. Confirmed disabled or empty sources use the solid fallback with an accurate Images status.
+- If decoding/retry is the confirmed defect, first-load failure of a single eligible photo recovers at the same URL and selection in both scopes without rotation or reload. The next attempt starts within five seconds of failure/timeout settlement while visible, and a healthy prompt response decodes within the existing ten-second deadline. Hidden, disposed, and replaced controllers cannot keep retrying or render late results.
 - A focused regression fails before the code fix and passes afterward, when a code defect is confirmed. Applicable unit/API/browser checks pass, with live deployment verification reported separately.
 
 ## Risks And Decisions
 
 - No root cause is established by the user's report or repository inspection. Investigation precedes the choice of code or deployment fix; compatibility and retry behavior are hypotheses only.
+- The five-second image-retry bound applies only if image retry needs correction. It measures from failure/timeout settlement, not from the initial request, and does not shorten the 60-second library/Local manifest refresh cadence or require a new timer when an existing owner can satisfy the bound.
 - Existing limits intentionally expose at most 100 accepted images from a bounded scan, not every NAS file. Restoring display does not expand those limits or add unsupported image formats.
 - Mount preparation failures require corrected configuration and restart; periodic discovery does not retry mounting. Keep the existing mount safeguards and use operator-controlled host changes when required.
 - Temporary-file/browser fixtures demonstrate application behavior but cannot prove that the deployment's NFS export is mounted, readable, or healthy.
