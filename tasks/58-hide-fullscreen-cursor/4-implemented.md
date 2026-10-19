@@ -3,7 +3,7 @@
 - [Implementation results](#implementation-results)
   - [Changes](#changes)
   - [Verification](#verification)
-  - [Pending browser verification](#pending-browser-verification)
+  - [Browser verification](#browser-verification)
 
 ## Changes
 
@@ -16,12 +16,19 @@
 
 - `node --test test/dashboard.test.js`: passed all 36 tests.
 - `git diff --check`: passed.
-- `npm run test:browser -- e2e/dashboard-home.spec.js -g 'fullscreen enters and exits'`: blocked at browser launch; the scenario did not run.
-- `npm run test:browser -- e2e/background-display-options.spec.js -g 'background-only fullscreen tools remain reachable'`: blocked at browser launch; the scenario did not run.
-- Both browser commands reported `browserType.launch: Executable doesn't exist at /home/container/.cache/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-linux64/chrome-headless-shell`.
+- `npm run test:browser -- e2e/dashboard-home.spec.js -g 'fullscreen enters and exits'`: passed, one test.
+- `npm run test:browser -- e2e/background-display-options.spec.js -g 'background-only fullscreen tools remain reachable'`: passed, one test.
+- Both browser commands initially failed to launch because Chromium was missing. The operator installed it, and both focused checks then passed.
 
-## Pending browser verification
+## Browser verification
 
-The operator must install Chromium with `npx playwright install chromium`, then rerun both focused browser commands. No browser dependencies were installed during implementation.
+Ran `node /tmp/opencode/inspect-fullscreen-cursor.mjs`, a temporary inspection script using real application markup, CSS, an isolated in-memory store/server, and headless Chromium. The script is outside the repository and passed after correcting inspection timing and opening the layout details panel before using its fullscreen control.
 
-Cursor-specific inspection remains blocked: computed cursors before/during/after fullscreen, movement without cursor reveal, background-only tool clicks, layout move/resize overrides, keyboard focus, repeated transitions, and normal text cursors after exit. Actual browser Escape exit also remains unverified; headless automation should use `document.exitFullscreen()` as specified in the plan. The code change is implemented, but browser acceptance criteria are not yet verified.
+- Confirmed `cursor: none` on the document root, body, clock, fullscreen and Settings controls, and a Settings link during actual Fullscreen API mode, including after mouse movement.
+- Confirmed two entry/exit cycles restore original `auto` and `pointer` computed cursor values.
+- Entered fullscreen from actual layout editing controls; move and resize handles changed from `move` and `nesw-resize` to `none`, then restored their original values on exit.
+- Confirmed keyboard Tab navigation retains a solid focus outline in fullscreen layout editing.
+- Confirmed background-only fullscreen Settings and Exit controls remain visible and clickable.
+- Confirmed a Settings text input resolves to `none` in fullscreen and restores `text` outside fullscreen.
+
+Headless checks used `document.exitFullscreen()` and actual application exit controls. Physical cursor appearance and browser-owned Escape exit were not manually observed; computed style checks verify the CSS behavior, and synthetic headless Escape does not invoke browser-level fullscreen exit.
