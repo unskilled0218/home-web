@@ -17,7 +17,7 @@ test('a 7001-image library supplies bounded Local/legacy pools and rotates the G
   slideshow = createPhotoSlideshow({ ...clock, photoLibrary: library, preferences: { order: 'name', interval: 5 } });
   server = createDashboardServer({ runtimeConfig: { allowedHosts: ['127.0.0.1'] }, store, photoLibrary: library, photoSourceEnabled: true, slideshow });
   server.listen(0, '127.0.0.1'); await once(server, 'listening'); const base = `http://127.0.0.1:${server.address().port}`;
-  await slideshow.start(); const first = slideshow.snapshot(); assert.equal(first.count, 100); assert.ok(first.current); assert.equal(first.nextChangeAt, clock.now() + 5000);
+  await slideshow.start(); const first = slideshow.snapshot(); assert.equal(first.count, 7001); assert.ok(first.current); assert.equal(first.nextChangeAt, clock.now() + 5000);
   await clock.advance(15000); const current = slideshow.snapshot(); assert.equal(current.revision, first.revision + 3); assert.notDeepEqual(current.current, first.current); assert.equal(current.nextChangeAt, clock.now() + 5000);
   const preferences = store.getDashboardPreferences();
   const [sharedResponse, localResponse, legacyResponse] = await Promise.all(['/api/dashboard/slideshow', '/api/dashboard/photos/local', '/api/dashboard/photos'].map(route => fetch(base + route)));
@@ -28,8 +28,24 @@ test('a 7001-image library supplies bounded Local/legacy pools and rotates the G
   const shared = validateSlideshowSnapshot(JSON.parse(sharedText)); const local = validateLocalPhotoManifest(JSON.parse(localText));
   assert.deepEqual(shared, current); assert.equal(local.count, 100); assert.equal(local.count, local.photos.length); assert.equal(local.available, true); assert.equal(legacy.available, true); assert.equal(legacy.photos.length, 100);
   assert.deepEqual(slideshow.snapshot(), current); assert.deepEqual(store.getDashboardPreferences(), preferences);
-  for (const url of [shared.current.url, local.photos.at(-1).url]) {
+  const statusResponse = await fetch(base + '/api/dashboard/photos/status'); const status = await statusResponse.json();
+  assert.equal(status.counts.eligible, 7001); assert.equal(status.complete, true); assert.equal(statusResponse.headers.get('cache-control'), 'no-store');
+  assert.equal((await fetch(base + '/api/dashboard/photos/status', { method: 'POST' })).status, 405);
+  for (const url of [shared.current.url, local.photos.at(-1).url, library.inventory().photos[3500].url, library.inventory().photos.at(-1).url]) {
     const response = await fetch(base + url); assert.equal(response.status, 200); assert.equal(response.headers.get('content-type'), 'image/png'); assert.deepEqual(Buffer.from(await response.arrayBuffer()), SMALL_PNG);
   }
   assert.deepEqual(slideshow.snapshot(), current); assert.deepEqual(store.getDashboardPreferences(), preferences);
+});
+
+test('Settings and Local cached inventory remain available without Global preferences and recovery does not rescan', async context => {
+  const root = mkdtempSync('/tmp/opencode/no-photo-preferences-'); populatePhotoFiles(root, 3); const clock = slideshowClock(); const library = createPhotoLibrary({ root, ...clock });
+  let scans = 0; const photoLibrary = { ...library, refresh() { scans++; return library.refresh(); } };
+  const slideshow = createPhotoSlideshow({ ...clock, photoLibrary, preferences: null }); const store = createStore(':memory:');
+  const server = createDashboardServer({ runtimeConfig: { allowedHosts: ['127.0.0.1'] }, store, photoLibrary, photoSourceEnabled: true, slideshow });
+  context.after(async () => { await Promise.all([server.lifecycle.shutdown(), slideshow.stop(), library.stop()]); store.close(); rmSync(root, { recursive: true, force: true }); });
+  server.listen(0, '127.0.0.1'); await once(server, 'listening'); const base = `http://127.0.0.1:${server.address().port}`;
+  await slideshow.start(); assert.equal(scans, 1); assert.equal(slideshow.snapshot().current, null);
+  assert.equal((await (await fetch(base + '/api/dashboard/photos/status')).json()).counts.eligible, 3);
+  assert.equal((await (await fetch(base + '/api/dashboard/photos/local')).json()).count, 3);
+  slideshow.configure({ order: 'name', interval: 5 }); assert.equal(slideshow.snapshot().count, 3); assert.equal(scans, 1); assert.equal(clock.timers.size, 2);
 });

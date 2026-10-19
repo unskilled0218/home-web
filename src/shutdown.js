@@ -4,7 +4,7 @@ export function createShutdownCoordinator({ report = console.error, notify = () 
   const resources = {}; const preparations = new Map();
   let phase = 'startup'; let failure = null; let finished = false; let deadline; let shutdownPromise; let resolveShutdown;
   let resolveStartup; const startup = new Promise((resolve) => { resolveStartup = resolve; });
-  let startupSettled = false; let httpDrain; let weatherDrain; let slideshowDrain; let localWeatherDrain;
+  let startupSettled = false; let httpDrain; let weatherDrain; let slideshowDrain; let localWeatherDrain; let photoLibraryDrain;
   const log = (message) => { try { report(message); } catch { /* Reporting cannot prevent cleanup. */ } };
   const send = (message) => { try { notify(message); } catch { /* Owner loss does not undo local cleanup. */ } };
   const preparationStatus = () => send({ type: 'dashboard:preparation', pending: preparations.size });
@@ -23,6 +23,7 @@ export function createShutdownCoordinator({ report = console.error, notify = () 
     if (resources.weather && !weatherDrain) weatherDrain = clean('Weather', () => resources.weather.stop());
     if (resources.localWeather && !localWeatherDrain) localWeatherDrain = clean('Local weather', () => resources.localWeather.stop());
     if (resources.slideshow && !slideshowDrain) slideshowDrain = clean('Slideshow', () => resources.slideshow.stop());
+    if (resources.photoLibrary && !photoLibraryDrain) photoLibraryDrain = clean('Photo library', () => resources.photoLibrary.stop());
   }
   function stopPreparation(child, owner) {
     if (owner.stopping) return;
@@ -41,7 +42,7 @@ export function createShutdownCoordinator({ report = console.error, notify = () 
     beginDrains(); for (const [child, owner] of preparations) stopPreparation(child, owner);
     void (async () => {
       await startup; beginDrains();
-      await Promise.all([httpDrain, weatherDrain, localWeatherDrain, slideshowDrain, ...[...preparations.values()].map((owner) => owner.exited)]);
+      await Promise.all([httpDrain, weatherDrain, localWeatherDrain, slideshowDrain, photoLibraryDrain, ...[...preparations.values()].map((owner) => owner.exited)]);
       if (finished) return;
       if (resources.homeAssistant) await clean('Home Assistant transport', () => resources.homeAssistant.dispose());
       if (finished) return;

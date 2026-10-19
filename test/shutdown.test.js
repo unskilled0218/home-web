@@ -19,6 +19,16 @@ test('shutdown is shared and waits for startup, HTTP and weather before closing 
   assert.equal(shutdown.shutdown(), first);
 });
 
+for (const forced of [false, true]) test(`library drain owns real pending work independently of slideshow configuration (forced: ${forced})`, async () => {
+  const clock = fakeClock(); const pending = deferred(); let closed = 0; let stopped = 0;
+  const lifecycle = createShutdownCoordinator({ ...clock, timeoutMs: 30, report() {} });
+  lifecycle.attach('photoLibrary', { stop() { stopped++; return pending.promise; } }); lifecycle.attach('store', { close() { closed++; } }); lifecycle.startupFinished();
+  const work = lifecycle.shutdown(); await tick(); assert.equal(closed, 0); assert.equal(stopped, 1);
+  if (forced) clock.fire(30); else pending.resolve();
+  const result = await work; assert.equal(result.cleanupSafe, !forced); assert.equal(result.code, forced ? 1 : 0);
+  pending.resolve(); await tick(); assert.equal(closed, forced ? 0 : 1);
+});
+
 test('owned Home Assistant transport disposes after admitted HTTP work and before SQLite closes', async () => {
   const clock = fakeClock(); const http = deferred(); const transport = deferred(); const order = [];
   const lifecycle = createShutdownCoordinator({ ...clock, report() {} });

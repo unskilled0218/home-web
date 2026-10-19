@@ -2,6 +2,7 @@ import { expect } from '@playwright/test';
 import { globalTest as test } from './global-fixtures.js';
 import { once } from 'node:events';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { createStore } from '../src/db.js';
 import { createDashboardServer } from '../src/app.js';
@@ -15,19 +16,20 @@ const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR
 async function environment({ count = 3, enabled = true, animation = 'none' } = {}) {
   const directory = await mkdtemp('/tmp/opencode/browser-slideshow-'); const store = createStore(path.join(directory, 'app.db')); const clock = slideshowClock();
   for (let i = 0; i < count; i++) await writeFile(path.join(directory, `${i}.png`), png);
-  const library = createPhotoLibrary({ root: directory }); let unavailable = false; let scans = 0;
-  const photoLibrary = { open: library.open, async list() { scans++; return unavailable ? { available: false, photos: [] } : library.list(); } };
+  let unavailable = false; let scans = 0;
+  const library = createPhotoLibrary({ root: directory, ...clock, fs: { ...fs, realpath(...args) { if (unavailable) return Promise.reject(Object.assign(new Error('Source unavailable'), { code: 'EIO' })); return fs.realpath(...args); } } });
+  const photoLibrary = { ...library, async refresh() { scans++; return library.refresh(); } };
   store.saveDashboardPreferences(normalizeDashboardPreferences({ order: 'random', interval: 5, imageInfo: true, animation }), 0);
   const create = () => createPhotoSlideshow({ ...clock, photoLibrary, enabled, preferences: store.getDashboardPreferences().preferences, random: () => 0 });
   let slideshow = create();
-  const server = createDashboardServer({ runtimeConfig: { allowedHosts: ['127.0.0.1'] }, store, photoLibrary, slideshow: { snapshot: () => slideshow.snapshot(), configure: (next) => slideshow.configure(next) } });
+  const server = createDashboardServer({ runtimeConfig: { allowedHosts: ['127.0.0.1'] }, store, photoLibrary, photoSourceEnabled: enabled, slideshow: { snapshot: () => slideshow.snapshot(), configure: (next) => slideshow.configure(next) } });
   server.listen(0, '127.0.0.1'); await once(server, 'listening'); await slideshow.start();
   return {
     base: `http://127.0.0.1:${server.address().port}`, clock, store, get slideshow() { return slideshow; }, scans: () => scans,
     setUnavailable(value) { unavailable = value; },
     async empty() { for (let i = 0; i < count; i++) await rm(path.join(directory, `${i}.png`), { force: true }); },
     async restart() { await slideshow.stop(); slideshow = create(); await slideshow.start(); },
-    async close() { await Promise.all([slideshow.stop(), server.lifecycle.shutdown()]); store.close(); await rm(directory, { recursive: true, force: true }); }
+    async close() { await Promise.all([slideshow.stop(), library.stop(), server.lifecycle.shutdown()]); store.close(); await rm(directory, { recursive: true, force: true }); }
   };
 }
 
@@ -95,5 +97,44 @@ for (const mode of ['single', 'empty', 'disabled', 'unavailable']) test(`${mode}
     } else await expect(page.locator('.photo-layer')).toHaveCount(0);
     await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(0, 0, 0)');
     await expect(page.locator('#open-settings')).toBeVisible(); expect(env.slideshow.snapshot().nextChangeAt).toBe(null);
+  } finally { await page.goto('about:blank'); await env.close(); }
+});
+
+test('full Global library stays shared while Settings counts persist across decode errors, stale scans and scope changes', async ({ browser }) => {
+  const env = await environment({ count: 151 }); const a = await browser.newPage(); const b = await browser.newPage(); let imageReads = 0;
+  try {
+    await a.clock.install(); await b.clock.install(); a.on('request', request => { if (/\/api\/dashboard\/photos\/[A-Za-z0-9_-]{16,128}$/.test(new URL(request.url()).pathname)) imageReads++; });
+    await a.goto(env.base); await b.goto(env.base); await shown(a, env.slideshow.snapshot().current); await shown(b, env.slideshow.snapshot().current);
+    expect(env.slideshow.snapshot().count).toBe(151); expect(imageReads).toBeLessThan(5);
+    await a.locator('#open-settings').click(); await a.locator('#settings-tab-images').click(); await expect(a.locator('#photo-count')).toHaveText('Global playable image files: 151.');
+    await env.clock.advance(5000); const failed = env.slideshow.snapshot().current;
+    await a.route(`**${failed.url}`, route => route.fulfill({ contentType: 'image/png', body: 'bad image' })); await a.clock.fastForward(5000);
+    await expect(a.locator('#photo-status')).toContainText('could not be displayed'); await expect(a.locator('#photo-count')).toHaveText('Global playable image files: 151.');
+    await b.clock.fastForward(5000); await shown(b, failed);
+    env.setUnavailable(true); await env.clock.advance(60000);
+    await expect.poll(async () => (await (await fetch(env.base + '/api/dashboard/photos/status')).json()).stale).toBe(true);
+    await a.clock.fastForward(5000); await expect(a.locator('#photo-count')).toContainText('151. Last completed count is stale.');
+    env.setUnavailable(false); await env.restart(); await a.locator('#close-settings').click();
+    await a.locator('#open-settings').click(); await a.locator('#settings-tab-images').click(); await expect(a.locator('#photo-count')).toHaveText('Global playable image files: 151.');
+    await a.locator('#settings-tab-general').click(); await a.locator('#settings-scope').selectOption('local'); await a.locator('#settings-tab-images').click();
+    await expect(a.locator('#photo-count')).toHaveText('Global playable image files: 151.');
+    const local = await (await fetch(env.base + '/api/dashboard/photos/local')).json(); expect(local.count).toBe(100); expect(env.slideshow.snapshot().count).toBe(151);
+  } finally { await a.close(); await b.close(); await env.close(); }
+});
+
+test('Settings counts distinguish initial unknown from completed zero and stop polling while closed or hidden', async ({ page }) => {
+  const env = await environment({ count: 0 }); let reads = 0;
+  let status = { version: 1, enabled: true, available: false, loading: true, complete: false, stale: false, error: null, counts: null, progress: 0 };
+  await page.route('**/api/dashboard/photos/status', route => { reads++; return route.fulfill({ json: status }); });
+  try {
+    await page.clock.install(); await page.goto(env.base); await page.locator('#open-settings').click(); await page.locator('#settings-tab-images').click();
+    await expect(page.locator('#photo-count')).toHaveText('Image file count: unknown. Scanning image files… 0 entries examined.'); expect(reads).toBe(1);
+    status = { ...status, available: true, loading: false, complete: true, counts: { supported: 0, eligible: 0, filenameExcluded: 0, permissionExcluded: 0, raceExcluded: 0, fileExcluded: 0 } };
+    await page.clock.fastForward(5000); await expect(page.locator('#photo-count')).toHaveText('Global playable image files: 0.');
+    await page.locator('#close-settings').click(); const before = reads; await page.clock.fastForward(15000); expect(reads).toBe(before);
+    await page.locator('#open-settings').click(); await page.locator('#settings-tab-images').click(); await expect.poll(() => reads).toBe(before + 1);
+    await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, value: true }); document.dispatchEvent(new Event('visibilitychange')); });
+    const hidden = reads; await page.clock.fastForward(15000); expect(reads).toBe(hidden);
+    await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, value: false }); document.dispatchEvent(new Event('visibilitychange')); }); await expect.poll(() => reads).toBe(hidden + 1);
   } finally { await page.goto('about:blank'); await env.close(); }
 });

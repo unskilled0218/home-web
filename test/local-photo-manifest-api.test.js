@@ -22,13 +22,13 @@ test('Local producer filters oversized legacy metadata before serialization and 
   t.after(async () => { await Promise.all([slideshow.stop(), server.lifecycle.shutdown()]); store.close(); await rm(root, { recursive: true, force: true }); }); const base = `http://127.0.0.1:${server.address().port}`;
   const legacy = await (await fetch(`${base}/api/dashboard/photos`)).text(); assert.ok(Buffer.byteLength(legacy) > 262144); assert.equal(JSON.parse(legacy).photos.length, 100);
   const before = slideshow.snapshot(); const response = await fetch(`${base}/api/dashboard/photos/local`); const body = await response.text(); const manifest = validateLocalPhotoManifest(JSON.parse(body)); assert.ok(Buffer.byteLength(body) <= 262144); assert.equal(manifest.count, 1); assert.equal(manifest.photos[0].name, 'valid.png'); assert.equal(response.headers.get('cache-control'), 'no-store'); assert.deepEqual(slideshow.snapshot(), before);
-  assert.equal((await fetch(base + manifest.photos[0].url)).status, 200); await rm(path.join(root, 'valid.png')); const empty = validateLocalPhotoManifest(await (await fetch(`${base}/api/dashboard/photos/local`)).json()); assert.equal(empty.available, true); assert.equal(empty.count, 0);
+  assert.equal((await fetch(base + manifest.photos[0].url)).status, 200); await rm(path.join(root, 'valid.png')); await library.refresh(); const empty = validateLocalPhotoManifest(await (await fetch(`${base}/api/dashboard/photos/local`)).json()); assert.equal(empty.available, true); assert.equal(empty.count, 0);
   assert.equal((await fetch(`${base}/api/dashboard/photos/local`, { method: 'POST' })).status, 405);
 });
 
 test('disabled projection never scans, while failed enabled preparation remains unavailable rather than disabled', async t => {
   for (const enabled of [false, true]) {
-    let scans = 0; const store = createStore(':memory:'); const server = createDashboardServer({ runtimeConfig: { allowedHosts: ['127.0.0.1'] }, store, photoSourceEnabled: enabled, photoLibrary: { async list() { scans++; return { available: false, photos: [] }; } } }); server.listen(0, '127.0.0.1'); await once(server, 'listening');
+    let scans = 0; const store = createStore(':memory:'); const server = createDashboardServer({ runtimeConfig: { allowedHosts: ['127.0.0.1'] }, store, photoSourceEnabled: enabled, photoLibrary: { async local() { scans++; return { available: false, photos: [] }; } } }); server.listen(0, '127.0.0.1'); await once(server, 'listening');
     t.after(async () => { await server.lifecycle.shutdown(); store.close(); }); const state = validateLocalPhotoManifest(await (await fetch(`http://127.0.0.1:${server.address().port}/api/dashboard/photos/local`)).json()); assert.equal(state.enabled, enabled); assert.equal(state.available, false); assert.equal(scans, enabled ? 1 : 0);
   }
 });

@@ -41,7 +41,7 @@ export function createPhotoController({ show, clear, report, update = () => {}, 
     if (autoPoll && visible && !disposed && started) timer = schedule(() => { timer = undefined; void load(); }, delay);
   }
   function reportSource(next) {
-    report(!next.enabled ? 'NFS backgrounds are disabled.' : next.stale ? 'NFS backgrounds are stale. Retrying automatically.' : next.loading && !next.current ? 'Loading NFS backgrounds…' : !next.available ? 'NFS backgrounds are unavailable. Retrying automatically.' : next.count ? `Using ${next.count} NFS background${next.count === 1 ? '' : 's'} from the bounded photo pool.` : 'No eligible photos were found within the bounded scan.');
+    report(!next.enabled ? 'NFS backgrounds are disabled.' : next.stale ? 'NFS backgrounds are stale. Retrying automatically.' : next.loading && !next.current ? 'Loading NFS backgrounds…' : !next.available ? 'NFS backgrounds are unavailable. Retrying automatically.' : next.count ? `Using ${next.count} NFS background${next.count === 1 ? '' : 's'} in this playback sequence.` : 'No eligible photos were found in the completed inventory.');
   }
   function render(photo) {
     const key = photoKey(photo);

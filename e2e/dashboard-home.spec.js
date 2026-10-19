@@ -145,7 +145,7 @@ test('home initializes the photo dashboard without widget requests and handles u
   await page.locator('#open-settings').click();
   await expect(page.locator('#settings-dialog')).toBeVisible();
   await page.getByRole('tab', { name: 'Images', exact: true }).click();
-  await expect(page.locator('#photo-status')).toHaveText('No eligible photos were found within the bounded scan.');
+  await expect(page.locator('#photo-status')).toHaveText('No eligible photos were found in the completed inventory.');
   await page.locator('#close-settings').click();
   await expect(page.locator('#settings-dialog')).not.toBeVisible();
   await expect(page.locator('#open-settings')).toBeFocused();

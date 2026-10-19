@@ -64,11 +64,36 @@ test('failure and recovery retain stale selection, confirmed empty clears, and m
   setResult({ available: true, photos: [] }); await clock.advance(60_000); assert.equal(service.snapshot().current, null); assert.equal(service.snapshot().available, true); assert.equal(clock.timers.size, 1); await service.stop();
 });
 
-test('initial unavailable and unconfigured services recover without inventing preferences; disabled sources never scan', async () => {
-  const { service, clock, setResult } = environment({ preferences: null }); await service.start(); assert.equal(service.snapshot().available, false); assert.equal(clock.timers.size, 0);
-  setResult({ available: false, photos: [] }); service.configure({ order: 'name', interval: 5 }); await tick(); assert.equal(service.snapshot().current, null);
+test('unconfigured services discover without inventing preferences and recover from cache; disabled sources never scan', async () => {
+  const { service, clock, scans, setResult } = environment({ preferences: null }); await service.start(); assert.equal(service.snapshot().available, false); assert.equal(service.snapshot().current, null); assert.equal(scans(), 1); assert.equal(clock.timers.size, 1);
+  service.configure({ order: 'name', interval: 5 }); assert.equal(service.snapshot().current.name, 'a.png'); assert.equal(scans(), 1); assert.equal(clock.timers.size, 2);
   setResult({ available: true, photos: [photo()] }); await clock.advance(60_000); assert.equal(service.snapshot().available, true); assert.equal(service.snapshot().nextChangeAt, null); assert.equal(clock.timers.size, 1); await service.stop();
   const disabled = environment({ enabled: false }); await disabled.service.start(); assert.equal(disabled.scans(), 0); assert.equal(disabled.service.snapshot().enabled, false); assert.equal(disabled.clock.timers.size, 0); await disabled.service.stop();
+});
+
+for (const order of ['name', 'date', 'random']) test(`${order} traverses all 7001 records across unchanged refreshes without omission or premature repetition`, async () => {
+  const records = Array.from({ length: 7001 }, (_, i) => photo(`${String(i).padStart(5, '0')}.png`, { lastModified: 7001 - i, url: `/api/dashboard/photos/token${String(i).padStart(16, '0')}` }));
+  let scans = 0; const clock = slideshowClock();
+  const service = createPhotoSlideshow({ ...clock, random: () => 0.37, preferences: { order, interval: 5 }, photoLibrary: { refresh: async () => { scans++; return { available: true, revision: 'unchanged', photos: records }; } } });
+  try {
+    await service.start(); const seen = new Set();
+    for (let index = 0; index < records.length; index++) {
+      const state = service.snapshot(); assert.equal(state.count, 7001); assert.equal(seen.has(state.current.name), false, `premature repeat at ${index}`); seen.add(state.current.name);
+      if (order !== 'random') assert.equal(state.current.name, records[order === 'name' ? index : records.length - index - 1].name);
+      await clock.advance(5000);
+    }
+    assert.equal(seen.size, 7001); assert.ok(scans > 500); assert.equal(clock.timers.size, 2);
+    if (order === 'random') assert.notEqual(service.snapshot().current.name, [...seen].at(-1));
+  } finally { await service.stop(); }
+  assert.equal(clock.timers.size, 0);
+});
+
+test('preference recovery keeps cached inventory marked stale when the latest discovery failed', async () => {
+  const { service, clock, scans, setResult } = environment({ preferences: null });
+  await service.start(); setResult({ available: false, photos: [] }); await clock.advance(60000);
+  assert.equal(scans(), 2); assert.equal(service.snapshot().available, false);
+  service.configure({ order: 'name', interval: 5 }); assert.equal(service.snapshot().count, 2); assert.equal(service.snapshot().stale, true); assert.equal(scans(), 2);
+  await service.stop();
 });
 
 test('eligibility filters before selection, counts only valid records, and all-rejected rescan is authoritative empty', async () => {

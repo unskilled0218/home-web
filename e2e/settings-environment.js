@@ -16,18 +16,18 @@ export async function settingsEnvironment({ photoCount = 2 } = {}) {
   const directory = await mkdtemp('/tmp/opencode/settings-scope-browser-'); const photos = path.join(directory, 'photos'); await mkdir(photos);
   const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64');
   for (let i = 0; i < photoCount; i++) await writeFile(path.join(photos, `${i}.png`), png);
-  const clock = slideshowClock(); let store; let server; let weather; let localWeather; let slideshow; let base; let port = 0;
+  const clock = slideshowClock(); let store; let server; let weather; let localWeather; let slideshow; let photoLibrary; let base; let port = 0;
   const provider = async url => Response.json(url.hostname.startsWith('air-') ? { current: { us_aqi: 20 } } : rawForecast(Number(url.searchParams.get('latitude'))));
   async function start() {
     store = createStore(path.join(directory, 'app.db'));
     if (!store.getDashboardPreferences().initialized) store.saveDashboardPreferences(normalizeDashboardPreferences({ color: '#222222', imageInfo: true, order: 'name', interval: 60, animation: 'none' }), 0);
     if (!store.getWeatherLocation().location) store.saveWeatherLocation({ latitude: 51, longitude: 0, label: 'London' }, store.getWeatherLocation().revision);
     weather = createWeatherService({ store, ...clock, fetchImpl: provider }); localWeather = createLocalWeatherService({ ...clock, fetchImpl: provider });
-    const photoLibrary = createPhotoLibrary({ root: photos }); slideshow = createPhotoSlideshow({ ...clock, photoLibrary, preferences: store.getDashboardPreferences().preferences });
+    photoLibrary = createPhotoLibrary({ root: photos }); slideshow = createPhotoSlideshow({ ...clock, photoLibrary, preferences: store.getDashboardPreferences().preferences });
     server = createDashboardServer({ store, weather, localWeather, slideshow, photoLibrary, photoSourceEnabled: true, runtimeConfig: { allowedHosts: ['127.0.0.1'] } });
     server.listen(port, '127.0.0.1'); await once(server, 'listening'); port = server.address().port; base = `http://127.0.0.1:${port}`; weather.start(); localWeather.start(); await slideshow.start(); await tick();
   }
-  async function stop() { await Promise.all([server.lifecycle.shutdown(), weather.stop(), localWeather.stop(), slideshow.stop()]); store.close(); }
+  async function stop() { await Promise.all([server.lifecycle.shutdown(), weather.stop(), localWeather.stop(), slideshow.stop(), photoLibrary.stop()]); store.close(); }
   await start();
   return { get base() { return base; }, get store() { return store; }, get slideshow() { return slideshow; }, clock, async restart() { await stop(); await start(); }, async close() { await stop(); await rm(directory, { recursive: true, force: true }); } };
 }

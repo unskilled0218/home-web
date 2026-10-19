@@ -1,6 +1,7 @@
 import { MOBILE_MEDIA_QUERY, PREFERENCE_KEYS, clockText, normalizeDashboardPreferences, preferencesEqual, resolveDisplayPreferences, sampleHours, temperatureRange, weatherDescription, weatherIconFile } from './dashboard-helpers.js';
 import { searchLocations } from './dashboard-weather.js';
 import { createScopedPhotoController } from './dashboard-photo-scope.js';
+import { createPhotoStatusController } from './dashboard-photo-status.js';
 import { createScopedWeatherController } from './dashboard-weather-scope.js';
 import { createCalendarController, formatCalendarEvent } from './dashboard-calendar.js';
 import { createSettingsTabs } from './dashboard-settings.js';
@@ -41,7 +42,9 @@ const layoutView = createDashboardLayoutView({ document, window, onMeasure: () =
 layoutEditor = createDashboardLayoutEditor({ document, window, view: layoutView, getState: () => settingsSync.getState(), save: (value, revision) => settingsSync.save(value, revision), canEnter: () => !dialog.open && !settingsSync.getState().pending, activeProfile: () => mobileViewport.matches ? 'mobile' : 'desktop', toggleFullscreen: () => toggleFullscreen(), activationBlocked: () => layoutActivation?.blocked() });
 layoutActivation = createLayoutActivation({ document, window, canEnter: () => !layoutEditor.active && !dialog.open && !settingsSync.getState().pending, activate: (id, node) => layoutEditor.enter(id, node) });
 $('edit-layout').addEventListener('click', () => layoutEditor.enter());
-const settingsTabs = createSettingsTabs(dialog, { onSelect: (id) => { deviceIntegrations.setPickerOpen(dialog.open && id === 'settings-tab-home-assistant'); bookmarks.setPickerOpen(dialog.open && id === 'settings-tab-bookmarks'); } });
+const photoStatus = createPhotoStatusController({ report: message => { $('photo-count').textContent = message; } });
+const showPhotoStatus = () => photoStatus.setVisible(!document.hidden && dialog.open && $('settings-tab-images').getAttribute('aria-selected') === 'true');
+const settingsTabs = createSettingsTabs(dialog, { onSelect: (id) => { deviceIntegrations.setPickerOpen(dialog.open && id === 'settings-tab-home-assistant'); bookmarks.setPickerOpen(dialog.open && id === 'settings-tab-bookmarks'); showPhotoStatus(); } });
 const deviceView = createDashboardDeviceView({ document, wake: (id) => { if (!layoutEditor.active) return deviceIntegrations.wake(id); } });
 const deviceSelection = createDeviceSelection({ document, root: $('home-assistant-device-picker'), status: $('home-assistant-selection-status'), onChange: () => { draftDirty = true; settingsTransfer?.update(); } });
 const deviceIntegrations = createDashboardDevices({ onChange: (state) => { deviceView.render(state); deviceSelection.update(state); } });
@@ -340,7 +343,7 @@ $('open-settings').addEventListener('click', () => {
   $('settings-tab-general').focus();
 });
 $('close-settings').addEventListener('click', () => dialog.close());
-dialog.addEventListener('close', () => { settingsSession++; draftDirty = false; $('edit-layout').disabled = settingsSync.getState().pending; integrationSettings.close(); deviceIntegrations.setPickerOpen(false); bookmarks.setPickerOpen(false); $('open-settings').focus(); });
+dialog.addEventListener('close', () => { photoStatus.setVisible(false); settingsSession++; draftDirty = false; $('edit-layout').disabled = settingsSync.getState().pending; integrationSettings.close(); deviceIntegrations.setPickerOpen(false); bookmarks.setPickerOpen(false); $('open-settings').focus(); });
 function cancelSearch() { searchGeneration++; searchController?.abort(); }
 $('location-search').addEventListener('submit', async (event) => {
   event.preventDefault(); cancelSearch(); const request = searchGeneration;
@@ -429,12 +432,14 @@ async function toggleFullscreen() {
 }
 $('fullscreen').addEventListener('click', toggleFullscreen);
 document.addEventListener('fullscreenchange', fullscreenState);
-document.addEventListener('visibilitychange', () => { startClock(); photos.setVisible(!document.hidden); weather.setVisible(!document.hidden); calendar.setVisible(!document.hidden); bookmarks.setVisible(!document.hidden); settingsSync.setVisible(!document.hidden); deviceIntegrations.setVisible(!document.hidden); if (document.hidden) stopAnimations(); });
+document.addEventListener('visibilitychange', () => { showPhotoStatus(); startClock(); photos.setVisible(!document.hidden); weather.setVisible(!document.hidden); calendar.setVisible(!document.hidden); bookmarks.setVisible(!document.hidden); settingsSync.setVisible(!document.hidden); deviceIntegrations.setVisible(!document.hidden); if (document.hidden) stopAnimations(); });
 reducedMotion.addEventListener('change', stopAnimations);
 mobileViewport.addEventListener('change', applyPresentation);
 window.addEventListener('pagehide', (event) => { clearInterval(clockTimer); cancelSearch(); layoutActivation.cancel(); layoutEditor.cancelGesture(); weather.dispose(); if (event.persisted) { photos.setVisible(false); bookmarks.setVisible(false); settingsSync.setVisible(false); deviceIntegrations.setVisible(false); integrationSettings.suspend(); } else { settingsTransfer.dispose(); photos.dispose(); layoutActivation.dispose(); layoutEditor.dispose(); layoutView.dispose(); calendar.dispose(); bookmarks.dispose(); settingsSync.dispose(); integrationSettings.dispose(); deviceIntegrations.dispose(); } });
 window.addEventListener('pageshow', (event) => { if (event.persisted) { photos.setVisible(!document.hidden); applyPresentation(); const scope = settingsSync.getState(); weather.configure(settings, scope.mode, scope.source, scope.weatherLocation); void weather.refresh(); void calendar.refresh(); bookmarks.setVisible(!document.hidden); settingsSync.setVisible(!document.hidden); deviceIntegrations.setVisible(!document.hidden); } });
 window.addEventListener('online', () => { if (servicesStarted) { void photos.load(); void settingsSync.refresh(); void weather.refresh(); } });
+window.addEventListener('pagehide', event => { if (event.persisted) photoStatus.setVisible(false); else photoStatus.dispose(); });
+window.addEventListener('pageshow', event => { if (event.persisted) showPhotoStatus(); });
 photos.setVisible(!document.hidden); weather.setVisible(!document.hidden); calendar.setVisible(!document.hidden);
 bookmarks.setVisible(!document.hidden);
 deviceIntegrations.setVisible(!document.hidden);

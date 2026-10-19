@@ -19,7 +19,7 @@ export function validateSlideshowPhoto(value) {
 export function validateSlideshowSnapshot(value) {
   if (!fields(value, SNAPSHOT_FIELDS) || value.version !== 1 || typeof value.instanceId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(value.instanceId)) throw new Error('Invalid slideshow snapshot version or instance.');
   if (!Number.isSafeInteger(value.revision) || value.revision < 0 || !timestamp(value.serverTime) || (value.nextChangeAt !== null && !timestamp(value.nextChangeAt))) throw new Error('Invalid slideshow revision or timestamp.');
-  if (!['enabled', 'available', 'loading', 'stale'].every((key) => typeof value[key] === 'boolean') || !Number.isSafeInteger(value.count) || value.count < 0 || value.count > 100) throw new Error('Invalid slideshow status.');
+  if (!['enabled', 'available', 'loading', 'stale'].every((key) => typeof value[key] === 'boolean') || !Number.isSafeInteger(value.count) || value.count < 0) throw new Error('Invalid slideshow status.');
   const current = value.current === null ? null : validateSlideshowPhoto(value.current);
   if (!value.enabled && (value.available || value.loading || value.stale)) throw new Error('Disabled slideshow cannot be active.');
   if (!value.available && (value.count !== 0 || current !== null || value.stale)) throw new Error('Unavailable slideshow cannot publish a pool.');
@@ -34,4 +34,16 @@ export function validateLocalPhotoManifest(value) {
   const photos = value.photos.map(validateSlideshowPhoto);
   if (slideshowBytes(value) > MAX_LOCAL_PHOTO_MANIFEST_BYTES) throw new Error('Local photo manifest exceeds limits.');
   return { ...value, photos };
+}
+
+export function validatePhotoLibraryStatus(value) {
+  const names = ['supported', 'eligible', 'filenameExcluded', 'permissionExcluded', 'raceExcluded', 'fileExcluded'];
+  const count = number => Number.isSafeInteger(number) && number >= 0;
+  if (!fields(value, ['version', 'enabled', 'available', 'loading', 'complete', 'stale', 'error', 'counts', 'progress']) || value.version !== 1) throw new Error('Invalid photo inventory status.');
+  if (!['enabled', 'available', 'loading', 'complete', 'stale'].every(key => typeof value[key] === 'boolean') || !count(value.progress) || ![null, 'resource-limit', 'scan-failed'].includes(value.error)) throw new Error('Invalid photo inventory state.');
+  if (value.counts !== null && (!fields(value.counts, names) || !names.every(key => count(value.counts[key])) || value.counts.eligible + value.counts.filenameExcluded !== value.counts.supported)) throw new Error('Invalid photo inventory counts.');
+  if (value.available !== (value.counts !== null) || value.complete !== (value.available && value.error === null) || value.stale !== (value.available && value.error !== null)) throw new Error('Inconsistent photo inventory state.');
+  if (!value.enabled && (value.available || value.loading || value.error !== null || value.progress !== 0)) throw new Error('Disabled photo inventory cannot be active.');
+  if (slideshowBytes(value) > MAX_SLIDESHOW_BYTES) throw new Error('Photo inventory status too large.');
+  return { ...value, counts: value.counts ? { ...value.counts } : null };
 }

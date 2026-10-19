@@ -13,7 +13,8 @@ test('shared photo contract counts UTF-8 bytes and preserves accepted names and 
 test('snapshot schema distinguishes loading, unavailable, stale, empty and disabled states', () => {
   const empty = { count: 0, current: null, nextChangeAt: null };
   for (const extra of [{}, { ...empty }, { ...empty, available: false, loading: true }, { ...empty, available: false }, { ...empty, available: false, enabled: false }, { stale: true }, { count: 2, nextChangeAt: 1_005_000 }]) assert.doesNotThrow(() => validateSlideshowSnapshot(slideshowSnapshot(extra)));
-  for (const extra of [{ version: 2 }, { instanceId: 'x'.repeat(129) }, { revision: -1 }, { revision: 0.1 }, { serverTime: NaN }, { nextChangeAt: 'soon' }, { count: 101 }, { count: 0 }, { current: null }, { enabled: false }, { available: false }, { count: 2 }, { nextChangeAt: 5 }, { ...empty, available: false, stale: true }, { extra: true }]) assert.throws(() => validateSlideshowSnapshot(slideshowSnapshot(extra)), undefined, JSON.stringify(extra));
+  assert.doesNotThrow(() => validateSlideshowSnapshot(slideshowSnapshot({ count: 7001, nextChangeAt: 1_005_000 })));
+  for (const extra of [{ version: 2 }, { instanceId: 'x'.repeat(129) }, { revision: -1 }, { revision: 0.1 }, { serverTime: NaN }, { nextChangeAt: 'soon' }, { count: Number.MAX_SAFE_INTEGER + 1 }, { count: 0 }, { current: null }, { enabled: false }, { available: false }, { count: 2 }, { nextChangeAt: 5 }, { ...empty, available: false, stale: true }, { extra: true }]) assert.throws(() => validateSlideshowSnapshot(slideshowSnapshot(extra)), undefined, JSON.stringify(extra));
   const value = slideshowSnapshot({ current: photo('é".png') });
   assert.equal(slideshowBytes(value), Buffer.byteLength(JSON.stringify(value), 'utf8'));
   assert.ok(slideshowBytes(value) <= MAX_SLIDESHOW_BYTES);

@@ -75,7 +75,7 @@ test('real library/service/API round trip filters transport-ineligible names wit
   const longDirectory = path.join(root, ...Array.from({ length: 5 }, (_, i) => `${i}${'x'.repeat(219)}`)); await mkdir(longDirectory, { recursive: true });
   const names = ['日"本.png', 'plain.png', 'control\n.png', path.relative(root, path.join(longDirectory, 'long.png'))];
   for (const name of names) await writeFile(path.join(root, name), 'image');
-  const library = createPhotoLibrary({ root }); const legacy = await library.list(); assert.equal(legacy.photos.length, 4);
+  const library = createPhotoLibrary({ root }); await library.refresh(); const legacy = await library.list(); assert.equal(legacy.photos.length, 4);
   const env = await environment(t, { photoLibrary: library }); env.service.configure({ order: 'name', interval: 5 }); await env.service.start();
   const seen = new Set();
   for (let i = 0; i < 4; i++) {

@@ -19,7 +19,7 @@ import { validateWeatherLocation, weatherTimezone } from '../public/weather-data
 import { validateDashboardPreferences } from '../public/dashboard-helpers.js';
 import { CONNECTION_SHUTDOWN_GRACE_MS } from './lifecycle-constants.js';
 import { safeBookmarkUrl } from '../public/bookmark-data.js';
-import { validateSlideshowSnapshot, validateSlideshowPhoto, validateLocalPhotoManifest } from '../public/photo-slideshow-data.js';
+import { validateSlideshowSnapshot, validateLocalPhotoManifest, validatePhotoLibraryStatus } from '../public/photo-slideshow-data.js';
 import { exactFields, MAX_SETTINGS_TRANSFER_BYTES, validateSettingsTransfer } from '../public/dashboard-settings-data.js';
 
 export const MAX_JSON_BODY_BYTES = 16_384;
@@ -362,11 +362,18 @@ export function createDashboardServer({ runtimeConfig, store, linkwarden, homeAs
       try { if (!localWeather) throw new Error('Unavailable service.'); return json(response, 200, localWeather.query(input.location, input.timezone)); }
       catch (error) { return json(response, error.status === 429 ? 429 : 503, { error: 'Local weather is unavailable. Retry later.' }); }
     }
+    if (pathname === '/api/dashboard/photos/status') {
+      if (request.method !== 'GET') return json(response, 405, { error: 'Method not allowed.' });
+      try {
+        const status = photoLibrary.status();
+        return json(response, 200, validatePhotoLibraryStatus({ ...status, enabled: photoSourceEnabled }));
+      } catch { return json(response, 503, { error: 'Photo inventory is unavailable.' }); }
+    }
     if (pathname === '/api/dashboard/photos/local') {
       if (request.method !== 'GET') return json(response, 405, { error: 'Method not allowed.' });
       try {
-        const result = photoSourceEnabled ? await photoLibrary.list() : { available: false, photos: [] };
-        const photos = result.available ? result.photos.slice(0, 100).flatMap(photo => { try { return [validateSlideshowPhoto(photo)]; } catch { return []; } }) : [];
+        const result = photoSourceEnabled ? await photoLibrary.local() : { available: false, photos: [] };
+        const photos = result.available ? result.photos : [];
         return json(response, 200, validateLocalPhotoManifest({ version: 1, enabled: photoSourceEnabled, available: Boolean(result.available), count: photos.length, photos }));
       } catch { return json(response, 503, { error: 'Local photos are unavailable.' }); }
     }

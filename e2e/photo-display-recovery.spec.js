@@ -56,7 +56,7 @@ for (const mode of ['local', 'global']) test(`${mode} retries a failed first ima
     await expect(page.locator('#photo-status')).toHaveText('The selected background could not be displayed. Retrying automatically.');
     await expect(page.locator('#photos img')).toHaveCount(0);
     await page.clock.runFor(5000); await shown(page, snapshot.current.url);
-    await expect(page.locator('#photo-status')).toHaveText('Using 1 NFS background from the bounded photo pool.');
+    await expect(page.locator('#photo-status')).toHaveText('Using 1 NFS background in this playback sequence.');
     expect(requests.length).toBeGreaterThan(1); expect(new Set(requests).size).toBe(1);
     expect(env.slideshow.snapshot()).toEqual(snapshot); expect(env.store.exportDashboardSettings()).toEqual(before);
     expect(await page.locator('#settings-scope').inputValue()).toBe(mode); expect(errors).toEqual([]);

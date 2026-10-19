@@ -66,6 +66,7 @@ async function boot() {
   if (lifecycle.getState().pendingPreparations || lifecycle.getState().failure === 'cleanup') throw new Error('NFS preparation cleanup is unconfirmed. Use disabled/pre-mounted NFS or permit owned-child termination.');
   if (config.nfs.error || nfs.reason === 'failed') console.warn('NFS backgrounds are unavailable; starting the dashboard without photos.');
   const photoLibrary = nfs.available ? createPhotoLibrary({ root: nfs.root }) : createUnavailablePhotoLibrary();
+  lifecycle.attach('photoLibrary', photoLibrary);
   const weather = createWeatherService({ store }); lifecycle.attach('weather', weather);
   const localWeather = createLocalWeatherService(); lifecycle.attach('localWeather', localWeather);
   let photoPreferences;
