@@ -6,4 +6,4 @@ While displaying one image, read `/photos`, pick a random image to display next,
 
 ## goal
 
-Make the slideshow repeatedly read the photo directory and select the next random image while the current image remains displayed, then show that selection and repeat.
+While displaying the current image, randomly select and prepare one next image from the discovered photo library. Switch when it is ready, then repeat. Refresh the library periodically to detect added or removed files instead of rereading `/photos` for every transition. If preparation fails, keep the current image visible.
