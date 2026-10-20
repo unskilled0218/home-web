@@ -6,7 +6,7 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { createStore } from '../src/db.js';
 import { createWeatherService, WEATHER_REFRESH_MS } from '../src/weather.js';
-import { location, epoch, rawForecast } from './fixtures/weather.js';
+import { location, epoch, rawAir, rawForecast } from './fixtures/weather.js';
 
 const settle = async () => { for (let i = 0; i < 10; i++) await new Promise((resolve) => setImmediate(resolve)); };
 const providerResponse = (url, temperature = 12) => Response.json(url.hostname.startsWith('air-') ? { current: { us_aqi: 20 } } : rawForecast(temperature));
@@ -75,7 +75,7 @@ test('independent failures preserve successful parts and only forecast success a
   let failForecast = false; let failAir = true;
   const env = setup(t, async (url) => {
     if (url.hostname.startsWith('air-') ? failAir : failForecast) throw new Error('offline');
-    return providerResponse(url);
+    return url.hostname.startsWith('air-') ? Response.json(rawAir(0)) : providerResponse(url);
   });
   env.store.saveWeatherLocation(location, 0); env.service.start(); await settle();
   assert.equal(env.service.snapshot().forecastUpdated, epoch); assert.equal(env.service.snapshot().airError, true);
@@ -83,7 +83,7 @@ test('independent failures preserve successful parts and only forecast success a
   env.advance(WEATHER_REFRESH_MS); env.service.ensureFresh('UTC'); await settle();
   const partial = env.service.snapshot();
   assert.equal(partial.forecast.current.temperature_2m, 12); assert.equal(partial.forecastUpdated, epoch); assert.equal(partial.forecastError, true);
-  assert.equal(partial.air.aqi, 20); assert.equal(partial.airUpdated, epoch + WEATHER_REFRESH_MS); assert.equal(partial.airError, false);
+  assert.equal(partial.air.aqi, 0); assert.equal(partial.airUpdated, epoch + WEATHER_REFRESH_MS); assert.equal(partial.airError, false);
   failForecast = false; failAir = true;
   env.advance(WEATHER_REFRESH_MS); env.service.ensureFresh('UTC'); await settle();
   assert.equal(env.service.snapshot().forecastUpdated, epoch + 2 * WEATHER_REFRESH_MS);
@@ -105,6 +105,23 @@ test('coordinate changes reject late results even when a provider ignores abort'
   resolveOld(Response.json(rawForecast(1))); await settle();
   assert.equal(env.service.snapshot().location.label, 'Tokyo'); assert.equal(env.service.snapshot().forecast.current.temperature_2m, 25);
   assert.equal(env.service.snapshot().forecastError, false); assert.equal(env.tasks.size, 1);
+});
+
+test('late air results cannot replace the new location AQI, timestamp, or error state', async t => {
+  let resolveOld;
+  const env = setup(t, async url => {
+    if (!url.hostname.startsWith('air-')) return providerResponse(url);
+    if (url.searchParams.get('latitude') === String(location.latitude)) return new Promise(resolve => { resolveOld = resolve; });
+    return Response.json(rawAir(91));
+  });
+  env.store.saveWeatherLocation(location, 0); env.service.start(); await settle();
+  assert.equal(typeof resolveOld, 'function', 'the old forecast finished and its air request is pending');
+  env.advance(1000); env.service.saveLocation({ latitude: 37.566, longitude: 126.9784, label: 'Seoul' }, 1); await settle();
+  const current = env.service.snapshot();
+  assert.deepEqual(current.air, { aqi: 91 }); assert.equal(current.airUpdated, epoch + 1000); assert.equal(current.airError, false);
+  resolveOld(Response.json(rawAir(12))); await settle();
+  const after = env.service.snapshot();
+  assert.deepEqual(after.air, current.air); assert.equal(after.airUpdated, current.airUpdated); assert.equal(after.airError, current.airError);
 });
 
 for (const cached of [false, true]) test(`label-only revision replaces interrupted work and preserves ${cached ? 'cached' : 'first-load'} state`, async (t) => {

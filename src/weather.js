@@ -1,5 +1,5 @@
 import { normalizeAir, normalizeForecast, validateForecast, validTimestamp, weatherTimezone } from '../public/weather-data.js';
-import { weatherUrls, retrieve } from './weather-provider.js';
+import { createWeatherTransport, weatherUrls, retrieve } from './weather-provider.js';
 export { weatherUrls } from './weather-provider.js';
 
 export const WEATHER_REFRESH_MS = 3600000;
@@ -12,10 +12,11 @@ function cachedPart(row) {
   } catch { return null; }
 }
 
-export function createWeatherService({ store, fetchImpl = fetch, now = Date.now, schedule = setTimeout, cancel = clearTimeout, timeoutMs = 10000, onError = () => console.warn('Weather refresh could not be persisted; retrying automatically.') }) {
+export function createWeatherService({ store, fetchImpl, now = Date.now, schedule = setTimeout, cancel = clearTimeout, timeoutMs = 10000, onError = () => console.warn('Weather refresh could not be persisted; retrying automatically.') }) {
   let running = false; let generation = 0; let timer; let active; let draining;
   const queue = [];
-  const requestOptions = { fetchImpl, schedule, cancel, timeoutMs };
+  const transport = fetchImpl ? null : createWeatherTransport();
+  const requestOptions = { fetchImpl: fetchImpl ?? transport.fetch, schedule, cancel, timeoutMs };
   const jobKey = (row) => `${row.part}:${row.timezone}:${row.revision}:${row.registration}`;
   const pending = (row) => Boolean(row && (queue.some((job) => jobKey(job.row) === jobKey(row)) || (active && jobKey(active.row) === jobKey(row))));
   const eligible = (row) => row.attempted === null || now() - row.attempted >= WEATHER_REFRESH_MS;
@@ -126,7 +127,7 @@ export function createWeatherService({ store, fetchImpl = fetch, now = Date.now,
     },
     async stop() {
       running = false; generation++; cancel(timer); timer = undefined; queue.length = 0;
-      active?.controller.abort(); await draining;
+      active?.controller.abort(); await draining; await transport?.stop();
     }
   };
 }

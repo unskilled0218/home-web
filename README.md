@@ -25,6 +25,8 @@ Photo playback uses nonrepeating filename batches and prepares one upcoming imag
 
 Use the **General**, **Time**, **Weather**, **Calendar**, **Bookmarks**, **Home Assistant**, **Wake-on-LAN**, and **Images** tabs to customize the dashboard. **General → Settings scope** defaults to Local for this browser; choose Global to share preferences with other Global browsers. See [settings scope](docs/settings-scope.md), [global import/export](docs/settings-import-export.md), and [dashboard preferences](docs/dashboard.md). **Clear results** keeps the selected weather location.
 
+Weather shows current US AQI in both scopes. Server requests allow slower dual-stack connections while retaining bounded deadlines; see [weather behavior](docs/dashboard.md).
+
 ## Documentation
 
 Run documented commands from the repository root.

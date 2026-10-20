@@ -1,8 +1,9 @@
 import { normalizeForecast, normalizeAir, validateWeatherLocation, weatherTimezone } from '../public/weather-data.js';
 import { localWeatherSource, MAX_LOCAL_WEATHER_BYTES } from '../public/local-weather-data.js';
-import { providerJson, weatherUrls } from './weather-provider.js';
+import { createWeatherTransport, providerJson, weatherUrls } from './weather-provider.js';
 
-export function createLocalWeatherService({ fetchImpl = fetch, now = Date.now, schedule = setTimeout, cancel = clearTimeout, timeoutMs = 10000 } = {}) {
+export function createLocalWeatherService({ fetchImpl, now = Date.now, schedule = setTimeout, cancel = clearTimeout, timeoutMs = 10000 } = {}) {
+  const transport = fetchImpl ? null : createWeatherTransport(); const fetchProvider = fetchImpl ?? transport.fetch;
   const entries = new Map(); const queue = []; const active = new Set(); let running = false; let stopped = false; let stopping;
   const bytes = row => Buffer.byteLength(JSON.stringify([row.forecast, row.air]));
   const totalBytes = () => [...entries.values()].reduce((total, row) => total + bytes(row), 0);
@@ -13,7 +14,7 @@ export function createLocalWeatherService({ fetchImpl = fetch, now = Date.now, s
       if (entries.get(row.sourceId) !== row) continue;
       const controller = new AbortController(); job.controller = controller;
       job.timer = schedule(() => { row[`${part}Error`] = true; controller.abort(); }, timeoutMs);
-      const work = Promise.resolve().then(() => providerJson(weatherUrls(row.location, row.timezone)[part], controller.signal, fetchImpl)).then(data => {
+      const work = Promise.resolve().then(() => providerJson(weatherUrls(row.location, row.timezone)[part], controller.signal, fetchProvider)).then(data => {
         if (!running || controller.signal.aborted || entries.get(row.sourceId) !== row) return;
         const payload = part === 'forecast' ? normalizeForecast(data) : normalizeAir(data); const old = row[part]; row[part] = payload;
         while (totalBytes() > 512 * 1024 && reclaim(row)) { /* Reclaim inactive data before accepting new bytes. */ }
@@ -47,7 +48,7 @@ export function createLocalWeatherService({ fetchImpl = fetch, now = Date.now, s
       if (stopping) return stopping;
       running = false; stopped = true; queue.length = 0;
       for (const job of active) { cancel(job.timer); job.controller.abort(); }
-      stopping = Promise.all([...active].map(job => job.work)).then(() => { entries.clear(); }); return stopping;
+      stopping = Promise.all([...active].map(job => job.work)).then(async () => { entries.clear(); await transport?.stop(); }); return stopping;
     }
   };
 }

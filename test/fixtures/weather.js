@@ -1,5 +1,9 @@
 export const location = { latitude: 51, longitude: 0, label: 'London' };
 export const epoch = Date.parse('2026-10-11T12:00:00Z');
+// Shape captured from the current Open-Meteo Seoul air-quality response.
+export function rawAir(aqi = 91) {
+  return { latitude: 37.6, longitude: 127, generationtime_ms: 0.3279, utc_offset_seconds: 0, timezone: 'GMT', timezone_abbreviation: 'GMT', elevation: 27, current_units: { time: 'unixtime', interval: 'seconds', us_aqi: 'USAQI' }, current: { time: epoch / 1000, interval: 3600, us_aqi: aqi } };
+}
 export function rawForecast(temperature = 12) {
   const time = epoch / 1000;
   return {

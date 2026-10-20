@@ -8,6 +8,7 @@
   - [Photo inventory memory benchmark](#photo-inventory-memory-benchmark)
   - [Photo lookahead and browser resources](#photo-lookahead-and-browser-resources)
   - [Local and Global settings](#local-and-global-settings)
+  - [Weather air quality](#weather-air-quality)
 - [Direct layout editing](#direct-layout-editing)
 
 ```sh
@@ -87,6 +88,12 @@ On an accessible Raspberry Pi 5/NFS target, separately observe a complete nonrep
 Run `node --test test/dashboard-settings-scope.test.js test/dashboard-settings-transfer.test.js test/local-weather.test.js test/local-photo-manifest-api.test.js test/dashboard-settings-sync.test.js` for scope/storage/epoch races, atomic import/export, Local weather admission/retries/drainage, and the real eligible-manifest projection. Global controller tests now assert that legacy Local values never initialize shared preferences automatically. Provider retrieval is shared between the persisted Global owner and bounded volatile Local service. No test contacts a live provider or mounts NFS.
 
 New `e2e/settings-scope.spec.js` and `e2e/global-settings-transfer.spec.js` use Playwright's base fixture and default-Local contexts against a real app/store with injected provider/time and temporary PNGs. They cover A-local/B-C-global isolation, source switching/reload/restart, independent Local city/playback, same-profile dirty drafts, and actual settings downloads/uploads/conflicts. Existing shared-behavior specs explicitly opt into `e2e/global-fixtures.js`, including independent Chromium/Firefox contexts, so their shared assumptions do not suppress the new Local default. Listing scenarios is not proof they ran; missing browser executables must remain an explicit blocker.
+
+## Weather air quality
+
+Run `node --test test/weather-provider.test.js test/weather.test.js test/local-weather.test.js test/weather-api.test.js test/local-weather-api.test.js test/dashboard.test.js`. The transport tests use loopback HTTP to verify the actual connector receives a two-second dual-stack attempt window without changing Node's process-wide default, and that aborting a stalled body releases transport work. Service tests use a representative current-AQI response, zero readings, controlled hourly recovery, malformed refresh retention, and distinct-location late responses. Direct normalizer cases reject absent, null, string, and nonfinite readings; JSON-compatible malformed data is also exercised through the Local service. No automated case requires a live provider.
+
+Run `npm run test:browser -- e2e/dashboard-home.spec.js e2e/settings-scope.spec.js` for unavailable → zero → stale AQI presentation, forecast independence, and Local/Global isolation. The existing AQI-without-forecast test remains the single browser case for that behavior. For an optional live diagnostic, compare the current provider response for the selected coordinates with `air`, `airUpdated`, and `airError` from the active weather API. Use isolated storage for manual service/browser checks; never erase a deployment cache or change its saved location to force recovery.
 
 ## Direct layout editing
 

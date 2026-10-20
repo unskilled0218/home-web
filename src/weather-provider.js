@@ -1,4 +1,15 @@
+import { Agent, fetch as fetchWeather } from 'undici';
+
 const MAX_PROVIDER_BYTES = 1024 * 1024;
+
+export function createWeatherTransport() {
+  // Distant IPv4 providers can need more than Node's 250ms before an unreachable IPv6 attempt.
+  const dispatcher = new Agent({ connect: { autoSelectFamily: true, autoSelectFamilyAttemptTimeout: 2000 } });
+  return {
+    fetch: (url, options) => fetchWeather(url, { ...options, dispatcher }),
+    stop: () => dispatcher.destroy()
+  };
+}
 
 export function weatherUrls(location, timezone = 'UTC') {
   const common = { latitude: location.latitude, longitude: location.longitude, timezone, timeformat: 'unixtime' };

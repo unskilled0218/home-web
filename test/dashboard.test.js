@@ -8,7 +8,8 @@ import { tmpdir } from 'node:os';
 import { createDashboardServer } from '../src/app.js';
 import { MOBILE_MEDIA_QUERY, clockText, loadSettings, normalizeSettings, resolveDisplayPreferences, sampleHours, temperatureRange, weatherIconFile } from '../public/dashboard-helpers.js';
 import { createWeatherController, requestJson, searchLocations } from '../public/dashboard-weather.js';
-import { formatWeatherUpdated, normalizeForecast, presentForecast, validateWeatherSnapshot } from '../public/weather-data.js';
+import { formatWeatherUpdated, normalizeAir, normalizeForecast, presentForecast, validateWeatherSnapshot } from '../public/weather-data.js';
+import { rawAir } from './fixtures/weather.js';
 import { weatherUrls } from '../src/weather.js';
 import { createPhotoController } from '../public/dashboard-photos.js';
 import { photo, slideshowSnapshot, snapshotResponse, slideshowClock } from './fixtures/photo-slideshow.js';
@@ -304,6 +305,14 @@ test('constructs bounded provider queries and normalizes geocoding', async () =>
   } });
   assert.deepEqual(results, [{ label: 'London', latitude: 51, longitude: 0 }]);
   await assert.rejects(searchLocations('London', { fetchImpl: async () => response({ results: {} }) }));
+});
+
+test('current AQI accepts zero and rejects absent or nonnumeric provider readings', () => {
+  assert.deepEqual(normalizeAir(rawAir()), { aqi: 91 });
+  assert.deepEqual(normalizeAir(rawAir(0)), { aqi: 0 });
+  for (const data of [{}, { current: {} }, ...[null, '91', NaN, Infinity, -Infinity].map(rawAir)]) {
+    assert.throws(() => normalizeAir(data), /Invalid air quality/, JSON.stringify(data));
+  }
 });
 
 test('aborts provider requests on deadline and caller cancellation', async () => {

@@ -936,6 +936,22 @@ test('remote forecast changes retain dirty drafts and survive empty, stale, and 
   await expect(page.locator('[name="weatherHourlyVisible"]')).not.toBeChecked(); await expect(page.locator('[name="weatherDailyVisible"]')).toBeChecked();
 });
 
+test('air quality recovers from unavailable to zero and retains stale readings independently of forecasts', async ({ page }) => {
+  await page.clock.install({ time: instant });
+  const mock = await mockWeather(page); mock.setState({ air: null, airUpdated: null, airError: true });
+  await page.goto('/');
+  await expect(page.locator('#current-weather-subvalues')).toContainText('Air quality unavailable.');
+  await expect(page.locator('#current-weather-values .temperature')).toHaveText('12 °C');
+  mock.setState({ air: { aqi: 0 }, airUpdated: instant.getTime() + 3600000, airError: false });
+  await page.clock.fastForward(60000);
+  await expect(page.locator('#current-weather-subvalues')).toContainText('US AQI: 0');
+  await expect(page.locator('#current-weather-subvalues')).not.toContainText('Air quality unavailable');
+  mock.setState({ airError: true }); await page.clock.fastForward(60000);
+  await expect(page.locator('#current-weather-subvalues')).toContainText('US AQI: 0 (stale; refresh failed)');
+  await expect(page.locator('#current-weather-values .temperature')).toHaveText('12 °C');
+  await expect(page.locator('#weather-updated')).toHaveAttribute('datetime', instant.toISOString());
+});
+
 test('successful air quality remains visible when the first forecast fails', async ({ page }) => {
   const mock = await mockWeather(page);
   mock.setState({ forecast: null, forecastUpdated: null, forecastError: true });
