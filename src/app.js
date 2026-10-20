@@ -424,9 +424,11 @@ export function createDashboardServer({ runtimeConfig, store, linkwarden, homeAs
     }
     if (pathname === '/api/dashboard/slideshow') {
       if (request.method !== 'GET') return json(response, 405, { error: 'Method not allowed.' });
+      const versions = new URL(request.url, 'http://localhost').searchParams.getAll('version');
+      if (versions.length > 1 || versions.length === 1 && !['1', '2'].includes(versions[0])) return json(response, 400, { error: 'Unsupported slideshow version.' });
       try {
         if (!slideshow) throw new Error('Slideshow is unavailable.');
-        return json(response, 200, validateSlideshowSnapshot(slideshow.snapshot()));
+        return json(response, 200, validateSlideshowSnapshot(slideshow.snapshot({ version: Number(versions[0] ?? 1) })));
       } catch { return json(response, 503, { error: 'Slideshow is unavailable.' }); }
     }
     if (pathname === '/api/home/settings') {

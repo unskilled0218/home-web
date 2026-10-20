@@ -17,10 +17,15 @@ export function validateSlideshowPhoto(value) {
 }
 
 export function validateSlideshowSnapshot(value) {
-  if (!fields(value, SNAPSHOT_FIELDS) || value.version !== 1 || typeof value.instanceId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(value.instanceId)) throw new Error('Invalid slideshow snapshot version or instance.');
+  if (!fields(value, value?.version === 2 ? [...SNAPSHOT_FIELDS, 'next', 'queueRevision'] : SNAPSHOT_FIELDS) || ![1, 2].includes(value.version) || typeof value.instanceId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(value.instanceId)) throw new Error('Invalid slideshow snapshot version or instance.');
   if (!Number.isSafeInteger(value.revision) || value.revision < 0 || !timestamp(value.serverTime) || (value.nextChangeAt !== null && !timestamp(value.nextChangeAt))) throw new Error('Invalid slideshow revision or timestamp.');
   if (!['enabled', 'available', 'loading', 'stale'].every((key) => typeof value[key] === 'boolean') || !Number.isSafeInteger(value.count) || value.count < 0) throw new Error('Invalid slideshow status.');
   const current = value.current === null ? null : validateSlideshowPhoto(value.current);
+  if (value.version === 2) {
+    if (!Number.isSafeInteger(value.queueRevision) || value.queueRevision < 0) throw new Error('Invalid queue revision.');
+    const next = value.next === null ? null : validateSlideshowPhoto(value.next);
+    if (next && (!value.enabled || !value.available || value.count < 2 || next.name === current?.name)) throw new Error('Invalid upcoming photo.');
+  }
   if (!value.enabled && (value.available || value.loading || value.stale)) throw new Error('Disabled slideshow cannot be active.');
   if (!value.available && (value.count !== 0 || current !== null || value.stale)) throw new Error('Unavailable slideshow cannot publish a pool.');
   if ((value.count > 0) !== (current !== null) || (value.count > 1) !== (value.nextChangeAt !== null)) throw new Error('Inconsistent slideshow selection or deadline.');

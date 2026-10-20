@@ -394,7 +394,7 @@ function photoFollower(extra = {}) {
 
 test('photo follower renders only server selections and deduplicates repeated snapshots and presentation changes', async () => {
   let reads = 0; let decodes = 0;
-  const env = photoFollower({ fetchImpl: async (url) => { assert.equal(url, '/api/dashboard/slideshow'); reads++; return snapshotResponse(slideshowSnapshot()); }, decode: async () => { decodes++; } });
+  const env = photoFollower({ fetchImpl: async (url) => { assert.equal(url, '/api/dashboard/slideshow?version=2'); reads++; return snapshotResponse(slideshowSnapshot()); }, decode: async () => { decodes++; } });
   await env.client.load(); await tick(); assert.deepEqual(env.shown, ['a.png']);
   await env.clock.advance(15_000); assert.equal(reads, 4); assert.equal(decodes, 1); assert.deepEqual(env.shown, ['a.png']); assert.equal(env.clock.timers.size, 1);
   const timers = [...env.clock.timers]; env.client.configure(settings({ imageInfo: true, interval: 5, order: 'random' })); assert.deepEqual([...env.clock.timers], timers); assert.deepEqual(env.updates, ['a.png']); env.client.dispose(); assert.equal(env.clock.timers.size, 0);

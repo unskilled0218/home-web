@@ -13,16 +13,16 @@ import { slideshowClock } from '../test/fixtures/photo-slideshow.js';
 
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64');
 
-async function environment({ count = 3, enabled = true, animation = 'none' } = {}) {
+async function environment({ count = 3, enabled = true, animation = 'none', yieldWork, presentation = {} } = {}) {
   const directory = await mkdtemp('/tmp/opencode/browser-slideshow-'); const store = createStore(path.join(directory, 'app.db')); const clock = slideshowClock();
   for (let i = 0; i < count; i++) await writeFile(path.join(directory, `${i}.png`), png);
   let unavailable = false; let scans = 0;
   const library = createPhotoLibrary({ root: directory, ...clock, fs: { ...fs, realpath(...args) { if (unavailable) return Promise.reject(Object.assign(new Error('Source unavailable'), { code: 'EIO' })); return fs.realpath(...args); } } });
   const photoLibrary = { ...library, async refresh() { scans++; return library.refresh(); } };
-  store.saveDashboardPreferences(normalizeDashboardPreferences({ order: 'random', interval: 5, imageInfo: true, animation }), 0);
-  const create = () => createPhotoSlideshow({ ...clock, photoLibrary, enabled, preferences: store.getDashboardPreferences().preferences, random: () => 0 });
+  store.saveDashboardPreferences(normalizeDashboardPreferences({ order: 'random', interval: 5, imageInfo: true, animation, ...presentation }), 0);
+  const create = () => createPhotoSlideshow({ ...clock, photoLibrary, enabled, yieldWork, preferences: store.getDashboardPreferences().preferences, random: () => 0 });
   let slideshow = create();
-  const server = createDashboardServer({ runtimeConfig: { allowedHosts: ['127.0.0.1'] }, store, photoLibrary, photoSourceEnabled: enabled, slideshow: { snapshot: () => slideshow.snapshot(), configure: (next) => slideshow.configure(next) } });
+  const server = createDashboardServer({ runtimeConfig: { allowedHosts: ['127.0.0.1'] }, store, photoLibrary, photoSourceEnabled: enabled, slideshow: { snapshot: options => slideshow.snapshot(options), configure: (next) => slideshow.configure(next) } });
   server.listen(0, '127.0.0.1'); await once(server, 'listening'); await slideshow.start();
   return {
     base: `http://127.0.0.1:${server.address().port}`, clock, store, get slideshow() { return slideshow; }, scans: () => scans,
@@ -34,7 +34,7 @@ async function environment({ count = 3, enabled = true, animation = 'none' } = {
 }
 
 async function shown(page, current) {
-  await expect(page.locator('#photo-caption')).toHaveText(current.name);
+  await expect(page.locator('#photo-caption')).toHaveText(current.name, { timeout: 10000 });
   await expect(page.locator('#photos .photo-layer > img').last()).toHaveAttribute('src', current.url);
   await expect.poll(() => page.locator('#photos .photo-layer > img').last().evaluate((image) => image.complete && image.naturalWidth > 0)).toBe(true);
 }
@@ -77,6 +77,8 @@ test('unchanged snapshots preserve DOM layers; confirmed preferences update pres
 test('failed image decode retains last-good background and recovers on a later real selection', async ({ page }) => {
   const env = await environment();
   try {
+    const upcoming = env.slideshow.snapshot({ version: 2 }).next;
+    await page.route(`**${upcoming.url}`, (route) => route.fulfill({ contentType: 'image/png', body: 'not an image' }));
     await page.clock.install(); await page.goto(env.base); const previous = env.slideshow.snapshot().current; await shown(page, previous);
     await env.clock.advance(5000); const failed = env.slideshow.snapshot().current;
     await page.route(`**${failed.url}`, (route) => route.fulfill({ contentType: 'image/png', body: 'not an image' }));
@@ -103,6 +105,8 @@ for (const mode of ['single', 'empty', 'disabled', 'unavailable']) test(`${mode}
 test('full Global library stays shared while Settings counts persist across decode errors, stale scans and scope changes', async ({ browser }) => {
   const env = await environment({ count: 151 }); const a = await browser.newPage(); const b = await browser.newPage(); let imageReads = 0;
   try {
+    const upcoming = env.slideshow.snapshot({ version: 2 }).next;
+    await a.route(`**${upcoming.url}`, route => route.fulfill({ contentType: 'image/png', body: 'bad image' }));
     await a.clock.install(); await b.clock.install(); a.on('request', request => { if (/\/api\/dashboard\/photos\/[A-Za-z0-9_-]{16,128}$/.test(new URL(request.url()).pathname)) imageReads++; });
     await a.goto(env.base); await b.goto(env.base); await shown(a, env.slideshow.snapshot().current); await shown(b, env.slideshow.snapshot().current);
     expect(env.slideshow.snapshot().count).toBe(151); expect(imageReads).toBeLessThan(5);
@@ -137,4 +141,75 @@ test('Settings counts distinguish initial unknown from completed zero and stop p
     const hidden = reads; await page.clock.fastForward(15000); expect(reads).toBe(hidden);
     await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, value: false }); document.dispatchEvent(new Event('visibilitychange')); }); await expect.poll(() => reads).toBe(hidden + 1);
   } finally { await page.goto('about:blank'); await env.close(); }
+});
+
+test('late Global previews arrive before selection, including an exhausted metadata-batch boundary', async ({ page }) => {
+  let blocked = true; let release;
+  const env = await environment({ count: 20, yieldWork: () => blocked ? new Promise(resolve => { release = resolve; }) : undefined });
+  const requests = [];
+  page.on('request', request => { if (/\/api\/dashboard\/photos\/[A-Za-z0-9_-]+$/.test(new URL(request.url()).pathname)) requests.push(new URL(request.url()).pathname); });
+  await page.addInitScript(() => {
+    const decode = HTMLImageElement.prototype.decode; window.decodedPhotos = new Map();
+    HTMLImageElement.prototype.decode = async function () { await decode.call(this); window.decodedPhotos.set(this.getAttribute('src'), new WeakRef(this)); };
+  });
+  try {
+    await page.clock.install(); await page.goto(env.base); const first = env.slideshow.snapshot({ version: 2 }); await shown(page, first.current);
+    expect(first.next).toBe(null); expect(requests).toEqual([first.current.url]);
+    await page.evaluate(() => { window.heldFrame = document.querySelector('#photos img'); });
+    blocked = false; release(); await expect.poll(() => env.slideshow.snapshot({ version: 2 }).next !== null).toBe(true);
+    const next = env.slideshow.snapshot({ version: 2 }).next;
+    await page.clock.runFor(500); await expect.poll(() => requests.includes(next.url)).toBe(true);
+    await expect(page.locator('#photo-caption')).toHaveText(first.current.name);
+    expect(await page.evaluate(() => window.heldFrame === document.querySelector('#photos img'))).toBe(true);
+    expect(new Set(requests).size).toBe(2); blocked = true;
+    const names = new Set([first.current.name]);
+    for (let i = 0; i < 11; i++) {
+      await env.clock.advance(5000); await page.clock.runFor(5000); const selected = env.slideshow.snapshot({ version: 2 }); await shown(page, selected.current);
+      expect(names.has(selected.current.name)).toBe(false); names.add(selected.current.name);
+      expect(await page.evaluate(url => window.decodedPhotos.get(url)?.deref() === document.querySelector('#photos img'), selected.current.url)).toBe(true);
+    }
+    const boundary = env.slideshow.snapshot({ version: 2 }); expect(boundary.next).toBe(null);
+    const reads = requests.length; blocked = false; release(); await expect.poll(() => env.slideshow.snapshot({ version: 2 }).next !== null).toBe(true);
+    const ready = env.slideshow.snapshot({ version: 2 }); expect(ready.revision).toBe(boundary.revision); expect(ready.nextChangeAt).toBe(boundary.nextChangeAt);
+    await page.clock.runFor(500); await expect.poll(() => requests.length).toBeGreaterThan(reads); expect(requests.at(-1)).toBe(ready.next.url);
+    await expect(page.locator('#photo-caption')).toHaveText(boundary.current.name);
+  } finally { blocked = false; release?.(); await page.goto('about:blank'); await env.close(); }
+});
+
+test('large-image resource ownership remains bounded through promotions, blur transitions and a stalled/failing preview', async ({ page }) => {
+  test.setTimeout(120000);
+  const env = await environment({ count: 20, animation: 'fade', presentation: { background: 'blur', duration: 1 } });
+  let imageRequests = 0; let stalled; let stalledOnce = false; const requestedUrls = new Set(); const ownership = [];
+  const data = await page.evaluate(() => { const canvas = document.createElement('canvas'); canvas.width = 2048; canvas.height = 1536; const ctx = canvas.getContext('2d'); const gradient = ctx.createLinearGradient(0, 0, 2048, 1536); gradient.addColorStop(0, '#125'); gradient.addColorStop(1, '#fed'); ctx.fillStyle = gradient; ctx.fillRect(0, 0, 2048, 1536); return canvas.toDataURL('image/png').split(',')[1]; });
+  const bytes = Buffer.from(data, 'base64');
+  await page.route(/\/api\/dashboard\/photos\/[A-Za-z0-9_-]{16,128}$/, route => { imageRequests++; requestedUrls.add(route.request().url()); if (requestedUrls.size === 3 && !stalledOnce) { stalledOnce = true; stalled = route; return; } return route.fulfill({ contentType: 'image/png', body: bytes }); });
+  await page.addInitScript(() => {
+    window.photoDecodes = []; window.photoResources = []; window.releasedPhotos = 0;
+    const decode = HTMLImageElement.prototype.decode; const remove = HTMLImageElement.prototype.removeAttribute;
+    HTMLImageElement.prototype.decode = async function () {
+      const start = performance.now(); window.photoResources.push(new WeakRef(this));
+      try { await decode.call(this); window.photoDecodes.push({ width: this.naturalWidth, height: this.naturalHeight, durationMs: performance.now() - start }); } catch (error) { throw error; }
+    };
+    HTMLImageElement.prototype.removeAttribute = function (name) { if (name === 'src' && this.hasAttribute('src')) window.releasedPhotos++; return remove.call(this, name); };
+  });
+  const sample = async () => page.evaluate(() => ({ foreground: document.querySelectorAll('.photo-layer > img:not(.photo-blur)').length, blur: document.querySelectorAll('.photo-blur').length, speculative: window.photoResources.filter(ref => { const image = ref.deref(); return image?.getAttribute('src') && !image.isConnected; }).length, released: window.releasedPhotos }));
+  try {
+    await page.goto(env.base); await shown(page, env.slideshow.snapshot().current);
+    await expect.poll(() => requestedUrls.size).toBe(2); ownership.push(await sample());
+    await env.clock.advance(5000); await shown(page, env.slideshow.snapshot().current); await expect.poll(() => Boolean(stalled)).toBe(true);
+    const held = env.slideshow.snapshot().current; ownership.push(await sample());
+    await env.clock.advance(5000);
+    await page.waitForResponse(async response => response.url().includes('/api/dashboard/slideshow?') && (await response.json()).revision === env.slideshow.snapshot().revision);
+    await expect(page.locator('#photo-caption')).toHaveText(held.name);
+    await stalled.fulfill({ contentType: 'image/png', body: 'invalid image' }); stalled = undefined;
+    await expect(page.locator('#photo-status')).toContainText('could not be displayed'); await expect(page.locator('#photo-caption')).toHaveText(held.name);
+    for (let i = 0; i < 6; i++) {
+      await env.clock.advance(5000); await shown(page, env.slideshow.snapshot().current); ownership.push(await sample());
+      await expect(page.locator('.photo-layer')).toHaveCount(1); ownership.push(await sample());
+    }
+    for (const entry of ownership) { expect(entry.foreground).toBeLessThanOrEqual(2); expect(entry.blur).toBeLessThanOrEqual(2); expect(entry.speculative).toBeLessThanOrEqual(1); }
+    const decodes = await page.evaluate(() => window.photoDecodes); expect(decodes.every(row => row.width === 2048 && row.height === 1536)).toBe(true);
+    expect(ownership.at(-1).released).toBeGreaterThan(10); expect(requestedUrls.size).toBeLessThanOrEqual(10); expect(imageRequests).toBeLessThanOrEqual(24);
+    console.log(JSON.stringify({ photoBrowserBenchmark: { dimensions: [2048, 1536], compressedBytes: bytes.length, decodedRgbaBytesPerImage: 2048 * 1536 * 4, imageRequests, distinctImageUrls: requestedUrls.size, decodes, ownership } }));
+  } finally { await stalled?.abort().catch(() => {}); await page.goto('about:blank'); await env.close(); }
 });

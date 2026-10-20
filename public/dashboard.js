@@ -163,15 +163,16 @@ function renderCalendar(state = calendarState) {
 const calendar = createCalendarController({ onChange: renderCalendar, autoStart: false });
 function stopAnimations() {
   animations.forEach((animation) => animation.cancel()); animations = [];
-  const container = $('photos'); while (container.children.length > 1) container.firstElementChild.remove();
+  const container = $('photos'); while (container.children.length > 1) releasePhotoLayer(container.firstElementChild);
 }
+function releasePhotoLayer(layer) { if (!layer) return; layer.photoResource?.release(); layer.photoResource = undefined; for (const image of layer.querySelectorAll('img')) image.removeAttribute('src'); layer.remove(); }
 function applyVisibilityLayout() {
   const display = dashboardDisplay(settings, { mobile: mobileViewport.matches, fullscreen: Boolean(document.fullscreenElement), caption: Boolean($('photo-caption').textContent) });
   applyDashboardDisplay(document, display);
   layoutView.update({ layout: settings.widgetLayout, mobile: mobileViewport.matches, scale: settings.scale, display });
   return display;
 }
-function clearPhotos() { stopAnimations(); $('photos').replaceChildren(); $('photo-caption').textContent = ''; applyVisibilityLayout(); }
+function clearPhotos() { stopAnimations(); releasePhotoLayer($('photos').lastElementChild); $('photo-caption').textContent = ''; applyVisibilityLayout(); }
 function updatePhotoPresentation(photo, options) {
   const container = $('photos'); const layer = container.lastElementChild;
   if (!layer) return;
@@ -181,7 +182,7 @@ function updatePhotoPresentation(photo, options) {
   if (options.background === 'blur') {
     if (!background) { background = new Image(); background.alt = ''; background.src = photo.url; background.className = 'photo-blur'; layer.prepend(background); }
     background.style.filter = `blur(${options.blur}px)`;
-  } else background?.remove();
+  } else if (background) { background.removeAttribute('src'); background.remove(); }
   $('photo-caption').textContent = options.imageInfo ? photo.file.name : ''; applyVisibilityLayout();
 }
 const photos = createScopedPhotoController({
@@ -195,7 +196,7 @@ const photos = createScopedPhotoController({
     const previous = container.lastElementChild;
     const layer = document.createElement('div'); layer.className = 'photo-layer';
     if (options.background === 'blur') { const background = new Image(); background.alt = ''; background.src = photo.url; background.className = 'photo-blur'; background.style.filter = `blur(${options.blur}px)`; layer.append(background); }
-    const image = new Image(); image.alt = ''; image.src = photo.url; layer.append(image); layer.style.opacity = options.opacity;
+    const image = photo.resource?.image ?? new Image(); layer.photoResource = photo.resource; image.alt = ''; if (!photo.resource) image.src = photo.url; layer.append(image); layer.style.opacity = options.opacity;
     container.append(layer);
     $('photo-caption').textContent = options.imageInfo ? photo.file.name : '';
     applyVisibilityLayout();
@@ -204,8 +205,8 @@ const photos = createScopedPhotoController({
       const animation = layer.animate(frames, { duration: options.duration * 1000, easing: 'ease-in-out' });
       animations.push(animation);
       if (options.animation === 'fade') animations.push(previous.animate([{ opacity: Number(previous.style.opacity) }, { opacity: 0 }], { duration: options.duration * 1000, fill: 'forwards' }));
-      animation.finished.then(() => { previous.remove(); }, () => {});
-    } else previous?.remove();
+      animation.finished.then(() => { releasePhotoLayer(previous); }, () => {});
+    } else releasePhotoLayer(previous);
   }
 });
 

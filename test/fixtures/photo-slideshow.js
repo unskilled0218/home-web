@@ -1,7 +1,7 @@
 import { tick } from './lifecycle.js';
 
 export const photo = (name = 'a.png', extra = {}) => ({ name, lastModified: 1, url: `/api/dashboard/photos/${name.startsWith('b') ? 'b' : 'a'}bcdefghijklmnop`, ...extra });
-export const slideshowSnapshot = (extra = {}) => ({ version: 1, instanceId: 'fixture', revision: 1, serverTime: 1_000_000, enabled: true, available: true, loading: false, stale: false, count: 1, current: photo(), nextChangeAt: null, ...extra });
+export const slideshowSnapshot = (extra = {}) => ({ version: 1, instanceId: 'fixture', revision: 1, serverTime: 1_000_000, enabled: true, available: true, loading: false, stale: false, count: 1, current: photo(), nextChangeAt: null, ...(extra.version === 2 ? { queueRevision: 0, next: null } : {}), ...extra });
 export const snapshotResponse = (value) => new Response(JSON.stringify(value), { headers: { 'Content-Type': 'application/json' } });
 
 export function slideshowClock() {

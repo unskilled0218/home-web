@@ -109,6 +109,17 @@ test('slideshow attached after the startup shutdown deadline is still stopped be
   owner.attach('slideshow', service); await service.start(); owner.startupFinished(); await tick(); assert.equal(scans, 0); assert.equal(clock.timers.size, 0);
 });
 
+for (const forced of [false, true]) test(`slideshow queue preparation drains before SQLite closure (forced: ${forced})`, async () => {
+  const clock = fakeClock(); const preparing = deferred(); let closed = 0;
+  const slideshow = createPhotoSlideshow({ ...clock, yieldWork: () => preparing.promise, preferences: { order: 'random', interval: 5 }, photoLibrary: { list: () => ({ available: true, photos: [photo(), photo('b')] }) } });
+  await slideshow.start(); await tick(); const owner = createShutdownCoordinator({ ...clock, timeoutMs: 30, report() {} });
+  owner.attach('slideshow', slideshow); owner.attach('store', { close() { closed++; } }); owner.startupFinished();
+  const stopping = owner.shutdown(); await tick(); assert.equal(closed, 0);
+  if (forced) { clock.fire(30); assert.equal((await stopping).cleanupSafe, false); }
+  preparing.resolve(); const result = await stopping; await tick(); assert.equal(result.code, forced ? 1 : 0); assert.equal(closed, forced ? 0 : 1);
+  assert.equal(slideshow.snapshot({ version: 2 }).next, null); assert.equal(clock.timers.size, 0);
+});
+
 for (const forced of [false, true]) test(`Local weather actual provider work remains owned before SQLite cleanup (forced: ${forced})`, async () => {
   const clock = fakeClock(); const work = deferred(); let closed = 0;
   const localWeather = createLocalWeatherService({ ...clock, fetchImpl: () => work.promise }); localWeather.start(); localWeather.query({ latitude: 1, longitude: 2, label: 'Local' }, 'UTC'); await tick();

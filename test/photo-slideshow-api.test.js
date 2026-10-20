@@ -40,6 +40,18 @@ test('missing or invalid producer service returns a bounded unavailable response
   }
 });
 
+test('version negotiation publishes only current/next metadata and rejects unsupported explicit versions', async t => {
+  const env = await environment(t); await env.service.start(); await tick();
+  const before = env.service.snapshot({ version: 2 });
+  assert.equal((await (await fetch(`${env.base}/api/dashboard/slideshow`)).json()).version, 1);
+  const response = await fetch(`${env.base}/api/dashboard/slideshow?version=2`); assert.equal(response.status, 200);
+  assert.deepEqual(validateSlideshowSnapshot(await response.json()), before); assert.notEqual(before.current.name, before.next.name);
+  for (const query of ['version=3', 'version=', 'version=02', 'version=2&version=2']) {
+    const invalid = await fetch(`${env.base}/api/dashboard/slideshow?${query}`); assert.equal(invalid.status, 400); assert.ok((await invalid.text()).length < 100);
+  }
+  assert.deepEqual(env.service.snapshot({ version: 2 }), before);
+});
+
 test('initial scans return loading snapshots promptly without request-owned discovery', async (t) => {
   const work = deferred(); let scans = 0;
   const env = await environment(t, { photoLibrary: { list() { scans++; return work.promise; } } }); const starting = env.service.start(); await tick();

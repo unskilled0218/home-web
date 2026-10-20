@@ -14,8 +14,18 @@ test('snapshot schema distinguishes loading, unavailable, stale, empty and disab
   const empty = { count: 0, current: null, nextChangeAt: null };
   for (const extra of [{}, { ...empty }, { ...empty, available: false, loading: true }, { ...empty, available: false }, { ...empty, available: false, enabled: false }, { stale: true }, { count: 2, nextChangeAt: 1_005_000 }]) assert.doesNotThrow(() => validateSlideshowSnapshot(slideshowSnapshot(extra)));
   assert.doesNotThrow(() => validateSlideshowSnapshot(slideshowSnapshot({ count: 7001, nextChangeAt: 1_005_000 })));
-  for (const extra of [{ version: 2 }, { instanceId: 'x'.repeat(129) }, { revision: -1 }, { revision: 0.1 }, { serverTime: NaN }, { nextChangeAt: 'soon' }, { count: Number.MAX_SAFE_INTEGER + 1 }, { count: 0 }, { current: null }, { enabled: false }, { available: false }, { count: 2 }, { nextChangeAt: 5 }, { ...empty, available: false, stale: true }, { extra: true }]) assert.throws(() => validateSlideshowSnapshot(slideshowSnapshot(extra)), undefined, JSON.stringify(extra));
+  for (const extra of [{ version: 3 }, { instanceId: 'x'.repeat(129) }, { revision: -1 }, { revision: 0.1 }, { serverTime: NaN }, { nextChangeAt: 'soon' }, { count: Number.MAX_SAFE_INTEGER + 1 }, { count: 0 }, { current: null }, { enabled: false }, { available: false }, { count: 2 }, { nextChangeAt: 5 }, { ...empty, available: false, stale: true }, { extra: true }]) assert.throws(() => validateSlideshowSnapshot(slideshowSnapshot(extra)), undefined, JSON.stringify(extra));
   const value = slideshowSnapshot({ current: photo('é".png') });
   assert.equal(slideshowBytes(value), Buffer.byteLength(JSON.stringify(value), 'utf8'));
   assert.ok(slideshowBytes(value) <= MAX_SLIDESHOW_BYTES);
+});
+
+test('version 2 has an independent exact schema, nullable preview and bounded worst-case metadata', () => {
+  const valid = slideshowSnapshot({ version: 2, count: 2, nextChangeAt: 5, next: photo('b.png'), queueRevision: 3 });
+  assert.deepEqual(validateSlideshowSnapshot(valid), valid);
+  assert.doesNotThrow(() => validateSlideshowSnapshot({ ...valid, next: null }));
+  for (const extra of [{ version: 1 }, { queueRevision: -1 }, { queueRevision: 0.5 }, { queueRevision: Number.MAX_SAFE_INTEGER + 1 }, { next: valid.current }, { next: photo('../bad') }, { count: 1, nextChangeAt: null }, { extra: true }]) assert.throws(() => validateSlideshowSnapshot({ ...valid, ...extra }));
+  const missing = { ...valid }; delete missing.next; assert.throws(() => validateSlideshowSnapshot(missing));
+  const worst = { ...valid, current: photo('"'.repeat(1024)), next: photo('a' + '"'.repeat(1023)), instanceId: 'x'.repeat(128) };
+  assert.ok(slideshowBytes(validateSlideshowSnapshot(worst)) < 8192);
 });

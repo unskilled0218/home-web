@@ -63,3 +63,28 @@ for (const mode of ['local', 'global']) test(`${mode} retries a failed first ima
     await page.clock.runFor(5000); await expect(page.locator('#photos .photo-layer')).toHaveCount(1);
   } finally { await page.goto('about:blank'); await env.close(); }
 });
+
+test('Local cooperative completion delivers lookahead without polling or consuming a Global selection', async ({ page }) => {
+  const env = await settingsEnvironment({ photoCount: 20 }); const requests = [];
+  await page.route('**/local-lookahead-check', route => route.fulfill({ contentType: 'text/html', body: '<div id="frame"></div>' }));
+  page.on('request', request => { if (/\/api\/dashboard\/photos\/[A-Za-z0-9_-]{16,128}$/.test(new URL(request.url()).pathname)) requests.push(new URL(request.url()).pathname); });
+  try {
+    const global = env.slideshow.snapshot(); await page.clock.install(); await page.goto(`${env.base}/local-lookahead-check`);
+    await page.evaluate(async () => {
+      const { createLocalPhotoController } = await import('/dashboard-local-photos.js');
+      window.blockFill = true; window.selections = [];
+      window.localPhotos = createLocalPhotoController({ yieldWork: () => window.blockFill ? new Promise(resolve => { window.releaseFill = resolve; }) : undefined,
+        clear() {}, report() {}, show(photo) { const frame = document.querySelector('#frame'); frame.firstChild?.removeAttribute('src'); frame.replaceChildren(photo.resource.image); window.selections.push(photo.file.name); } });
+      window.localPhotos.configure({ order: 'name', interval: 5 }); await window.localPhotos.load();
+    });
+    await expect(page.locator('#frame img')).toBeVisible(); expect(requests).toEqual([global.current.url]);
+    await page.evaluate(() => { window.initialImage = document.querySelector('#frame img'); window.blockFill = false; window.releaseFill(); });
+    await expect.poll(() => requests.length).toBe(2); expect(await page.evaluate(() => document.querySelector('#frame img') === window.initialImage)).toBe(true);
+    await page.evaluate(() => { window.blockFill = true; });
+    for (let i = 0; i < 11; i++) { await page.clock.runFor(5000); await expect.poll(() => page.evaluate(() => window.selections.length)).toBe(i + 2); }
+    const count = requests.length; await page.evaluate(() => { window.blockFill = false; window.releaseFill(); });
+    await expect.poll(() => requests.length).toBe(count + 1); expect(await page.evaluate(() => window.selections.length)).toBe(12);
+    expect(await page.evaluate(() => new Set(window.selections).size)).toBe(12); expect(env.slideshow.snapshot()).toEqual(global);
+    await page.evaluate(() => window.localPhotos.dispose());
+  } finally { await page.goto('about:blank'); await env.close(); }
+});

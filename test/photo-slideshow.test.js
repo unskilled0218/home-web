@@ -34,15 +34,16 @@ test('configuration changes only ordering or interval, preserving unrelated save
 test('name/date ordering preserves existing sort semantics without mutating library records', async () => {
   const records = [photo('z.png', { lastModified: 1 }), photo('a.png', { lastModified: 2 }), photo('b.png', { lastModified: 1 })]; const original = structuredClone(records);
   const { service, clock } = environment({ photoLibrary: { list: async () => ({ available: true, photos: records }) } }); await service.start(); assert.equal(service.snapshot().current.name, 'a.png');
-  service.configure({ order: 'date', interval: 5 }); assert.equal(service.snapshot().current.name, 'b.png'); await clock.advance(5000); assert.equal(service.snapshot().current.name, 'z.png'); await clock.advance(5000); assert.equal(service.snapshot().current.name, 'a.png'); assert.deepEqual(records, original); await service.stop();
+  service.configure({ order: 'date', interval: 5 }); assert.equal(service.snapshot().current.name, 'b.png'); await tick(); await clock.advance(5000); assert.equal(service.snapshot().current.name, 'z.png'); await clock.advance(5000); assert.equal(service.snapshot().current.name, 'a.png'); assert.deepEqual(records, original); await service.stop();
 });
 
 test('random cycles traverse every photo and avoid boundary repeats without reshuffling unchanged scans', async () => {
   let randomCalls = 0; const records = [photo(), photo('b.png'), photo('c.png', { url: '/api/dashboard/photos/cccccccccccccccc' })];
   const { service, clock } = environment({ random: () => { randomCalls++; return 0; }, preferences: { order: 'random', interval: 60 }, photoLibrary: { list: async () => ({ available: true, photos: records }) } });
-  await service.start(); const names = [service.snapshot().current.name]; assert.equal(randomCalls, 2);
+  await service.start(); await tick(); const names = [service.snapshot().current.name]; const initialCalls = randomCalls;
+  for (let i = 0; i < 20; i++) service.snapshot(); assert.equal(randomCalls, initialCalls);
   for (let i = 0; i < 6; i++) { await clock.advance(60_000); names.push(service.snapshot().current.name); }
-  assert.equal(new Set(names.slice(0, 3)).size, 3); assert.notEqual(names[2], names[3]); assert.equal(new Set(names.slice(3, 6)).size, 3); assert.equal(randomCalls, 6);
+  assert.equal(new Set(names.slice(0, 3)).size, 3); assert.notEqual(names[2], names[3]); assert.equal(new Set(names.slice(3, 6)).size, 3); assert.ok(randomCalls <= 12);
   await service.stop();
 });
 
@@ -100,4 +101,23 @@ test('eligibility filters before selection, counts only valid records, and all-r
   const { service, clock, setResult } = environment(); const records = [photo('../bad.png'), photo('a.png'), photo('a\n.png'), photo('é'.repeat(513))];
   setResult({ available: true, photos: records }); await service.start(); assert.equal(service.snapshot().count, 1); assert.equal(service.snapshot().current.name, 'a.png'); assert.equal(records.length, 4);
   setResult({ available: true, photos: records.filter((row) => row.name !== 'a.png') }); await clock.advance(60_000); assert.equal(service.snapshot().count, 0); assert.equal(service.snapshot().current, null); assert.equal(service.snapshot().available, true); assert.equal(clock.timers.size, 1); await service.stop();
+});
+
+test('long-lived reserved filenames resolve refreshed URLs without resetting deadline or surviving visited progress', async () => {
+  const rows = ['a', 'b', 'c', 'd'].map(name => photo(name));
+  const env = environment({ preferences: { order: 'name', interval: 3600 }, photoLibrary: { list: () => ({ available: true, photos: rows }) } });
+  await env.service.start(); await tick(); const before = env.service.snapshot({ version: 2 });
+  rows[1] = photo('b', { url: '/api/dashboard/photos/replacementtoken' }); rows.push(photo('e'));
+  await env.clock.advance(60000); const after = env.service.snapshot({ version: 2 });
+  assert.equal(after.next.url, rows[1].url); assert.equal(after.revision, before.revision); assert.equal(after.nextChangeAt, before.nextChangeAt); assert.ok(after.queueRevision > before.queueRevision);
+  env.service.configure({ order: 'name', interval: 5 }); await env.clock.advance(5000); assert.equal(env.service.snapshot().current.url, rows[1].url);
+  const seen = ['a', 'b']; for (let i = 0; i < 3; i++) { await env.clock.advance(5000); seen.push(env.service.snapshot().current.name); }
+  assert.deepEqual(seen, ['a', 'b', 'c', 'd', 'e']); await env.service.stop();
+});
+
+test('stop drains deferred metadata preparation and prevents late preview publication', async () => {
+  const pending = deferred(); const env = environment({ yieldWork: () => pending.promise }); await env.service.start();
+  assert.equal(env.service.snapshot({ version: 2 }).next, null); let drained = false;
+  const stopping = env.service.stop().then(() => { drained = true; }); await tick(); assert.equal(drained, false);
+  pending.resolve(); await stopping; assert.equal(env.service.snapshot({ version: 2 }).next, null); assert.equal(env.clock.timers.size, 0);
 });

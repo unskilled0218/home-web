@@ -2,6 +2,11 @@
 
 A self-hosted photo dashboard with a clock, weather forecasts, an optional Baikal calendar, and Linkwarden bookmarks. Designed for a trusted local network.
 
+- [dashboard](#dashboard)
+  - [Quick start](#quick-start)
+  - [Settings](#settings)
+  - [Documentation](#documentation)
+
 ## Quick start
 
 Requires Node.js 24 or later. Edit `.env` once; the integration encryption key is created automatically on first startup.
@@ -13,6 +18,8 @@ npm start
 ```
 
 Open [http://127.0.0.1:3000](http://127.0.0.1:3000). A clock and dark background work immediately.
+
+Photo playback uses nonrepeating filename batches and prepares one upcoming image. See [NFS photo backgrounds](docs/nfs-backgrounds.md#metadata-batches-and-image-lookahead).
 
 ## Settings
 
