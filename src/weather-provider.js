@@ -1,10 +1,15 @@
-import { Agent, fetch as fetchWeather } from 'undici';
+import http from 'node:http';
+import { Agent, EnvHttpProxyAgent, fetch as fetchWeather } from 'undici';
 
 const MAX_PROVIDER_BYTES = 1024 * 1024;
 
 export function createWeatherTransport() {
   // Distant IPv4 providers can need more than Node's 250ms before an unreachable IPv6 attempt.
-  const dispatcher = new Agent({ connect: { autoSelectFamily: true, autoSelectFamilyAttemptTimeout: 2000 } });
+  const connect = { autoSelectFamily: true, autoSelectFamilyAttemptTimeout: 2000 };
+  // Node has already resolved startup flags, NODE_OPTIONS, and NODE_USE_ENV_PROXY.
+  const dispatcher = http.globalAgent.options?.proxyEnv
+    ? new EnvHttpProxyAgent({ connect, proxyTls: connect, requestTls: connect })
+    : new Agent({ connect });
   return {
     fetch: (url, options) => fetchWeather(url, { ...options, dispatcher }),
     stop: () => dispatcher.destroy()
