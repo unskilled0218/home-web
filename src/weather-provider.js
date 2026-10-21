@@ -1,18 +1,46 @@
 import http from 'node:http';
+import { isIP } from 'node:net';
 import { Agent, EnvHttpProxyAgent, fetch as fetchWeather } from 'undici';
 
 const MAX_PROVIDER_BYTES = 1024 * 1024;
+
+function wildcardApex(origin) {
+  const url = new URL(origin);
+  const hostname = url.hostname.toLowerCase().replace(/\.$/, '');
+  if (isIP(hostname)) return false;
+  const port = Number(url.port || (url.protocol === 'https:' ? 443 : 80));
+  return (process.env.no_proxy ?? process.env.NO_PROXY ?? '').split(/[,\s]/).some(entry => {
+    const match = /^\*\.([a-z0-9-]+(?:\.[a-z0-9-]+)*\.?)(?::(\d+))?$/i.exec(entry);
+    return match && match[1].toLowerCase().replace(/\.$/, '') === hostname && (match[2] === undefined || Number(match[2]) === port);
+  });
+}
 
 export function createWeatherTransport() {
   // Distant IPv4 providers can need more than Node's 250ms before an unreachable IPv6 attempt.
   const connect = { autoSelectFamily: true, autoSelectFamilyAttemptTimeout: 2000 };
   // Node has already resolved startup flags, NODE_OPTIONS, and NODE_USE_ENV_PROXY.
-  const dispatcher = http.globalAgent.options?.proxyEnv
+  const proxyEnabled = Boolean(http.globalAgent.options?.proxyEnv);
+  const owner = proxyEnabled
     ? new EnvHttpProxyAgent({ connect, proxyTls: connect, requestTls: connect })
     : new Agent({ connect });
+  let direct; let stopPromise;
+  // Supplement native Node's wildcard apex match; Undici retains live environment refresh for all other routes.
+  const dispatcher = proxyEnabled ? owner.compose(dispatch => (options, handler) => {
+    if (!stopPromise && wildcardApex(options.origin)) {
+      direct ??= new Agent({ connect });
+      return direct.dispatch(options, handler);
+    }
+    return dispatch(options, handler);
+  }) : owner;
   return {
     fetch: (url, options) => fetchWeather(url, { ...options, dispatcher }),
-    stop: () => dispatcher.destroy()
+    stop: () => {
+      stopPromise ??= Promise.allSettled([owner, direct].filter(Boolean).map(agent => Promise.resolve().then(() => agent.destroy()))).then(results => {
+        const failure = results.find(result => result.status === 'rejected');
+        if (failure) throw failure.reason;
+      });
+      return stopPromise;
+    }
   };
 }
 

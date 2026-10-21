@@ -21,14 +21,34 @@ if (process.env.WEATHER_NETWORK_CASE) {
     module[method] = function (options, ...args) { connections.push({ tls: module === tls, autoSelectFamily: options.autoSelectFamily, attemptTimeout: options.autoSelectFamilyAttemptTimeout }); return original.call(this, options, ...args); };
   }
   const { createWeatherTransport } = await import('../../src/weather-provider.js');
-  let service; let external; let store; let closed = false; let stopped = false; let callerDisposals = 0; let poolDisposals = 0;
+  let service; let external; let sequence; let store; let closed = false; let stopped = false; let callerDisposals = 0; let poolDisposals = 0;
   const defaultTimeout = net.getDefaultAutoSelectFamilyAttemptTimeout();
   async function finish() {
-    await service?.stop(); await external?.stop(); if (store && !closed) store.close(); clearTimeout(deadline); process.disconnect();
+    await service?.stop(); await external?.stop(); await sequence?.stop(); if (store && !closed) store.close(); clearTimeout(deadline); process.disconnect();
   }
   process.on('message', message => {
     void (async () => {
       if (message.type === 'exit') await finish();
+      else if (message.type === 'request') {
+        for (const [name, value] of Object.entries(message.env ?? {})) {
+          assert.ok(['NO_PROXY', 'no_proxy'].includes(name));
+          if (value === null) delete process.env[name]; else process.env[name] = value;
+        }
+        try {
+          const controller = new AbortController(); const timeout = setTimeout(() => controller.abort(), 2500);
+          try {
+            const response = await (sequence?.fetch ?? fetch)(message.url ?? config.url, { signal: controller.signal });
+            if (message.pending) send({ type: 'headers', id: message.id });
+            if (message.abort) controller.abort();
+            const data = await response.json();
+            send({ type: 'step', id: message.id, ok: true, data, connections, defaultUnchanged: defaultTimeout === net.getDefaultAutoSelectFamilyAttemptTimeout() });
+          } finally { clearTimeout(timeout); }
+        } catch (error) { send({ type: 'step', id: message.id, ok: false, name: error.name, code: error.cause?.code ?? error.code }); }
+      } else if (message.type === 'dispose-transport') {
+        const first = sequence.stop(); const second = sequence.stop(); await Promise.all([first, second]);
+        await assert.rejects(sequence.fetch(config.url));
+        send({ type: 'transport-disposed', samePromise: first === second });
+      }
       else if (message.type === 'stop') {
         const { createShutdownCoordinator } = await import('../../src/shutdown.js');
         const owner = createShutdownCoordinator({ report: message => { throw new Error(message); } });
@@ -44,7 +64,9 @@ if (process.env.WEATHER_NETWORK_CASE) {
       } else if (message.type === 'dispose-external') { await external.stop(); send({ type: 'external-disposed' }); }
     })().catch(error => { console.error(error); process.exitCode = 1; void finish(); });
   });
-  if (config.kind === 'fetch') {
+  if (config.kind === 'sequence') {
+    sequence = config.native ? null : createWeatherTransport(); send({ type: 'sequence-ready' });
+  } else if (config.kind === 'fetch') {
     let transport;
     try {
       transport = config.native ? null : createWeatherTransport();

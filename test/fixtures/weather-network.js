@@ -18,15 +18,18 @@ export async function weatherNetwork(t, { holdAir = false } = {}) {
   const cert = path.join(directory, 'cert.pem'); const key = path.join(directory, 'key.pem');
   execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', key, '-out', cert, '-days', '1', '-subj', '/CN=weather.invalid', '-addext', 'subjectAltName=DNS:weather.invalid,DNS:sub.weather.invalid,DNS:api.open-meteo.com,DNS:air-quality-api.open-meteo.com,IP:127.0.0.1'], { stdio: 'ignore' });
   const tls = { key: readFileSync(key), cert: readFileSync(cert) };
-  const servers = []; const sockets = new Set(); const proxySockets = new Set(); const events = new EventEmitter(); const requests = []; const held = []; const airStarted = deferred();
+  const servers = []; const sockets = new Set(); const proxySockets = new Set(); const targetSockets = new Set(); const events = new EventEmitter(); const requests = []; const held = []; const airStarted = deferred();
+  const upstreamPorts = new Set(); let proxyRequestCount = 0;
+  const markUpstream = socket => { const port = socket.localPort; upstreamPorts.add(port); socket.once('close', () => upstreamPorts.delete(port)); };
   const track = (socket, set = sockets) => { set.add(socket); socket.on('error', () => {}); socket.once('close', () => { set.delete(socket); events.emit('socket-close'); }); };
   t.after(async () => { for (const socket of sockets) socket.destroy(); for (const socket of proxySockets) socket.destroy(); await Promise.all(servers.map(server => new Promise(resolve => server.close(resolve)))); });
   async function listen(server, proxy = false) {
-    servers.push(server); server.on('connection', socket => track(socket, proxy ? proxySockets : sockets));
+    servers.push(server); server.on('connection', socket => { track(socket, proxy ? proxySockets : sockets); if (!proxy) { targetSockets.add(socket); socket.once('close', () => { targetSockets.delete(socket); events.emit('socket-close'); }); } });
     server.listen(0, '127.0.0.1'); await within(once(server, 'listening'));
     return server.address().port;
   }
   function target(request, response) {
+    if (upstreamPorts.has(request.socket.remotePort)) proxyRequestCount++;
     const air = request.url.startsWith('/v1/air-quality');
     response.setHeader('Content-Type', 'application/json'); response.setHeader('Keep-Alive', 'timeout=60');
     if (air && holdAir) { response.write('{'); held.push(response); airStarted.resolve(); return; }
@@ -50,7 +53,7 @@ export async function weatherNetwork(t, { holdAir = false } = {}) {
         const { url, port } = destination(request.url);
         requests.push({ id, method: request.method, hostname: url.hostname, port: url.port });
         const upstream = http.request({ hostname: '127.0.0.1', port, path: url.pathname + url.search, headers: request.headers, agent: false }, reply => { response.writeHead(reply.statusCode, reply.headers); reply.pipe(response); });
-        upstream.on('socket', socket => track(socket)); upstream.on('error', () => { response.destroy(); }); request.pipe(upstream);
+        upstream.on('socket', socket => { track(socket); socket.once('connect', () => markUpstream(socket)); }); upstream.on('error', () => { response.destroy(); }); request.pipe(upstream);
       } catch { response.writeHead(502); response.end(); }
     });
     server.on('connect', (request, client, head) => {
@@ -60,7 +63,7 @@ export async function weatherNetwork(t, { holdAir = false } = {}) {
         // Native fetch may tunnel an HTTP destination too; preserve its actual protocol.
         const targetPort = Number(url.port) === httpPort || Number(url.port) === 80 ? httpPort : port;
         const upstream = net.connect({ host: '127.0.0.1', port: targetPort }); track(upstream);
-        upstream.once('connect', () => { client.write('HTTP/1.1 200 Connection Established\r\n\r\n'); if (head.length) upstream.write(head); client.pipe(upstream); upstream.pipe(client); });
+        upstream.once('connect', () => { markUpstream(upstream); client.write('HTTP/1.1 200 Connection Established\r\n\r\n'); if (head.length) upstream.write(head); client.pipe(upstream); upstream.pipe(client); });
         client.once('close', () => upstream.destroy()); upstream.once('close', () => client.destroy());
       } catch { client.destroy(); }
     });
@@ -72,6 +75,9 @@ export async function weatherNetwork(t, { holdAir = false } = {}) {
     httpUrl: `http://weather.invalid:${httpPort}/air`, httpsUrl: `https://weather.invalid:${httpsPort}/air`,
     releaseAir() { for (const response of held) response.end(JSON.stringify(rawAir()).slice(1)); },
     waitForProxyClose() { return within((async () => { while (proxySockets.size) await once(events, 'socket-close'); })(), 1500); },
+    waitForTargetClose() { return within((async () => { while (targetSockets.size) await once(events, 'socket-close'); })(), 1500); },
+    get openTargetConnections() { return targetSockets.size; },
+    get proxyRequestCount() { return proxyRequestCount; },
     get openProxyConnections() { return proxySockets.size; }
   };
 }
@@ -89,11 +95,15 @@ export function weatherClient(t, config, { env = {}, args = [], ca } = {}) {
     const result = await within(closed, 15000); assert.equal(result.code, 0, stderr + stdout); assert.equal(result.signal, null);
   });
   return {
-    send: type => child.send({ type }),
+    send: message => child.send(typeof message === 'string' ? { type: message } : message),
     get alive() { return child.exitCode === null && child.signalCode === null && child.connected; },
-    async wait(type) {
-      const existing = messages.find(message => message.type === type); if (existing) return existing;
-      return within(Promise.race([once(events, type).then(([message]) => message), closed.then(result => { throw new Error(`Client exited before ${type}: ${JSON.stringify(result)} ${stderr} ${stdout}`); })]), 7000);
+    async wait(type, id) {
+      const matches = message => message.type === type && (id === undefined || message.id === id);
+      const existing = messages.find(matches); if (existing) return existing;
+      let listener;
+      const received = new Promise(resolve => { listener = message => { if (matches(message)) resolve(message); }; events.on(type, listener); });
+      try { return await within(Promise.race([received, closed.then(result => { throw new Error(`Client exited before ${type}: ${JSON.stringify(result)} ${stderr} ${stdout}`); })]), 7000); }
+      finally { events.off(type, listener); }
     }
   };
 }
