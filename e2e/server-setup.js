@@ -16,7 +16,7 @@ export default async function setup(config) {
   const directory = await mkdtemp('/tmp/opencode/home-web-playwright-');
   const child = spawn(process.execPath, ['--input-type=module', '--eval', source], {
     cwd: path.resolve(import.meta.dirname, '..'),
-    env: { ...process.env, HOST: url.hostname, PORT: url.port, DATABASE_PATH: path.join(directory, 'app.db'), LINKWARDEN_CONFIG_ENCRYPTION_KEY: '', LINKWARDEN_CONFIG_ENCRYPTION_KEY_FILE: path.join(directory, 'integration.key'), HOME_ASSISTANT_CA_FILE: '', LINKWARDEN_CA_FILE: '', CALDAV_CA_FILE: '', NODE_EXTRA_CA_CERTS: '', NFS_MOUNT_MODE: 'disabled' },
+    env: { ...process.env, HOST: url.hostname, PORT: url.port, DATABASE_PATH: path.join(directory, 'app.db'), LINKWARDEN_CONFIG_ENCRYPTION_KEY: '', LINKWARDEN_CONFIG_ENCRYPTION_KEY_FILE: path.join(directory, 'integration.key'), HOME_ASSISTANT_CA_FILE: '', LINKWARDEN_CA_FILE: '', CALDAV_CA_FILE: '', NODE_EXTRA_CA_CERTS: '', NFS_MOUNT_MODE: 'off' },
     stdio: ['ignore', 'pipe', 'pipe', 'ipc']
   });
   let stderr = ''; child.stderr.on('data', (chunk) => { stderr += chunk; });

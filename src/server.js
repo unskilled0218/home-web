@@ -63,7 +63,7 @@ async function boot() {
   const calDav = createCalDavClient({ cacheSeconds: config.calDavCacheSeconds, ca: calDavCa });
   const nfs = await prepareNfs(config.nfs, { onChild: lifecycle.ownPreparation });
   if (lifecycle.stopping) return;
-  if (lifecycle.getState().pendingPreparations || lifecycle.getState().failure === 'cleanup') throw new Error('NFS preparation cleanup is unconfirmed. Use disabled/pre-mounted NFS or permit owned-child termination.');
+  if (lifecycle.getState().pendingPreparations || lifecycle.getState().failure === 'cleanup') throw new Error('NFS preparation cleanup is unconfirmed. Use NFS_MOUNT_MODE=off or on with an existing mount and empty NFS_SOURCE, or permit owned-child termination.');
   if (config.nfs.error || nfs.reason === 'failed') console.warn('NFS backgrounds are unavailable; starting the dashboard without photos.');
   const photoLibrary = nfs.available ? createPhotoLibrary({ root: nfs.root }) : createUnavailablePhotoLibrary();
   lifecycle.attach('photoLibrary', photoLibrary);
@@ -71,8 +71,8 @@ async function boot() {
   const localWeather = createLocalWeatherService(); lifecycle.attach('localWeather', localWeather);
   let photoPreferences;
   try { photoPreferences = store.getDashboardPreferences().preferences; } catch { console.warn('Shared photo preferences are unavailable; slideshow rotation is paused.'); }
-  const slideshow = createPhotoSlideshow({ photoLibrary, enabled: config.nfs.mode !== 'disabled', preferences: photoPreferences }); lifecycle.attach('slideshow', slideshow);
-  const server = createDashboardServer({ runtimeConfig: config, store, linkwarden, homeAssistant, homeAssistantControls, calDav, photoLibrary, photoSourceEnabled: config.nfs.mode !== 'disabled', weather, localWeather, slideshow }); lifecycle.attach('server', server);
+  const slideshow = createPhotoSlideshow({ photoLibrary, enabled: config.nfs.mode === 'on', preferences: photoPreferences }); lifecycle.attach('slideshow', slideshow);
+  const server = createDashboardServer({ runtimeConfig: config, store, linkwarden, homeAssistant, homeAssistantControls, calDav, photoLibrary, photoSourceEnabled: config.nfs.mode === 'on', weather, localWeather, slideshow }); lifecycle.attach('server', server);
   server.on('error', (error) => { void stop(error); });
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(config.port, config.host, resolve); });
   if (lifecycle.stopping) { await new Promise((resolve) => server.close(() => resolve())); return; }

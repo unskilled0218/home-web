@@ -41,10 +41,10 @@ function safelyMounted(entry, requireNfs) {
 }
 
 export async function prepareNfs(config, { mounts = defaultMounts, mkdirImpl = mkdir, statImpl = stat, run = execFile, onChild = () => {} } = {}) {
-  if (!config || config.mode === 'disabled') return { available: false, reason: 'disabled', root: null };
+  if (!config || config.mode === 'off') return { available: false, reason: 'disabled', root: null };
   if (config.error) return { available: false, reason: 'configuration', root: null };
   try {
-    if (config.mode === 'existing') {
+    if (!config.source) {
       const mounted = (await mounts()).find((entry) => entry.path === config.mountPath);
       if (!safelyMounted(mounted, false)) throw new Error('unsafe existing mount');
       await readableDirectory(config.mountPath, statImpl);

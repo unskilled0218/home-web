@@ -13,13 +13,12 @@ const integer = (value, fallback, name) => {
 function nfsConfig(environment) {
   const source = String(environment.NFS_SOURCE ?? '').trim();
   const mountPath = String(environment.NFS_MOUNT_PATH ?? '').trim();
-  const mode = String(environment.NFS_MOUNT_MODE ?? (source ? 'mount' : 'disabled')).trim().toLowerCase();
+  const mode = String(environment.NFS_MOUNT_MODE ?? 'off').trim().toLowerCase();
   const rawOptions = String(environment.NFS_MOUNT_OPTIONS ?? '').trim();
   const invalidText = (value, limit) => value.length > limit || /[\0-\x1f\x7f]/.test(value);
   let error = null;
-  if (!['disabled', 'mount', 'existing'].includes(mode)) error = 'NFS_MOUNT_MODE must be disabled, mount, or existing.';
-  else if (mode !== 'disabled' && !mountPath) error = 'NFS_MOUNT_PATH is required when NFS backgrounds are enabled.';
-  else if (mode === 'mount' && !source) error = 'NFS_SOURCE is required when NFS_MOUNT_MODE is mount.';
+  if (!['on', 'off'].includes(mode)) error = 'NFS_MOUNT_MODE must be on or off.';
+  else if (mode === 'on' && !mountPath) error = 'NFS_MOUNT_PATH is required when NFS backgrounds are enabled.';
   else if (invalidText(source, 1024) || (source && (!source.includes(':') || /\s/.test(source)))) error = 'NFS_SOURCE is invalid.';
   else if (invalidText(mountPath, 1024)) error = 'NFS_MOUNT_PATH is invalid.';
   else if (invalidText(rawOptions, 512)) error = 'NFS_MOUNT_OPTIONS is invalid.';

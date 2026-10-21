@@ -14,7 +14,7 @@ const entry = path.resolve(import.meta.dirname, '../src/server.js');
 const owned = new Map();
 async function launch(directory, { env = {}, file = false } = {}) {
   const reservation = net.createServer(); reservation.listen(0, '127.0.0.1'); await once(reservation, 'listening'); const port = reservation.address().port; await new Promise(resolve => reservation.close(resolve));
-  const child = spawn(process.execPath, [...(file ? [`--env-file=${directory}/.env`] : []), entry], { cwd: directory, env: { PATH: process.env.PATH, HOST: '127.0.0.1', PORT: String(port), NFS_MOUNT_MODE: 'disabled', ...env }, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
+  const child = spawn(process.execPath, [...(file ? [`--env-file=${directory}/.env`] : []), entry], { cwd: directory, env: { PATH: process.env.PATH, HOST: '127.0.0.1', PORT: String(port), NFS_MOUNT_MODE: 'off', ...env }, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
   let output = ''; child.stdout.on('data', chunk => { output += chunk; }); child.stderr.on('data', chunk => { output += chunk; });
   const exited = once(child, 'exit');
   const ready = new Promise(resolve => child.on('message', message => { if (message.type === 'dashboard:ready') resolve(true); }));

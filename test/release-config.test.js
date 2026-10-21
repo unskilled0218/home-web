@@ -44,13 +44,13 @@ test('Compose parser forwards env-file values and preserves fixed container path
   const directory = mkdtempSync('/tmp/opencode/compose-env-');
   try {
     copyFileSync(path.join(root, 'docker-compose.yml'), path.join(directory, 'docker-compose.yml'));
-    writeFileSync(path.join(directory, '.env'), 'HOST=127.0.0.1\nPORT=4555\nDATABASE_PATH=/host/not-container.db\nHOME_ASSISTANT_CA_FILE=./certs/ha.pem\nNFS_MOUNT_MODE=existing\nNFS_MOUNT_PATH=/host/not-photos\nNFS_HOST_MOUNT_PATH=/fixture/wallpaper\nLINKWARDEN_CONFIG_ENCRYPTION_KEY_FILE=\n');
+    writeFileSync(path.join(directory, '.env'), 'HOST=127.0.0.1\nPORT=4555\nDATABASE_PATH=/host/not-container.db\nHOME_ASSISTANT_CA_FILE=./certs/ha.pem\nNFS_MOUNT_MODE=on\nNFS_SOURCE=\nNFS_MOUNT_PATH=/host/not-photos\nNFS_HOST_MOUNT_PATH=/fixture/wallpaper\nLINKWARDEN_CONFIG_ENCRYPTION_KEY_FILE=\n');
     const result = spawnSync('docker', ['compose', 'config', '--format', 'json'], { cwd: directory, env: { PATH: process.env.PATH, HOME: directory, HOST: '192.0.2.1' }, encoding: 'utf8', timeout: 10000 });
     assert.equal(result.status, 0, result.stderr);
     const service = JSON.parse(result.stdout).services.dashboard;
     assert.equal(service.environment.HOST, '127.0.0.1', 'shell does not override a literal env-file application value');
     assert.equal(service.environment.PORT, '4555'); assert.equal(service.environment.DATABASE_PATH, '/app/data/wol.db');
-    assert.equal(service.environment.NFS_MOUNT_PATH, '/photos'); assert.equal(service.environment.NFS_MOUNT_MODE, 'existing');
+    assert.equal(service.environment.NFS_MOUNT_PATH, '/photos'); assert.equal(service.environment.NFS_MOUNT_MODE, 'on'); assert.equal(service.environment.NFS_SOURCE, '');
     assert.equal(service.environment.LINKWARDEN_CONFIG_ENCRYPTION_KEY_FILE, '/app/data/linkwarden-config-encryption.key');
     assert.equal(service.environment.HOME_ASSISTANT_CA_FILE, './certs/ha.pem'); assert.equal(Object.hasOwn(service.environment, 'NODE_EXTRA_CA_CERTS'), false);
     assert.ok(service.volumes.some(volume => volume.target === '/photos' && volume.source === '/fixture/wallpaper' && volume.read_only));

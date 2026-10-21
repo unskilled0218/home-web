@@ -25,7 +25,7 @@ try {
   }
   const reservation = net.createServer(); reservation.listen(0, '127.0.0.1'); await once(reservation, 'listening'); const port = reservation.address().port; await new Promise(resolve => reservation.close(resolve));
   const source = `const resolved = import.meta.resolve('undici'); if (!resolved.startsWith(${JSON.stringify('file://' + directory + '/node_modules/')})) throw new Error('Undici escaped production tree'); await import('undici'); console.log('production-dependency-ok'); await import('./src/server.js');`;
-  child = spawn(process.execPath, ['--input-type=module', '--eval', source], { cwd: directory, env: { ...environment, HOST: '127.0.0.1', PORT: String(port), NFS_MOUNT_MODE: 'disabled' }, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
+  child = spawn(process.execPath, ['--input-type=module', '--eval', source], { cwd: directory, env: { ...environment, HOST: '127.0.0.1', PORT: String(port), NFS_MOUNT_MODE: 'off' }, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
   exited = once(child, 'exit'); let dependency = false; let error = '';
   child.stdout.on('data', chunk => { if (chunk.toString().includes('production-dependency-ok')) dependency = true; }); child.stderr.on('data', chunk => { error += chunk; });
   const ready = new Promise(resolve => child.on('message', message => { if (message.type === 'dashboard:ready') resolve(true); }));

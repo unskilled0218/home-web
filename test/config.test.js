@@ -31,18 +31,42 @@ test('loads scoped CalDAV runtime configuration', async () => {
   assert.equal(config.calDavCaFile, path.resolve('./certs/baikal-ca.pem'));
 });
 
-test('loads optional NFS mount and pre-mounted photo configuration', async () => {
+test('NFS defaults to off even when a source is configured', async () => {
   const { loadConfig } = await import('../src/config.js');
-  assert.deepEqual(loadConfig({ HOST: '127.0.0.1' }).nfs, { mode: 'disabled', source: '', mountPath: null, options: [], error: null });
-  const mounted = loadConfig({ HOST: '127.0.0.1', NFS_SOURCE: 'nas.lan:/photos', NFS_MOUNT_PATH: './data/photos', NFS_MOUNT_OPTIONS: 'vers=4.2,timeo=20' }).nfs;
-  assert.deepEqual(mounted, { mode: 'mount', source: 'nas.lan:/photos', mountPath: path.resolve('./data/photos'), options: ['vers=4.2', 'timeo=20'], error: null });
-  const existing = loadConfig({ HOST: '127.0.0.1', NFS_MOUNT_MODE: 'existing', NFS_MOUNT_PATH: '/photos' }).nfs;
-  assert.equal(existing.mode, 'existing'); assert.equal(existing.error, null);
+  assert.deepEqual(loadConfig({ HOST: '127.0.0.1' }).nfs, { mode: 'off', source: '', mountPath: null, options: [], error: null });
+  for (const mode of [undefined, 'off', ' OFF ']) {
+    const config = loadConfig({ HOST: '127.0.0.1', NFS_MOUNT_MODE: mode, NFS_SOURCE: 'nas:/photos', NFS_MOUNT_PATH: '/photos' }).nfs;
+    assert.equal(config.mode, 'off'); assert.equal(config.error, null);
+  }
+});
+
+test('loads normalized on configuration for managed and existing mounts', async () => {
+  const { loadConfig } = await import('../src/config.js');
+  const mounted = loadConfig({ HOST: '127.0.0.1', NFS_MOUNT_MODE: ' ON ', NFS_SOURCE: ' nas.lan:/photos ', NFS_MOUNT_PATH: './data/photos', NFS_MOUNT_OPTIONS: 'vers=4.2,timeo=20' }).nfs;
+  assert.deepEqual(mounted, { mode: 'on', source: 'nas.lan:/photos', mountPath: path.resolve('./data/photos'), options: ['vers=4.2', 'timeo=20'], error: null });
+  assert.equal(Object.isFrozen(mounted), true); assert.equal(Object.isFrozen(mounted.options), true);
+  for (const source of [undefined, '', '  ']) {
+    const existing = loadConfig({ HOST: '127.0.0.1', NFS_MOUNT_MODE: 'on', NFS_SOURCE: source, NFS_MOUNT_PATH: '/photos' }).nfs;
+    assert.equal(existing.mode, 'on'); assert.equal(existing.source, ''); assert.equal(existing.error, null);
+  }
+});
+
+test('rejects legacy, empty, and unknown NFS modes nonfatally', async () => {
+  const { loadConfig } = await import('../src/config.js');
+  for (const mode of ['disabled', 'mount', 'existing', 'other', '', '  ']) {
+    const config = loadConfig({ HOST: '127.0.0.1', NFS_MOUNT_MODE: mode, NFS_MOUNT_PATH: '/photos' }).nfs;
+    assert.equal(config.error, 'NFS_MOUNT_MODE must be on or off.', JSON.stringify(mode));
+  }
+});
+
+test('enabled NFS validates mount paths, sources, and safety options', async () => {
+  const { loadConfig } = await import('../src/config.js');
   for (const environment of [
     { NFS_SOURCE: 'invalid', NFS_MOUNT_PATH: '/photos' },
     { NFS_SOURCE: 'nas:/photos', NFS_MOUNT_PATH: '/photos', NFS_MOUNT_OPTIONS: 'rw' },
     { NFS_SOURCE: 'nas:/photos', NFS_MOUNT_PATH: '/photos', NFS_MOUNT_OPTIONS: 'bg' },
-    { NFS_MOUNT_MODE: 'existing' },
-    { NFS_MOUNT_MODE: 'other', NFS_MOUNT_PATH: '/photos' }
-  ]) assert.ok(loadConfig({ HOST: '127.0.0.1', ...environment }).nfs.error);
+    {},
+    { NFS_SOURCE: 'nas:/photos' }
+  ]) assert.ok(loadConfig({ HOST: '127.0.0.1', NFS_MOUNT_MODE: 'on', ...environment }).nfs.error, JSON.stringify(environment));
+  assert.equal(loadConfig({ HOST: '127.0.0.1', NFS_MOUNT_MODE: 'off', NFS_SOURCE: 'invalid' }).nfs.error, 'NFS_SOURCE is invalid.');
 });

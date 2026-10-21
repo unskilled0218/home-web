@@ -26,11 +26,11 @@ async function fixture(t) {
   for (const directory of ['src', 'public', 'scripts']) await cp(path.join(project, directory), path.join(root, directory), { recursive: true });
   await symlink(path.join(project, 'node_modules'), path.join(root, 'node_modules'), 'dir');
   await cp(path.join(project, 'package.json'), path.join(root, 'package.json')); const port = await reservePort();
-  const environment = { ...process.env }; for (const name of ['HOST', 'PORT', 'DATABASE_PATH', 'NFS_SOURCE', 'NFS_MOUNT_MODE', 'NFS_MOUNT_PATH', 'NODE_EXTRA_CA_CERTS', 'LINKWARDEN_CONFIG_ENCRYPTION_KEY_FILE', 'HOME_ASSISTANT_CA_FILE', 'LINKWARDEN_CA_FILE', 'CALDAV_CA_FILE', 'TERMINAL_EVIDENCE_DIR']) delete environment[name];
+  const environment = { ...process.env }; for (const name of ['HOST', 'PORT', 'DATABASE_PATH', 'NFS_SOURCE', 'NFS_MOUNT_MODE', 'NFS_MOUNT_PATH', 'NFS_MOUNT_OPTIONS', 'NODE_EXTRA_CA_CERTS', 'LINKWARDEN_CONFIG_ENCRYPTION_KEY_FILE', 'HOME_ASSISTANT_CA_FILE', 'LINKWARDEN_CA_FILE', 'CALDAV_CA_FILE', 'TERMINAL_EVIDENCE_DIR']) delete environment[name];
   environment.LINKWARDEN_CONFIG_ENCRYPTION_KEY = Buffer.alloc(32, 4).toString('base64');
   const marker = path.join(root, 'process-marker.mjs'); await writeFile(marker, `console.log('fixture-pid:' + process.pid); const timer = setTimeout(() => { if (!process.emit('SIGTERM')) process.exit(0); }, 12000); process.on('exit', () => clearTimeout(timer));`);
   environment.NODE_OPTIONS = `${environment.NODE_OPTIONS ?? ''} --import=${marker}`.trim();
-  const env = (extra = '') => `HOST=127.0.0.1\nPORT=${port}\nDATABASE_PATH=${root}/dashboard.db\nNFS_MOUNT_MODE=disabled\n${extra}`;
+  const env = (extra = '') => `HOST=127.0.0.1\nPORT=${port}\nDATABASE_PATH=${root}/dashboard.db\nNFS_MOUNT_MODE=off\n${extra}`;
   await writeFile(path.join(root, '.env'), env());
   return { root, port, environment, env };
 }
@@ -63,11 +63,28 @@ for (const dev of [false, true]) test(`${dev ? 'development' : 'normal'} launch 
   const f = await fixture(t); const run = await launch(t, f, dev); await until(() => run.output.includes('dashboard listening at'), run.error || 'No ready output'); run.child.send({ type: 'dashboard:shutdown' }, () => {}); run.child.send({ type: 'dashboard:shutdown' }, () => {}); await assertStopped(f, run);
 });
 
+for (const dev of [false, true]) for (const mode of ['off', 'on']) test(`${dev ? 'development' : 'normal'} NFS ${mode} reports ${mode === 'on' ? 'enabled but unavailable' : 'disabled'} and shuts down cleanly`, async (t) => {
+  const f = await fixture(t);
+  await writeFile(path.join(f.root, '.env'), f.env(`NFS_MOUNT_MODE=${mode}\nNFS_SOURCE=${mode === 'off' ? 'nas:/photos' : ''}\nNFS_MOUNT_PATH=${f.root}\n`));
+  const run = await launch(t, f, dev); await until(() => run.output.includes('dashboard listening at'), 'NFS configuration prevented readiness');
+  for (const endpoint of ['photos/status', 'photos/local', 'slideshow']) {
+    const response = await fetch(`http://127.0.0.1:${f.port}/api/dashboard/${endpoint}`);
+    assert.equal(response.status, 200, endpoint);
+    const snapshot = await response.json();
+    assert.equal(snapshot.enabled, mode === 'on', `${endpoint}: enabled state`);
+    assert.equal(snapshot.available, false, `${endpoint}: unavailable inventory`);
+  }
+  const settings = await fetch(`http://127.0.0.1:${f.port}/api/dashboard/settings`); assert.equal(settings.status, 200); await settings.arrayBuffer();
+  if (mode === 'on') assert.match(run.error, /NFS backgrounds are unavailable/);
+  else assert.doesNotMatch(run.error, /NFS backgrounds are unavailable/);
+  run.child.send({ type: 'dashboard:shutdown' }, () => {}); await assertStopped(f, run);
+});
+
 for (const dev of [false, true]) test(`${dev ? 'development' : 'normal'} production owner rotates before the first HTTP read and drains its timers`, async (t) => {
   const f = await fixture(t);
   await writeFile(path.join(f.root, 'first.png'), 'first'); await writeFile(path.join(f.root, 'second.png'), 'second');
   await writeFile(path.join(f.root, 'src/nfs.js'), `export async function prepareNfs() { return { available: true, root: ${JSON.stringify(f.root)}, reason: 'existing' }; }`);
-  await writeFile(path.join(f.root, '.env'), f.env(`NFS_MOUNT_MODE=existing\nNFS_MOUNT_PATH=${f.root}\n`));
+  await writeFile(path.join(f.root, '.env'), f.env(`NFS_MOUNT_MODE=on\nNFS_MOUNT_PATH=${f.root}\n`));
   const file = path.join(f.root, 'src/server.js'); const source = await readFile(file, 'utf8');
   await writeFile(file, source.replace('createPhotoSlideshow({ photoLibrary,', "createPhotoSlideshow({ schedule: (fn, ms) => setTimeout(() => { fn(); if (ms === 5000) console.log('fixture-rotation'); }, ms === 5000 ? 20 : ms), photoLibrary,").replace('void slideshow.start();', "slideshow.configure({ order: 'name', interval: 5 }); void slideshow.start();"));
   const run = await launch(t, f, dev); await until(() => (run.output.match(/fixture-rotation/g) ?? []).length >= 2, 'No background rotations before first browser request');
@@ -105,7 +122,7 @@ test('development env reload changes actual startup CA trust before the server i
 });
 
 test('development honors explicit environment precedence and optional missing env files after reload', async (t) => {
-  const f = await fixture(t); Object.assign(f.environment, { HOST: '127.0.0.1', PORT: String(f.port), DATABASE_PATH: `${f.root}/dashboard.db`, NFS_MOUNT_MODE: 'disabled' });
+  const f = await fixture(t); Object.assign(f.environment, { HOST: '127.0.0.1', PORT: String(f.port), DATABASE_PATH: `${f.root}/dashboard.db`, NFS_MOUNT_MODE: 'off' });
   await writeFile(path.join(f.root, '.env'), f.env().replace(/^PORT=.*$/m, 'PORT=1')); const run = await launch(t, f, true); const readyCount = () => (run.output.match(/dashboard listening at/g) ?? []).length;
   await until(() => readyCount() === 1, 'Environment override was not honored'); assert.match(run.output, new RegExp(`127\\.0\\.0\\.1:${f.port}`));
   await rm(path.join(f.root, '.env')); await until(() => readyCount() === 2, 'Removing optional env file did not restart'); assert.equal((run.output.match(new RegExp(`127\\.0\\.0\\.1:${f.port}`, 'g')) ?? []).length, 2);

@@ -110,7 +110,7 @@ async function verifyDevelopmentReload(baseUrl, caFile) {
     for (const folder of ['src', 'public', 'scripts']) cpSync(path.join(root, folder), path.join(directory, folder), { recursive: true });
     cpSync(path.join(root, 'package.json'), path.join(directory, 'package.json')); symlinkSync(path.join(root, 'node_modules'), path.join(directory, 'node_modules'), 'dir');
     const socket = net.createServer(); socket.listen(0, '127.0.0.1'); await once(socket, 'listening'); const port = socket.address().port; await new Promise(resolve => socket.close(resolve));
-    const values = `HOST=127.0.0.1\nPORT=${port}\nDATABASE_PATH=${directory}/db.sqlite\nNFS_MOUNT_MODE=disabled\n`;
+    const values = `HOST=127.0.0.1\nPORT=${port}\nDATABASE_PATH=${directory}/db.sqlite\nNFS_MOUNT_MODE=off\n`;
     writeFileSync(path.join(directory, '.env'), values);
     child = spawn(process.execPath, ['scripts/dev.js'], { cwd: directory, env: { PATH: process.env.PATH }, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] }); exited = once(child, 'exit');
     let ready = 0; let errors = ''; child.stdout.on('data', chunk => { if (chunk.toString().includes('dashboard listening')) ready++; }); child.stderr.on('data', chunk => { errors += chunk; });

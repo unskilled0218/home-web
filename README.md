@@ -19,7 +19,7 @@ npm start
 
 Open [http://127.0.0.1:3000](http://127.0.0.1:3000). A clock and dark background work immediately.
 
-Photo playback uses nonrepeating filename batches and prepares one upcoming image. See [NFS photo backgrounds](docs/nfs-backgrounds.md#metadata-batches-and-image-lookahead).
+Enable photo backgrounds with `NFS_MOUNT_MODE=on`; the default is `off`. A configured `NFS_SOURCE` manages a mount; an empty source uses an existing mount. Photo playback uses nonrepeating filename batches and prepares one upcoming image. See [NFS photo backgrounds](docs/nfs-backgrounds.md).
 
 ## Settings
 

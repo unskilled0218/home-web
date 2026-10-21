@@ -7,10 +7,14 @@
   - [TrueNAS host mount example](#truenas-host-mount-example)
   - [Diagnose by stage](#diagnose-by-stage)
 
-For a direct run, install the NFS client supplied by the host operating system and configure the dashboard service account to mount only the intended export without an interactive password. The application never invokes `sudo` and must not run as root. Set the export and local mount point in `.env`:
+`NFS_MOUNT_MODE` accepts `on` and `off` after trimming whitespace and ignoring case. An omitted value defaults to `off`, even when `NFS_SOURCE` is set. `off` performs no NFS preparation or photo discovery. `on` requires `NFS_MOUNT_PATH`: a nonempty `NFS_SOURCE` selects application-managed mounting, and an empty source selects an existing mount. Invalid configuration is nonfatal and leaves photos unavailable; malformed source/options can still emit a warning under `off`. Restart the server after changing these settings.
+
+Migrate old values before upgrading: replace `disabled` with `off`, replace `mount` with `on` while retaining the source, and replace `existing` with `on` while clearing `NFS_SOURCE`. The old values and an explicitly empty mode are rejected. Deployments that previously enabled NFS by setting only `NFS_SOURCE` must now explicitly set `NFS_MOUNT_MODE=on`.
+
+For a direct run with application-managed mounting, install the NFS client supplied by the host operating system and configure the dashboard service account to mount only the intended export without an interactive password. The application never invokes `sudo` and must not run as root. Set the export and local mount point in `.env`:
 
 ```sh
-NFS_MOUNT_MODE=mount
+NFS_MOUNT_MODE=on
 NFS_SOURCE=nas.lan:/photos
 NFS_MOUNT_PATH=./data/backgrounds
 NFS_MOUNT_OPTIONS=vers=4.2
@@ -18,21 +22,23 @@ NFS_MOUNT_OPTIONS=vers=4.2
 
 `npm start` checks for an existing matching NFS/NFS4 mount, otherwise invokes `mount` with the configured source and path before opening the HTTP listener. It always forces `ro,nosuid,nodev,noexec,soft,timeo=20,retrans=2`, uses no shell interpolation, and bounds mount and disconnected-share operations. A missing client, denied mount, unreachable server, conflicting or unsafe mount point, timeout, or failed verification emits one generic warning and starts the dashboard without photos. The process does not unmount the share at shutdown because the mount may be shared or managed externally. `NFS_MOUNT_OPTIONS` accepts only comma-separated option tokens and cannot relax the forced bounded read-only settings; background, hard-mount, and retry-control options are rejected.
 
-To read a directory that is already mounted by the host or service manager, mount it with `ro,nosuid,nodev,noexec,soft,timeo=20,retrans=2`, omit `NFS_SOURCE`, and use:
+To read a directory that is already mounted by the host or service manager, mount it with `ro,nosuid,nodev,noexec,soft,timeo=20,retrans=2`, clear `NFS_SOURCE`, and use:
 
 ```dotenv
-NFS_MOUNT_MODE=existing
+NFS_MOUNT_MODE=on
+NFS_SOURCE=
 NFS_MOUNT_PATH=/srv/dashboard-photos
 ```
 
 The standard Compose service runs as root but does not install an NFS client or receive mount capabilities. The host-mounted share must allow that container process to read and traverse the files; account for the NFS export's root-squash and mode settings on the host. Mount NFS on the Docker host with the bounded read-only options above, then enable the integrated read-only mount:
 
 ```dotenv
-NFS_MOUNT_MODE=existing
+NFS_MOUNT_MODE=on
+NFS_SOURCE=
 NFS_HOST_MOUNT_PATH=/srv/dashboard-photos
 ```
 
-Save those values in `.env`, then run `docker compose up -d`. Compose mounts `${NFS_HOST_MOUNT_PATH:-./photos}` at `/photos` but leaves NFS disabled unless existing mode is set. Direct development uses `NFS_MOUNT_MODE=existing` and the application-visible `NFS_MOUNT_PATH` in `.env`, followed by `node scripts/dev.js`. A host mount alone does not configure a server that already started with NFS disabled.
+Save those values in `.env`, then run `docker compose up -d`. Compose mounts `${NFS_HOST_MOUNT_PATH:-./photos}` at `/photos` but leaves NFS disabled unless `NFS_MOUNT_MODE=on` is set. Keep `NFS_SOURCE` empty because the container uses the host-prepared mount. Direct development uses `NFS_MOUNT_MODE=on`, an empty source, and the application-visible `NFS_MOUNT_PATH` in `.env`, followed by `node scripts/dev.js`. A host mount alone does not configure a server that already started with NFS disabled.
 
 ## Server slideshow and filename eligibility
 
@@ -79,7 +85,7 @@ File-local `ENOENT`/`ENOTDIR` races and permission denials are counted exclusion
 
 ## TrueNAS host mount example
 
-For Docker/Compose, use **existing** mode. Mount the share on the Docker host, not inside the dashboard container. For example, the operator can configure an existing mount directory in `/etc/fstab`:
+For Docker/Compose, use `NFS_MOUNT_MODE=on` with an empty `NFS_SOURCE`. Mount the share on the Docker host, not inside the dashboard container. For example, the operator can configure an existing mount directory in `/etc/fstab`:
 
 ```fstab
 truenas.lan:/mnt/my-1/sync/Wallpaper /srv/dashboard-photos nfs ro,nosuid,nodev,noexec,soft,timeo=20,retrans=2,vers=3,_netdev,nofail 0 0
@@ -98,7 +104,8 @@ findmnt -M /srv/dashboard-photos -o TARGET,SOURCE,FSTYPE,OPTIONS
 It must be the intended NFS/NFS4 mount with `ro,nosuid,nodev,noexec,soft,timeo=20,retrans=2`. Then set these values for Compose, replacing the host path as needed:
 
 ```sh
-NFS_MOUNT_MODE=existing
+NFS_MOUNT_MODE=on
+NFS_SOURCE=
 NFS_HOST_MOUNT_PATH=/srv/dashboard-photos
 ```
 
