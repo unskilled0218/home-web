@@ -5,11 +5,13 @@ import { promisify } from 'node:util';
 import { once } from 'node:events';
 import net from 'node:net';
 import path from 'node:path';
+import { temporaryPrefix } from './temporary.js';
 
 const root = path.resolve(import.meta.dirname, '..');
-const directory = await mkdtemp('/tmp/opencode/production-runtime-');
+const directory = await mkdtemp(temporaryPrefix('production-runtime-'));
 const execute = promisify(execFile);
-const environment = { PATH: process.env.PATH, HOME: directory, NPM_CONFIG_USERCONFIG: path.join(directory, 'npmrc') };
+const trustKeys = ['PATH', 'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'http_proxy', 'https_proxy', 'no_proxy', 'SSL_CERT_FILE', 'SSL_CERT_DIR', 'NODE_EXTRA_CA_CERTS'];
+const environment = { ...Object.fromEntries(trustKeys.filter(key => process.env[key] !== undefined).map(key => [key, process.env[key]])), HOME: directory, NPM_CONFIG_USERCONFIG: path.join(directory, 'npmrc'), NPM_CONFIG_CACHE: path.join(directory, 'npm-cache') };
 let child; let exited; let installation; let cleanupSafe = true;
 function bounded(promise, ms) {
   let timer;

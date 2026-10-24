@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { temporaryPrefix } from '../scripts/temporary.js';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { copyFileSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -40,7 +41,7 @@ test('Compose deploys the Forgejo image as root with data, trust, and optional N
 test('Compose parser forwards env-file values and preserves fixed container paths without global HA trust', t => {
   const available = spawnSync('docker', ['compose', 'version'], { encoding: 'utf8', timeout: 10000 });
   if (available.error?.code === 'ENOENT' || available.status !== 0) { t.skip('Docker Compose parser unavailable; static wiring checks remain separate.'); return; }
-  const directory = mkdtempSync('/tmp/opencode/compose-env-');
+  const directory = mkdtempSync(temporaryPrefix('compose-env-'));
   try {
     copyFileSync(path.join(root, 'docker-compose.yml'), path.join(directory, 'docker-compose.yml'));
     writeFileSync(path.join(directory, '.env'), 'HOST=127.0.0.1\nPORT=4555\nDATABASE_PATH=/host/not-container.db\nHOME_ASSISTANT_CA_FILE=./certs/ha.pem\nNFS_MOUNT_MODE=on\nNFS_SOURCE=\nNFS_MOUNT_PATH=/host/not-photos\nNFS_HOST_MOUNT_PATH=/fixture/wallpaper\nLINKWARDEN_CONFIG_ENCRYPTION_KEY_FILE=\n');
@@ -84,11 +85,9 @@ test('VERSION owns npm metadata, release notes, and the home-web release target'
   for (const state of ['.template-operation.lock', '.release-template/', '.template-transaction/']) assert.ok(read('.gitignore').split('\n').includes(state), `${state} must be ignored`);
 });
 
-test('publication is disabled and legacy CLI options refuse before external effects', () => {
-  for (const args of [[], [''], ['--promote-latest'], ['patch'], ['--validate', 'extra']]) {
+test('unsupported release CLI options refuse before external effects', () => {
+  for (const args of [[''], ['--promote-latest'], ['patch'], ['--validate', 'extra']]) {
     const result = spawnSync('/bin/bash', ['scripts/release.sh', ...args], { cwd: root, encoding: 'utf8', env: { PATH: '/missing', GIT_TOKEN: '/missing/token', RELEASE_LOCK_FD: '999', RELEASE_ENABLED: '1' } });
-    const blockedPublication = !args.length || args[0] === '';
-    assert.equal(result.status, blockedPublication ? 1 : 2);
-    if (blockedPublication) assert.match(result.stderr, /Publication disabled/);
+    assert.equal(result.status, 2);
   }
 });

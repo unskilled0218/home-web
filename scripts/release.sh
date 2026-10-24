@@ -6,18 +6,13 @@ case "${1:-}" in
   --help)
     [[ $# == 1 ]] || exit 2
     echo 'Usage: ./scripts/release.sh [--validate | --help]'
-    echo 'No arguments: publication disabled pending reviewed safety fixes. Use --validate for local configuration checks.'
+    echo 'No arguments: automatically verify committed source and both platforms, then publish. Setup: private token file, clean pushed main, and capable Docker host.'
     exit 0 ;;
-  --validate|'') ;;
+  --validate) ;;
+  '') [[ $# == 0 ]] || { echo 'Unsupported empty argument' >&2; exit 2; } ;;
   *) echo 'Unsupported arguments. Usage: ./scripts/release.sh [--validate | --help]' >&2; exit 2 ;;
 esac
 [[ $# -le 1 ]] || exit 2
-# BEGIN HOME-WEB PUBLICATION GUARD
-if [[ "${1:-}" != --validate ]]; then
-  echo 'Publication disabled: reviewed upstream safety fixes and package readiness are required; use --validate.' >&2
-  exit 1
-fi
-# END HOME-WEB PUBLICATION GUARD
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 source "$root/scripts/release-common.sh"
 command -v python3 >/dev/null || stop 'Install Python 3.11 or later (no jq required)'
@@ -27,7 +22,7 @@ if [[ "${1:-}" == --validate ]]; then
   echo 'Configuration valid; no credentials or remote operations used'
   exit 0
 fi
-for tool in git docker curl; do
+for tool in git docker curl node npm; do
   command -v "$tool" >/dev/null || stop "Required command unavailable: $tool"
 done
 for marker in release-template.lock.json scripts/release-template .template-transaction; do
@@ -38,11 +33,10 @@ if [[ -z "${RELEASE_LOCK_FD:-}" ]]; then
 fi
 data lock-check "$root"
 umask 077
-work=$(mktemp -d "${TMPDIR:-/tmp}/bash-release.XXXXXXXX")
+work=${RELEASE_WORK_DIR:?release supervisor must own work directory}
 phase='local setup'
-cleanup() { rm -rf -- "$work"; }
-trap cleanup EXIT
-trap 'echo "Publication incomplete/uncertain during $phase; inspect exact remaining objects without rollback" >&2' ERR
+mutation_started=false
+trap 'if [[ "$mutation_started" == true ]]; then echo "Publication incomplete/uncertain during $phase; inspect exact remaining objects without rollback" >&2; else echo "Publication did not begin; failed during $phase" >&2; fi' ERR
 trap 'exit 130' INT
 trap 'exit 143' TERM
 data settings "$root" "$work/settings.json"
@@ -53,15 +47,22 @@ repository=$(field "$work/settings.json" repository)
 image=$(field "$work/settings.json" image)
 printf 'Release target: %s / %s (%s)\n' "$repository" "$image" "$tag"
 [[ ! -e "$root/.release-template/$tag.json" && ! -L "$root/.release-template/$tag.json" ]] || stop 'Legacy checkpoint exists; preserve its original checkout/pin'
-phase='source and builder preflight'
+phase='source preflight'
+commit=$(data source "$root") || stop 'Cannot verify release source'
+data payload "$root" "$commit" "$work/payload.json"
+phase='automatic local verification'
+python3 -B "$root/scripts/release-verify.py" local "$root" "$work" "$commit"
+data source "$root" "$commit" >/dev/null
+phase='builder preflight'
 original_docker_context=${DOCKER_CONTEXT-}
 original_docker_config=${DOCKER_CONFIG:-$HOME/.docker}
+data buildx-capture "$work"
 run 1048576 60 docker buildx inspect --bootstrap
 data platforms "$work/command.out"
-commit=$(data source "$root") || stop 'Cannot verify release source'
 # Validate captured notes before reading credentials or doing any registry write.
 data payload "$root" "$commit" "$work/payload.json"
 data auth "$root" "$work"
+data buildx-pin "$work"
 phase='read-only package readiness'
 data package-ready "$root" "$work"
 registry_host=${image%%/*}
@@ -76,6 +77,7 @@ if [[ "$context" != default || -n "$original_docker_context" ]]; then
 else
   unset DOCKER_CONTEXT
 fi
+data buildx-check "$work"
 phase='read-only startup classification'
 data inventory "$root" "$work" "$work/inventory.json"
 tag_state
@@ -94,6 +96,8 @@ if [[ -n "$remote_oid" || -n "$release_record" ]]; then
   field "$work/inventory.json" release > "$work/release.json"
   data release-check "$root" "$commit" "$work/release.json"
   [[ $(data resolve "$root" "$work" latest) == "$prepared" ]] || stop 'Completed latest changed during verification'
+  login
+  python3 -B "$root/scripts/release-verify.py" image "$root" "$work" "$prepared" "$commit"
   associate_package "$remote_oid"
   success
   exit 0
@@ -111,6 +115,8 @@ if [[ -z "$prepared" ]]; then
   login
   data snapshot "$root" "$commit" "$work/source"
   phase='staging build and immutable verification'
+  mutation_started=true
+  data buildx-check "$work"
   run 16777216 7200 docker buildx build --platform linux/amd64,linux/arm64 --provenance=false \
     --metadata-file "$work/build.json" --push --tag "$image:$staging" \
     --label "org.opencontainers.image.version=$version" --label "org.opencontainers.image.revision=$commit" \
@@ -120,8 +126,11 @@ if [[ -z "$prepared" ]]; then
 else
   login
 fi
+phase='both-platform runtime verification'
+python3 -B "$root/scripts/release-verify.py" image "$root" "$work" "$prepared" "$commit"
 oid=$(data make-tag "$root" "$commit" "$prepared" "$predecessor" "$work/identity.json") || stop 'Cannot create exact intended tag'
 phase='tag publication'
+mutation_started=true
 fresh_guard
 # A failed response may follow an accepted write. Reconcile exactly; never force or roll back.
 attempt run 1048576 60 git -C "$root" push origin "$oid:refs/tags/$tag"
@@ -137,6 +146,7 @@ if [[ "$promotion_latest" != "$prepared" ]]; then
   attempt run 1048576 60 docker buildx imagetools create --tag "$image:latest" "$image@$prepared"
 fi
 [[ $(data resolve "$root" "$work" latest) == "$prepared" ]] || stop 'Promotion not confirmed'
+promotion_confirmed=true
 phase='release creation'
 fresh_guard
 attempt data http "$work" POST "$origin/api/v1/repos/$repository/releases" "$work/post.json" "$work/payload.json" > "$work/post.status"

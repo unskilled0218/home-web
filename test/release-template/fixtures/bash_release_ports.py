@@ -17,6 +17,21 @@ state = json.loads(state_path.read_text())
 arguments = sys.argv[1:]
 tool = Path(sys.argv[0]).name
 
+if tool == "python3":
+  if len(arguments) > 1 and arguments[0] == "-B" and arguments[1].endswith("release-verify.py"):
+    action = arguments[2]
+    events = ["verify:dependencies", "verify:syntax", "verify:application", "verify:release", "verify:packaging"] if action == "local" else ["runtime:linux/amd64", "runtime:linux/arm64"]
+    for value in events:
+      with (base / "events").open("a") as output:
+        output.write(value + "\n")
+      if state.get("verify_failure") == value:
+        sys.exit(1)
+    sys.exit(0)
+  os.execv(sys.executable, [sys.executable, *arguments])
+
+if tool in ("npm", "node"):
+  raise AssertionError("Unexpected recursive verification command")
+
 
 def save():
   state_path.write_text(json.dumps(state))
@@ -124,7 +139,17 @@ if tool == "docker":
   selection = docker_selection()
   with (base / "docker-selections").open("a") as output:
     output.write(json.dumps(selection) + "\n")
-  if arguments[:2] == ["buildx", "inspect"]:
+  if arguments[0] == "info":
+    plugin = base / "bin/buildx-plugin"
+    private = Path(os.environ.get("DOCKER_CONFIG", str(base / ".docker"))) / "cli-plugins/docker-buildx"
+    if private.exists():
+      plugin = private
+      if state.get("changed_plugin"):
+        plugin = base / "bin/foreign-plugin"
+        plugin.write_text("#!/bin/sh\nexit 1\n")
+        plugin.chmod(0o700)
+    print(json.dumps([{"Name": "buildx", "Path": str(plugin)}]))
+  elif arguments[:2] == ["buildx", "inspect"]:
     event("builder")
     if state.get("inspection_failure"):
       sys.exit(1)
@@ -169,6 +194,7 @@ if tool == "docker":
       sys.exit(1)
   elif arguments[:3] == ["buildx", "imagetools", "create"]:
     event("promote")
+    state["predecessor"] = state["aliases"].get("latest")
     state["aliases"]["latest"] = arguments[-1].split("@", 1)[1]
     if state.get("oversize_after_promotion"):
       state["oversized"] = True
@@ -248,6 +274,18 @@ elif route.endswith("/tags"):
 elif route.startswith("/v2/"):
   reference = route.rsplit("/", 1)[1]
   fault = None
+  if reference == "latest" and "promote" in (base / "events").read_text().splitlines():
+    state["after_promotion_reads"] = state.get("after_promotion_reads", 0) + 1
+    if state["after_promotion_reads"] == 2 and state.get("after_promotion_fault"):
+      fault = state.pop("after_promotion_fault")
+      event("after-promotion:" + fault)
+      if fault == "predecessor":
+        state["aliases"]["latest"] = state["predecessor"]
+      elif fault == "absent":
+        state["aliases"].pop("latest", None)
+      elif fault == "foreign":
+        state["aliases"]["latest"] = store({"foreign": True})
+    save()
   if reference == "latest" and "tag-confirmed" in (base / "events").read_text().splitlines() and "promote" not in (base / "events").read_text().splitlines():
     state["promotion_reads"] = state.get("promotion_reads", 0) + 1
     if state["promotion_reads"] == 2 and state.get("promotion_read_fault"):

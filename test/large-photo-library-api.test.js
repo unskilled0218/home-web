@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { temporaryPrefix } from '../scripts/temporary.js';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -11,7 +12,7 @@ import { populatePhotoFiles, SMALL_PNG } from './fixtures/large-photo-library.js
 import { slideshowClock } from './fixtures/photo-slideshow.js';
 
 test('a 7001-image library supplies bounded Local/legacy pools and rotates the Global selection without browsers', { timeout: 30000 }, async context => {
-  const root = mkdtempSync('/tmp/opencode/large-photo-api-'); let store; let slideshow; let server;
+  const root = mkdtempSync(temporaryPrefix('large-photo-api-')); let store; let slideshow; let server;
   context.after(async () => { await Promise.all([server?.lifecycle.shutdown(), slideshow?.stop()]); store?.close(); rmSync(root, { recursive: true, force: true }); });
   populatePhotoFiles(root, 7001); const clock = slideshowClock(); const library = createPhotoLibrary({ root, now: clock.now }); store = createStore(':memory:');
   slideshow = createPhotoSlideshow({ ...clock, photoLibrary: library, preferences: { order: 'name', interval: 5 } });
@@ -38,7 +39,7 @@ test('a 7001-image library supplies bounded Local/legacy pools and rotates the G
 });
 
 test('Settings and Local cached inventory remain available without Global preferences and recovery does not rescan', async context => {
-  const root = mkdtempSync('/tmp/opencode/no-photo-preferences-'); populatePhotoFiles(root, 3); const clock = slideshowClock(); const library = createPhotoLibrary({ root, ...clock });
+  const root = mkdtempSync(temporaryPrefix('no-photo-preferences-')); populatePhotoFiles(root, 3); const clock = slideshowClock(); const library = createPhotoLibrary({ root, ...clock });
   let scans = 0; const photoLibrary = { ...library, refresh() { scans++; return library.refresh(); } };
   const slideshow = createPhotoSlideshow({ ...clock, photoLibrary, preferences: null }); const store = createStore(':memory:');
   const server = createDashboardServer({ runtimeConfig: { allowedHosts: ['127.0.0.1'] }, store, photoLibrary, photoSourceEnabled: true, slideshow });

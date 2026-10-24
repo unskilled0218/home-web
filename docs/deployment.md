@@ -2,7 +2,7 @@
 
 - [Container deployment](#container-deployment)
 
-Existing release images are available from the private Gitea registry as `git.lan/dev/home-web`. New publication from this checkout is disabled pending reviewed safety fixes; see [release operations](releases.md). The image contains Node 24 and the application source, runs as root, and installs nothing at startup. Compose uses host networking because UDP broadcast packets need to leave through the LAN interface. Log in, create the persistent directories, pull the current image, and start it with the host's private address:
+Release images are available from the private Gitea registry as `git.lan/dev/home-web`. Maintainers use `bash scripts/release.sh` for automatic verification and publication after setup; see [release operations](releases.md). The image contains Node 24 and the application source, runs as root, and installs nothing at startup. Compose uses host networking because UDP broadcast packets need to leave through the LAN interface. Log in, create the persistent directories, pull the current image, and start it with the host's private address:
 
 ```sh
 docker login git.lan

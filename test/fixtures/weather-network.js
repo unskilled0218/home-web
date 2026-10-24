@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { temporaryPrefix } from '../../scripts/temporary.js';
 import { EventEmitter, once } from 'node:events';
 import { execFileSync, spawn } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -13,7 +14,7 @@ export const fixtureHosts = ['weather.invalid', 'sub.weather.invalid', 'wrong.in
 export const proxyRuntime = { skip: process.allowedNodeEnvironmentFlags.has('--use-env-proxy') ? false : 'Requires Node with built-in environment proxy support (24.5+).' };
 
 export async function weatherNetwork(t, { holdAir = false } = {}) {
-  const directory = mkdtempSync('/tmp/opencode/weather-network-');
+  const directory = mkdtempSync(temporaryPrefix('weather-network-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const cert = path.join(directory, 'cert.pem'); const key = path.join(directory, 'key.pem');
   execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', key, '-out', cert, '-days', '1', '-subj', '/CN=weather.invalid', '-addext', 'subjectAltName=DNS:weather.invalid,DNS:sub.weather.invalid,DNS:api.open-meteo.com,DNS:air-quality-api.open-meteo.com,IP:127.0.0.1'], { stdio: 'ignore' });

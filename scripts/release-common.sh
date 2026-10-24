@@ -3,9 +3,17 @@
 
 data() { python3 -B "$root/scripts/release-data.py" "$@"; }
 field() { data field "$1" "$2"; }
-stop() { echo "Release stopped (${phase:-local setup}): $*; inspect partial state without rollback" >&2; exit 1; }
+stop() {
+  if [[ "${mutation_started:-false}" == true ]]; then
+    echo "Release stopped (${phase:-local setup}): $*; inspect partial state without rollback" >&2
+  else
+    echo "Release stopped (${phase:-local setup}): $*; publication did not begin" >&2
+  fi
+  exit 1
+}
 run() { data run "$1" "$2" "$work/command.out" "${@:3}"; }
 login() {
+  data buildx-check "$work" || stop 'Cannot verify selected Buildx executable'
   data run-input 1048576 60 "$work/login.out" "$work/token" docker login "$registry_host" \
     --username "$(cat "$work/login")" --password-stdin
 }
@@ -29,9 +37,14 @@ tag_state() {
 alias_guard() {
   local current
   current=$(data resolve "$root" "$work" latest) || stop 'Cannot verify latest alias'
-  [[ "$current" == "$predecessor" || "$current" == "$prepared" ]] || stop 'Latest changed since preparation'
+  if [[ "${promotion_confirmed:-false}" == true ]]; then
+    [[ "$current" == "$prepared" ]] || stop 'Latest changed after confirmed promotion'
+  else
+    [[ "$current" == "$predecessor" || "$current" == "$prepared" ]] || stop 'Latest changed since preparation'
+  fi
 }
 fresh_guard() {
+  data buildx-check "$work" || stop 'Cannot verify selected Buildx executable'
   scan
   tag_state
   [[ -z "$release_record" ]] || stop 'Requested release appeared during publication'
@@ -58,6 +71,8 @@ associate_package() {
   local expected_oid=$1
   phase='package association'
   publication_guard "$expected_oid"
+  # Linking may be the one completed-retry write; do not claim no writes after an uncertain POST.
+  mutation_started=true
   data package-ensure "$root" "$work" || stop 'Package association failed or uncertain'
   publication_guard "$expected_oid"
   data package-check "$root" "$work" || stop 'Cannot verify final package association'

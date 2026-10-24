@@ -16,7 +16,11 @@ import subprocess
 import sys
 import tarfile
 import time
+import tempfile
 from urllib.parse import quote, urlencode, urlsplit
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from release_process import TreeOwner
+from temporary import parent as temporary_parent
 
 
 API_LIMIT = 4194304
@@ -130,12 +134,13 @@ def settings(root):
   version(release_version)
   require(len(release_version) <= 16, "Version exceeds supported registry-tag length")
   script_hash = sha(b"".join(name.encode() + b"\x00" + read(regular(root, "scripts/" + name)) for name in
-                             ("release.sh", "release-common.sh", "release-data.py")))
+                             ("release.sh", "release-common.sh", "release-data.py", "release-verify.py", "release_process.py",
+                              "temporary.py", "temporary.js", "check-syntax.js", "check-production.js")))
   return config | {"gitea": config["gitea"].rstrip("/"), "version": release_version, "tag": "v" + release_version,
                    "config_hash": sha(read(root / "scripts/release.json", ANNOTATION_LIMIT)), "script_hash": script_hash}
 
 
-def capture(arguments, limit=REF_LIMIT, seconds=READ_SECONDS, input_data=None, streams=None):
+def capture(arguments, limit=REF_LIMIT, seconds=READ_SECONDS, input_data=None, streams=None, environment=None, cwd=None):
   """Drain bounded pipes concurrently; terminate the whole owned process group on failure."""
   extra = streams or {}
   pipes, readers, limits = {}, {}, {}
@@ -147,12 +152,13 @@ def capture(arguments, limit=REF_LIMIT, seconds=READ_SECONDS, input_data=None, s
                .replace("{headers}", f"/dev/fd/{pipes['headers'][1]}") if pipes else str(a) for a in arguments]
   process = None
   selector = selectors.DefaultSelector()
+  owner = TreeOwner()
   try:
-    environment = {k: v for k, v in os.environ.items() if k not in
+    environment = {k: v for k, v in (os.environ if environment is None else environment).items() if k not in
                    ("GIT_TOKEN", "GIT_USERNAME", "FORGEJO_TOKEN", "FORGEJO_USER", "GITEA_TOKEN", "GITEA_USERNAME")}
     process = subprocess.Popen(arguments, stdin=subprocess.PIPE if input_data is not None else subprocess.DEVNULL,
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True,
-                               env=environment, pass_fds=tuple(w for _, w in pipes.values()))
+                               env=environment, cwd=cwd, pass_fds=tuple(w for _, w in pipes.values()))
     for _, writer in pipes.values():
       os.close(writer)
     readers |= {"stdout": process.stdout.fileno(), "stderr": process.stderr.fileno()}
@@ -191,13 +197,12 @@ def capture(arguments, limit=REF_LIMIT, seconds=READ_SECONDS, input_data=None, s
     remaining = max(0.001, deadline - time.monotonic())
     status = process.wait(timeout=remaining)
     return status, {key: bytes(value) for key, value in buffers.items()}
+  except subprocess.TimeoutExpired as error:
+    raise CommandFailed("Command timed out") from error
   finally:
     selector.close()
     if process is not None:
-      try:
-        os.killpg(process.pid, signal.SIGKILL)
-      except ProcessLookupError:
-        pass
+      owner.cleanup(process)
       process.wait()
       for pipe in (process.stdout, process.stderr, process.stdin):
         if pipe is not None:
@@ -308,6 +313,40 @@ def auth(root, work):
   for path in work.iterdir():
     if path.is_file():
       path.chmod(0o600)
+
+
+def buildx_identity():
+  records = decode(command(["docker", "info", "--format", "{{json .ClientInfo.Plugins}}"], CONFIG_LIMIT))
+  matches = [item for item in records if isinstance(item, dict) and item.get("Name") == "buildx"] if isinstance(records, list) else []
+  require(len(matches) == 1, "Cannot identify unique selected Buildx executable")
+  path = Path(matches[0].get("Path", ""))
+  require(path.is_absolute() and path.is_file() and os.access(path, os.X_OK), "Buildx executable is unavailable")
+  resolved = path.resolve()
+  with resolved.open("rb") as source_file:
+    checksum = hashlib.file_digest(source_file, "sha256").hexdigest()
+  return {"path": str(resolved), "digest": checksum}
+
+
+def pin_buildx(work):
+  work = Path(work)
+  selected = document(work / "buildx-identity.json")
+  directory = work / "docker/cli-plugins"
+  directory.mkdir()
+  (directory / "docker-buildx").symlink_to(selected["path"])
+
+
+def verify_buildx(work):
+  require(buildx_identity() == document(Path(work) / "buildx-identity.json"),
+          "Selected Buildx executable changed; inspect plugin discovery before publication")
+
+
+def discard_auth(work):
+  for name in ("token", "login", "api.curl", "registry.curl", "bearer.curl"):
+    (Path(work) / name).unlink(missing_ok=True)
+  private_docker = Path(work) / "docker"
+  if private_docker.exists():
+    # Context TLS keys are credentials too, even when cleanup evidence is retained.
+    shutil.rmtree(private_docker)
 
 
 def http(work, method, url, auth_name="api.curl", payload=None, limit=API_LIMIT, seconds=READ_SECONDS):
@@ -700,22 +739,49 @@ def dispatch(args):
     require(document(args[0]).get("containerimage.digest") == args[1], "Build metadata differs")
   elif action == "platforms":
     advertised_platforms(read(args[0]).decode())
+  elif action == "buildx-capture":
+    write(Path(args[0]) / "buildx-identity.json", buildx_identity())
+  elif action == "buildx-pin":
+    pin_buildx(args[0])
+  elif action == "buildx-check":
+    verify_buildx(args[0])
   elif action == "locked":
     root, script = args
     path = Path(root) / ".template-operation.lock"
     fd = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     try:
       fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-      environment = os.environ | {"RELEASE_LOCK_FD": str(fd)}
+      work = tempfile.mkdtemp(prefix="home-web-release-", dir=temporary_parent(root))
+      environment = os.environ | {"RELEASE_LOCK_FD": str(fd), "RELEASE_WORK_DIR": work}
+      owner = TreeOwner()
       child = subprocess.Popen(["bash", script], env=environment, pass_fds=(fd,), start_new_session=True)
+      interrupted = []
       def forward(number, _frame):
-        try:
-          os.killpg(child.pid, number)
-        except ProcessLookupError:
-          pass
+        interrupted.append(number)
+        owner.signal(number)
       signal.signal(signal.SIGTERM, forward)
       signal.signal(signal.SIGINT, forward)
-      return child.wait()
+      try:
+        while child.poll() is None:
+          owner.collect()
+          if interrupted:
+            owner.cleanup(child)
+            break
+          time.sleep(0.05)
+        status = child.wait()
+      finally:
+        cleanup_status = 1
+        try:
+          owner.cleanup(child)
+          cleanup_status, _ = capture([sys.executable, "-B", str(Path(root) / "scripts/release-verify.py"),
+                                       "cleanup", root, work], CONFIG_LIMIT, 60, environment=environment)
+        finally:
+          discard_auth(work)
+          if cleanup_status == 0:
+            shutil.rmtree(work)
+          else:
+            print("Owned cleanup unconfirmed; sanitized evidence retained at " + work, file=sys.stderr)
+      return status if cleanup_status == 0 else 1
     finally:
       os.close(fd)
   elif action == "lock-check":
@@ -737,7 +803,7 @@ if __name__ == "__main__":
   try:
     require(sys.version_info >= (3, 11), "Python 3.11 or later is required")
     sys.exit(dispatch(sys.argv[1:]))
-  except (Refusal, OSError, ValueError, KeyError, TypeError, IndexError, AttributeError, RecursionError, subprocess.SubprocessError) as exc:
+  except (Refusal, OSError, ValueError, RuntimeError, KeyError, TypeError, IndexError, AttributeError, RecursionError, subprocess.SubprocessError) as exc:
     # Never relay raw remote bodies, command stderr, config values, or credential paths.
     print("Release stopped: " + (str(exc) if isinstance(exc, Refusal) else "Invalid or unavailable input"), file=sys.stderr)
     sys.exit(2 if isinstance(exc, CommandFailed) else 1)

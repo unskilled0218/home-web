@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { temporaryPrefix } from '../scripts/temporary.js';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -105,7 +106,7 @@ try {
 }
 
 async function verifyDevelopmentReload(baseUrl, caFile) {
-  const directory = mkdtempSync('/tmp/opencode/ha-trust-reload-'); let child; let exited;
+  const directory = mkdtempSync(temporaryPrefix('ha-trust-reload-')); let child; let exited;
   try {
     for (const folder of ['src', 'public', 'scripts']) cpSync(path.join(root, folder), path.join(directory, folder), { recursive: true });
     cpSync(path.join(root, 'package.json'), path.join(directory, 'package.json')); symlinkSync(path.join(root, 'node_modules'), path.join(directory, 'node_modules'), 'dir');

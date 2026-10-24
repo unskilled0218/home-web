@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { temporaryPrefix } from '../scripts/temporary.js';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
@@ -15,7 +16,7 @@ import { photo, slideshowClock } from './fixtures/photo-slideshow.js';
 import { deferred, tick } from './fixtures/lifecycle.js';
 
 test('Local producer filters oversized legacy metadata before serialization and does not change Global selection', async t => {
-  const root = await mkdtemp('/tmp/opencode/local-photo-api-'); const directory = path.join(root, ...Array(8).fill('\u0001'.repeat(100))); await mkdir(directory, { recursive: true });
+  const root = await mkdtemp(temporaryPrefix('local-photo-api-')); const directory = path.join(root, ...Array(8).fill('\u0001'.repeat(100))); await mkdir(directory, { recursive: true });
   await writeFile(path.join(root, 'valid.png'), 'image'); for (let i = 0; i < 99; i++) await writeFile(path.join(directory, `${i}.png`), 'image');
   const library = createPhotoLibrary({ root }); const clock = slideshowClock(); const slideshow = createPhotoSlideshow({ ...clock, photoLibrary: library, preferences: { order: 'name', interval: 5 } }); await slideshow.start(); const store = createStore(':memory:');
   const server = createDashboardServer({ runtimeConfig: { allowedHosts: ['127.0.0.1'] }, store, photoLibrary: library, photoSourceEnabled: true, slideshow }); server.listen(0, '127.0.0.1'); await once(server, 'listening');

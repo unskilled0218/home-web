@@ -12,44 +12,40 @@ import tempfile
 import unittest
 from unittest.mock import patch
 import time
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'scripts'))
+from temporary import parent as temporary_parent
 
 
 ROOT = Path(__file__).resolve().parents[2]
 SUITE = Path(__file__).resolve().parent
-GUARD = '''# BEGIN HOME-WEB PUBLICATION GUARD
-if [[ "${1:-}" != --validate ]]; then
-  echo 'Publication disabled: reviewed upstream safety fixes and package readiness are required; use --validate.' >&2
-  exit 1
-fi
-# END HOME-WEB PUBLICATION GUARD
-'''
 
 
 class BashInterfaceTests(unittest.TestCase):
-  def test_publication_guard_needs_no_tools_helpers_credentials_or_state(self):
-    with tempfile.TemporaryDirectory(dir="/tmp/opencode") as directory:
+  def test_unsupported_invocation_needs_no_tools_helpers_credentials_or_state(self):
+    with tempfile.TemporaryDirectory(dir=temporary_parent()) as directory:
       root = Path(directory)
       script = root / "release.sh"
       shutil.copyfile(ROOT / "scripts/release.sh", script)
       before = sorted(root.iterdir())
       for overrides in ({}, {"RELEASE_ENABLED": "1", "ALLOW_PUBLICATION": "1", "RELEASE_LOCK_FD": "999",
                               "GIT_TOKEN": "/missing/token", "FORGEJO_TOKEN": "unused", "BASH_TEST_STATE": directory}):
-        for args in ([], [""]):
+        for args in ([""], ["--unknown"], ["--help", "extra"]):
           result = subprocess.run(["/bin/bash", str(script), *args], cwd=directory,
                                   env={"PATH": "/missing", "HOME": directory, **overrides},
                                   capture_output=True, text=True)
-          self.assertEqual(result.returncode, 1, result.stderr)
-          self.assertIn("Publication disabled", result.stderr)
+          self.assertEqual(result.returncode, 2, result.stderr)
           self.assertNotIn("No such file", result.stderr, "Must not source missing helpers or access token paths")
           self.assertEqual(sorted(root.iterdir()), before, "Guard must not create state")
 
   def test_validate_from_another_directory_has_no_state_or_external_commands(self):
-    with tempfile.TemporaryDirectory(dir="/tmp/opencode") as directory:
+    with tempfile.TemporaryDirectory(dir=temporary_parent()) as directory:
       base = Path(directory)
       root = base / "project"
       (root / "scripts").mkdir(parents=True)
       config = json.loads((ROOT / "scripts/release.json").read_text())
       for name in ("scripts/release.sh", "scripts/release-common.sh", "scripts/release-data.py", "scripts/release.json",
+                   "scripts/release-verify.py", "scripts/release_process.py", "scripts/temporary.py", "scripts/temporary.js",
+                   "scripts/check-syntax.js", "scripts/check-production.js",
                    "VERSION", "Dockerfile", ".dockerignore", config["notes"]):
         target = root / name
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -75,7 +71,7 @@ class BashInterfaceTests(unittest.TestCase):
   def test_help_describes_no_argument_release(self):
     result = subprocess.run(["bash", str(ROOT / "scripts/release.sh"), "--help"], capture_output=True, text=True)
     self.assertEqual(result.returncode, 0, result.stderr)
-    self.assertIn("No arguments: publication disabled", result.stdout)
+    self.assertIn("No arguments: automatically verify", result.stdout)
 
   def test_validate_needs_no_credentials_or_remote_operations(self):
     environment = os.environ | {"GIT_TOKEN": "/missing/must-not-be-read"}
@@ -124,6 +120,50 @@ def helper_module():
 
 
 class BashPublicationTests(unittest.TestCase):
+  def test_verification_failures_are_nonrecursive_and_block_all_publication(self):
+    for gate in ("dependencies", "syntax", "application", "release", "packaging"):
+      with self.subTest(gate=gate):
+        self.change(verify_failure="verify:" + gate)
+        (self.base / "events").write_text("")
+        result = self.release()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.events().count("verify:dependencies"), 1)
+        self.assert_no_writes()
+        self.assertNotIn("builder", self.events())
+        self.assertNotIn("login", self.events())
+
+  def test_runtime_failure_stops_before_tag_and_promotion(self):
+    self.change(verify_failure="runtime:linux/arm64")
+    result = self.release()
+    self.assertNotEqual(result.returncode, 0)
+    self.assertIn("build", self.events())
+    for action in ("tag-push", "promote", "release-post", "package-link"):
+      self.assertNotIn(action, self.events())
+
+  def test_plugin_replacement_under_private_auth_stops_before_login(self):
+    self.change(changed_plugin=True)
+    result = self.release()
+    self.assertNotEqual(result.returncode, 0)
+    self.assertIn("Buildx executable changed", result.stderr)
+    self.assertNotIn("login", self.events())
+    self.assert_no_writes()
+
+  def test_confirmed_promotion_never_accepts_predecessor_or_failed_evidence(self):
+    for fault in ("predecessor", "absent", "foreign", "transport", "unauthorized", "server_error", "malformed"):
+      with self.subTest(fault=fault):
+        # Each fault needs a fresh publication identity and owned remote.
+        self.git("tag", "-d", "v1.0.0") if self.git("tag", "--list") else None
+        self.git("--git-dir", str(self.base / "remote.git"), "update-ref", "-d", "refs/tags/v1.0.0")
+        self.change(objects={}, aliases={}, releases=[], post_push_scans=0, after_promotion_reads=0)
+        self.predecessor()
+        self.change(after_promotion_fault=fault)
+        (self.base / "events").write_text("")
+        result = self.release()
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("after-promotion:" + fault, self.events())
+        self.assertNotIn("release-post", self.events())
+        self.assertNotIn("package-link", self.events())
+
   def test_ssh_destination_is_compatible(self):
     self.change(git_destination="ssh://git@git.lan/fixtures/application.git")
     self.assertEqual(self.release().returncode, 0)
@@ -188,20 +228,21 @@ class BashPublicationTests(unittest.TestCase):
         result = self.release()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("running nodes", result.stderr)
-        self.assertEqual(self.events(), ["builder"])
+        self.assertEqual(self.events(), ["verify:dependencies", "verify:syntax", "verify:application", "verify:release", "verify:packaging", "builder"])
     self.change(inspection_failure=True)
     self.assertNotEqual(self.release().returncode, 0)
     self.assert_no_writes()
 
   def setUp(self):
-    self.temporary = tempfile.TemporaryDirectory(prefix="bash-release-test-", dir="/tmp/opencode" if Path("/tmp/opencode").is_dir() else None)
+    self.temporary = tempfile.TemporaryDirectory(prefix="bash-release-test-", dir=temporary_parent())
     self.addCleanup(self.temporary.cleanup)
     self.base = Path(self.temporary.name)
     self.root, self.bin = self.base / "project", self.base / "bin"
     self.root.mkdir()
     self.bin.mkdir()
     (self.root / "scripts").mkdir()
-    for name in ("release.sh", "release-common.sh", "release-data.py", "release.json"):
+    for name in ("release.sh", "release-common.sh", "release-data.py", "release.json", "release-verify.py", "release_process.py",
+                 "temporary.py", "temporary.js", "check-syntax.js", "check-production.js"):
       shutil.copyfile(ROOT / "scripts" / name, self.root / "scripts" / name)
     for name in ("Dockerfile", ".dockerignore", ".gitignore"):
       shutil.copyfile(ROOT / name, self.root / name)
@@ -216,28 +257,25 @@ class BashPublicationTests(unittest.TestCase):
     (self.root / "scripts/release.json").write_text(json.dumps(config))
     self.state_path = self.base / "state.json"
     self.state_path.write_text(json.dumps({"objects": {}, "aliases": {}, "releases": []}))
-    self.environment = os.environ | {"GIT_AUTHOR_NAME": "Fixture", "GIT_COMMITTER_NAME": "Fixture",
+    self.environment = {"GIT_AUTHOR_NAME": "Fixture", "GIT_COMMITTER_NAME": "Fixture",
       "GIT_AUTHOR_EMAIL": "fixture@localhost", "GIT_COMMITTER_EMAIL": "fixture@localhost",
       "BASH_TEST_STATE": str(self.base), "PATH": str(self.bin) + ":" + os.environ["PATH"],
-      "TMPDIR": str(self.base), "HOME": str(self.base)}
+      "TMPDIR": str(self.base), "HOME": str(self.base), "XDG_CONFIG_HOME": str(self.base), "RELEASE_TEMP_PARENT": str(self.base),
+      "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_COUNT": "2",
+      "GIT_CONFIG_KEY_0": "core.hooksPath", "GIT_CONFIG_VALUE_0": "/dev/null",
+      "GIT_CONFIG_KEY_1": "commit.gpgsign", "GIT_CONFIG_VALUE_1": "false"}
     for key in ("GIT_TOKEN", "GIT_USERNAME", "RELEASE_LOCK_FD", "DOCKER_CONTEXT", "DOCKER_CONFIG", "BUILDX_CONFIG",
                 "DOCKER_HOST", "DOCKER_TLS_VERIFY", "DOCKER_CERT_PATH", "BUILDX_BUILDER"):
       self.environment.pop(key, None)
     port = SUITE / "fixtures/bash_release_ports.py"
-    for name in ("git", "curl", "docker"):
+    for name in ("git", "curl", "docker", "node", "npm", "python3"):
       target = self.bin / name
-      shutil.copyfile(port, target)
+      target.write_text("#!" + sys.executable + "\n" + port.read_text().split("\n", 1)[1])
       target.chmod(0o755)
-    # This is a test-only source transformation in an owned temporary repository.
-    # The checked-in command has no bypass and is tested separately without changes.
-    script = self.root / "scripts/release.sh"
-    self.assertTrue(script.resolve().is_relative_to(self.base.resolve()))
-    self.assertFalse(script.resolve().is_relative_to(ROOT.resolve()))
-    for name in ("git", "curl", "docker"):
-      self.assertEqual((self.bin / name).read_bytes(), port.read_bytes())
-    content = script.read_text()
-    self.assertEqual(content.count(GUARD), 1)
-    script.write_text(content.replace(GUARD, "", 1))
+    plugin = self.bin / "buildx-plugin"
+    plugin.write_text("#!/bin/sh\nexit 0\n")
+    plugin.chmod(0o700)
+    self.assertEqual((self.root / "scripts/release.sh").read_bytes(), (ROOT / "scripts/release.sh").read_bytes())
     self.git("init", "--quiet", "--initial-branch=main")
     self.git("init", "--bare", "--quiet", str(self.base / "remote.git"))
     self.git("remote", "add", "origin", str(self.base / "remote.git"))
@@ -267,6 +305,7 @@ class BashPublicationTests(unittest.TestCase):
                             env=self.environment, capture_output=True, text=True, timeout=90)
     self.assertNotIn("SENTINEL_PRIVATE_TOKEN", result.stdout + result.stderr)
     self.assertEqual(list(self.base.glob("bash-release.*")), [], "Only run-owned temporary paths must be cleaned")
+    self.assertEqual(list(self.base.glob("home-web-release-*")), [], "Supervisor-owned work must be cleaned")
     return result
 
   def assert_no_writes(self):
@@ -780,15 +819,22 @@ class BashPublicationTests(unittest.TestCase):
     process = subprocess.Popen(["bash", str(self.root / "scripts/release.sh")], cwd=self.base,
                                env=self.environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     try:
-      deadline = time.monotonic() + 30
+      # The checkpoint now follows mandatory verification, plugin pinning and readiness.
+      # Keep a bounded startup allowance separate from the cancellation cleanup budget.
+      deadline = time.monotonic() + 60
       while "build" not in self.events() and process.poll() is None and time.monotonic() < deadline:
         time.sleep(0.02)
-      self.assertIn("build", self.events())
+      if "build" not in self.events():
+        if process.poll() is not None:
+          stdout, stderr = process.communicate(timeout=3)
+          self.fail(f"Release exited before cancellation checkpoint ({process.returncode}): {stdout}\n{stderr}")
+        self.fail(f"Release did not reach the cancellation checkpoint within 60 seconds: {self.events()}")
       process.terminate()
-      stdout, stderr = process.communicate(timeout=10)
+      stdout, stderr = process.communicate(timeout=25)
       self.assertNotEqual(process.returncode, 0)
       self.assertNotIn("SENTINEL_PRIVATE_TOKEN", stdout + stderr)
       self.assertEqual(list(self.base.glob("bash-release.*")), [])
+      self.assertEqual(list(self.base.glob("home-web-release-*")), [], "Supervisor must clean its real work directory")
       import fcntl
       with (self.root / ".template-operation.lock").open() as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -923,7 +969,8 @@ class BashPublicationTests(unittest.TestCase):
     # Seed a preexisting package: the first attempt now refuses before building.
     self.predecessor()
     self.change(gitea_version="1.25.0")
-    self.assertEqual(self.release().returncode, 0)
+    supported = self.release()
+    self.assertEqual(supported.returncode, 0, supported.stdout + supported.stderr)
     self.change(gitea_version="1.24.6")
     self.change(linked_repository=self.target_repository())
     (self.base / "events").write_text("")
@@ -1142,7 +1189,7 @@ class BashDataTests(unittest.TestCase):
     replies = [self.http_reply(401, b"{}", {"WWW-Authenticate": 'Bearer realm="https://fixture.invalid/token",service="registry"'}),
                self.http_reply(200, b'{"token":"FIXTURE_BEARER_TOKEN"}'),
                self.http_reply(200, body, {"Docker-Content-Digest": digest})]
-    with tempfile.TemporaryDirectory(dir="/tmp/opencode") as work, patch.object(self.data, "capture", side_effect=replies) as capture:
+    with tempfile.TemporaryDirectory(dir=temporary_parent()) as work, patch.object(self.data, "capture", side_effect=replies) as capture:
       self.assertEqual(self.data.registry(work, "https://fixture.invalid", "fixture.invalid/fixtures/application",
                                           "manifests", digest), (digest, {"schemaVersion": 2}))
       calls = [call.args[0] for call in capture.call_args_list]

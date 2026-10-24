@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { temporaryPrefix } from '../scripts/temporary.js';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -23,7 +24,7 @@ async function launch(directory, { env = {}, file = false } = {}) {
   const running = await within(Promise.race([ready, exited.then(() => false)]), 5000);
   return { running, port, get output() { return output; }, get code() { return child.exitCode; }, stop };
 }
-function temporary(t) { const directory = mkdtempSync('/tmp/opencode/startup-key-'); t.after(async () => { for (const run of owned.get(directory) || []) await run.stop(); owned.delete(directory); rmSync(directory, { recursive: true, force: true }); }); return directory; }
+function temporary(t) { const directory = mkdtempSync(temporaryPrefix('startup-key-')); t.after(async () => { for (const run of owned.get(directory) || []) await run.stop(); owned.delete(directory); rmSync(directory, { recursive: true, force: true }); }); return directory; }
 
 test('pure configuration computes database-relative defaults without touching storage', t => {
   const root = temporary(t); const databasePath = path.join(root, 'absent', 'dashboard.db');

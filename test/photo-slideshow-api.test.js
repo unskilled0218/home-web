@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { temporaryPrefix } from '../scripts/temporary.js';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import http from 'node:http';
@@ -14,7 +15,7 @@ import { photo, slideshowClock, slideshowSnapshot } from './fixtures/photo-slide
 import { deferred, tick } from './fixtures/lifecycle.js';
 
 async function environment(t, options = {}) {
-  const directory = await mkdtemp('/tmp/opencode/slideshow-api-'); const store = createStore(path.join(directory, 'app.db')); const clock = slideshowClock();
+  const directory = await mkdtemp(temporaryPrefix('slideshow-api-')); const store = createStore(path.join(directory, 'app.db')); const clock = slideshowClock();
   const photoLibrary = options.photoLibrary ?? { list: async () => ({ available: true, photos: [photo(), photo('b.png')] }), open: async () => null };
   const service = createPhotoSlideshow({ ...clock, photoLibrary, preferences: store.getDashboardPreferences().preferences });
   const server = createDashboardServer({ runtimeConfig: { allowedHosts: ['127.0.0.1'] }, store, photoLibrary, slideshow: options.absent ? undefined : options.slideshow ?? service });
@@ -83,7 +84,7 @@ test('notification failure cannot turn an already committed preference save into
 });
 
 test('real library/service/API round trip filters transport-ineligible names without altering legacy streams', async (t) => {
-  const root = await mkdtemp('/tmp/opencode/slideshow-names-'); t.after(() => rm(root, { recursive: true, force: true }));
+  const root = await mkdtemp(temporaryPrefix('slideshow-names-')); t.after(() => rm(root, { recursive: true, force: true }));
   const longDirectory = path.join(root, ...Array.from({ length: 5 }, (_, i) => `${i}${'x'.repeat(219)}`)); await mkdir(longDirectory, { recursive: true });
   const names = ['日"本.png', 'plain.png', 'control\n.png', path.relative(root, path.join(longDirectory, 'long.png'))];
   for (const name of names) await writeFile(path.join(root, name), 'image');

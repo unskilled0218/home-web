@@ -1,10 +1,11 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { temporaryPrefix } from '../../scripts/temporary.js';
 import path from 'node:path';
 
 export const SMALL_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64');
 
 export function photoFixture(context) {
-  const root = mkdtempSync('/tmp/opencode/large-photo-library-');
+  const root = mkdtempSync(temporaryPrefix('large-photo-library-'));
   context.after(() => rmSync(root, { recursive: true, force: true }));
   return root;
 }

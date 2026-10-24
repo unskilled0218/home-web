@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { temporaryPrefix } from '../scripts/temporary.js';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, rm, symlink } from 'node:fs/promises';
 import { createDevSupervisor, developmentEnvironment, scanDevelopmentFiles } from '../scripts/dev-supervisor.js';
@@ -12,7 +13,7 @@ function fixture(extra = {}) {
 }
 
 test('polling enumerates source/config changes but excludes databases, tasks, dependencies and symlinks', async (t) => {
-  const root = await mkdtemp('/tmp/opencode/dev-scan-'); t.after(() => rm(root, { recursive: true, force: true }));
+  const root = await mkdtemp(temporaryPrefix('dev-scan-')); t.after(() => rm(root, { recursive: true, force: true }));
   for (const directory of ['src', 'public', 'data', 'tasks', 'node_modules']) await mkdir(`${root}/${directory}`);
   await writeFile(`${root}/package.json`, '{}'); await writeFile(`${root}/src/server.js`, 'one'); await writeFile(`${root}/data/wol.db`, 'database'); await writeFile(`${root}/public/style.css`, 'css');
   await symlink(`${root}/data/wol.db`, `${root}/src/linked.js`);
@@ -23,7 +24,7 @@ test('polling enumerates source/config changes but excludes databases, tasks, de
 });
 
 test('child-only native env parsing preserves precedence and never pins file values in the parent', async (t) => {
-  const root = await mkdtemp('/tmp/opencode/dev-environment-'); t.after(() => rm(root, { recursive: true, force: true })); const original = { PORT: '5000' };
+  const root = await mkdtemp(temporaryPrefix('dev-environment-')); t.after(() => rm(root, { recursive: true, force: true })); const original = { PORT: '5000' };
   await writeFile(`${root}/.env`, 'PORT=4000\nNODE_EXTRA_CA_CERTS="first.pem"\nQUOTED="two words"\n');
   assert.deepEqual(developmentEnvironment(root, original), { PORT: '5000', NODE_EXTRA_CA_CERTS: 'first.pem', QUOTED: 'two words' }); assert.deepEqual(original, { PORT: '5000' });
   await writeFile(`${root}/.env`, 'NODE_EXTRA_CA_CERTS=second.pem\n'); assert.equal(developmentEnvironment(root, original).NODE_EXTRA_CA_CERTS, 'second.pem');

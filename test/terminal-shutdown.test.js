@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { temporaryPrefix } from '../scripts/temporary.js';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -62,7 +63,7 @@ test('npm kill EACCES remains an explicit limitation requiring safe application 
 });
 
 async function runDriver(t, source, options = {}, wrapper) {
-  const root = await mkdtemp('/tmp/opencode/terminal-driver-');
+  const root = await mkdtemp(temporaryPrefix('terminal-driver-'));
   let safe = false;
   t.after(async () => { assert.equal(safe, true, `Owned process exit unconfirmed; retained ${root}.`); await rm(root, { recursive: true, force: true }); });
   const settings = { cwd: root, environment: { PATH: process.env.PATH }, command: ['python3', '-c', source], sendCtrlC: false, timeoutMs: 2500, ...options };

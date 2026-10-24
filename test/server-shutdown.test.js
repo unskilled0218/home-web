@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { temporaryPrefix } from '../scripts/temporary.js';
 import assert from 'node:assert/strict';
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -15,7 +16,7 @@ const project = path.resolve(import.meta.dirname, '..'); const execute = promisi
 async function until(check, message, timeout = 5000) { const end = Date.now() + timeout; while (Date.now() < end) { if (await check()) return; await new Promise((resolve) => setTimeout(resolve, 25)); } throw new Error(message); }
 async function reservePort() { const server = net.createServer(); server.listen(0, '127.0.0.1'); await once(server, 'listening'); const port = server.address().port; await new Promise((resolve) => server.close(resolve)); return port; }
 async function fixture(t) {
-  const root = await mkdtemp('/tmp/opencode/shutdown-process-');
+  const root = await mkdtemp(temporaryPrefix('shutdown-process-'));
   t.after(async () => {
     const records = await terminalRecords(root);
     for (const record of records) {
