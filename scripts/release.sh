@@ -22,16 +22,16 @@ if [[ "${1:-}" == --validate ]]; then
   echo 'Configuration valid; no credentials or remote operations used'
   exit 0
 fi
+if [[ -z "${RELEASE_LOCK_FD:-}" ]]; then
+  exec python3 -B "$root/scripts/release-data.py" locked "$root" "$root/scripts/release.sh"
+fi
+data lock-check "$root"
 for tool in git docker curl node npm; do
   command -v "$tool" >/dev/null || stop "Required command unavailable: $tool"
 done
 for marker in release-template.lock.json scripts/release-template .template-transaction; do
   [[ ! -e "$root/$marker" && ! -L "$root/$marker" ]] || stop 'Old installation state; use its preserved original checkout/pin, not this command'
 done
-if [[ -z "${RELEASE_LOCK_FD:-}" ]]; then
-  exec python3 -B "$root/scripts/release-data.py" locked "$root" "$root/scripts/release.sh"
-fi
-data lock-check "$root"
 umask 077
 work=${RELEASE_WORK_DIR:?release supervisor must own work directory}
 phase='local setup'
@@ -47,25 +47,26 @@ repository=$(field "$work/settings.json" repository)
 image=$(field "$work/settings.json" image)
 printf 'Release target: %s / %s (%s)\n' "$repository" "$image" "$tag"
 [[ ! -e "$root/.release-template/$tag.json" && ! -L "$root/.release-template/$tag.json" ]] || stop 'Legacy checkpoint exists; preserve its original checkout/pin'
-phase='source preflight'
+set_phase 'source preflight'
 commit=$(data source "$root") || stop 'Cannot verify release source'
 data payload "$root" "$commit" "$work/payload.json"
-phase='early builder preflight'
+set_phase 'early builder preflight'
 original_docker_context=${DOCKER_CONTEXT-}
 original_docker_config=${DOCKER_CONFIG:-$HOME/.docker}
 data buildx-capture "$work" || stop 'Cannot identify selected Buildx executable; inspect Docker plugin discovery'
 builder_ready
-phase='automatic local verification'
+set_phase 'automatic local verification'
 python3 -B "$root/scripts/release-verify.py" local "$root" "$work" "$commit"
 data source "$root" "$commit" >/dev/null
-phase='builder readiness recheck'
+set_phase 'builder readiness recheck'
 data buildx-check "$work" || stop 'Cannot verify original Buildx executable after local verification'
 builder_ready
 # Validate captured notes before reading credentials or doing any registry write.
 data payload "$root" "$commit" "$work/payload.json"
+set_phase 'private authentication preparation'
 data auth "$root" "$work"
 data buildx-pin "$work"
-phase='read-only package readiness'
+set_phase 'read-only package readiness'
 data package-ready "$root" "$work"
 registry_host=${image%%/*}
 export BUILDX_CONFIG=${BUILDX_CONFIG:-$original_docker_config/buildx}
@@ -80,12 +81,12 @@ else
   unset DOCKER_CONTEXT
 fi
 data buildx-check "$work"
-phase='read-only startup classification'
+set_phase 'read-only startup classification'
 data inventory "$root" "$work" "$work/inventory.json"
 tag_state
 if [[ -n "$remote_oid" || -n "$release_record" ]]; then
   [[ -n "$remote_oid" && -n "$release_record" && "$remote_commit" == "$commit" ]] || stop 'Ambiguous tag-only/release-only or conflicting startup state; inspect without repair'
-  phase='completed-publication verification'
+  set_phase 'completed-publication verification'
   run 1048576 60 git -C "$root" fetch --no-tags --no-write-fetch-head origin "$remote_oid"
   data inspect-tag "$root" "$commit" "$remote_oid" "$work/identity.json"
   prepared=$(field "$work/identity.json" digest)
@@ -104,7 +105,7 @@ if [[ -n "$remote_oid" || -n "$release_record" ]]; then
   success
   exit 0
 fi
-phase='fresh-publication preparation'
+set_phase 'fresh-publication preparation'
 tag_confirmed=false
 run 65536 60 git -C "$root" tag --list "$tag"
 [[ ! -s "$work/command.out" ]] || stop 'Local tag exists without a remote publication; inspect before building'
@@ -116,43 +117,44 @@ if [[ -z "$prepared" ]]; then
   fresh_guard
   login
   data snapshot "$root" "$commit" "$work/source"
-  phase='staging build and immutable verification'
+  set_phase 'staging build and immutable verification'
   mutation_started=true
   data buildx-check "$work"
-  run 16777216 7200 docker buildx build --platform linux/amd64,linux/arm64 --provenance=false \
+  run_progress 16777216 7200 docker buildx build --platform linux/amd64,linux/arm64 --provenance=false \
     --metadata-file "$work/build.json" --push --tag "$image:$staging" \
     --label "org.opencontainers.image.version=$version" --label "org.opencontainers.image.revision=$commit" \
     --label "org.opencontainers.image.source=$origin/$repository" --file "$work/source/Dockerfile" "$work/source"
   prepared=$(data image "$root" "$work" "$staging" "$commit") || stop 'Cannot verify built image'
   data metadata "$work/build.json" "$prepared"
 else
+  set_phase 'verified staging reuse'
   login
 fi
-phase='both-platform runtime verification'
+set_phase 'both-platform runtime verification'
 python3 -B "$root/scripts/release-verify.py" image "$root" "$work" "$prepared" "$commit"
 oid=$(data make-tag "$root" "$commit" "$prepared" "$predecessor" "$work/identity.json") || stop 'Cannot create exact intended tag'
-phase='tag publication'
+set_phase 'tag publication'
 mutation_started=true
 fresh_guard
 # A failed response may follow an accepted write. Reconcile exactly; never force or roll back.
-attempt run 1048576 60 git -C "$root" push origin "$oid:refs/tags/$tag"
+attempt run_progress 1048576 60 git -C "$root" push origin "$oid:refs/tags/$tag"
 scan
 tag_state
 [[ "$remote_oid" == "$oid" && "$remote_commit" == "$commit" && -z "$release_record" ]] || stop 'Tag push not confirmed or release appeared'
 tag_confirmed=true
-phase='digest promotion'
+set_phase 'digest promotion'
 fresh_guard
 promotion_latest=$(data resolve "$root" "$work" latest) || stop 'Cannot read latest before promotion'
 [[ "$promotion_latest" == "$predecessor" || "$promotion_latest" == "$prepared" ]] || stop 'Latest changed before promotion'
 if [[ "$promotion_latest" != "$prepared" ]]; then
-  attempt run 1048576 60 docker buildx imagetools create --tag "$image:latest" "$image@$prepared"
+  attempt run_progress 1048576 60 docker buildx imagetools create --tag "$image:latest" "$image@$prepared"
 fi
 [[ $(data resolve "$root" "$work" latest) == "$prepared" ]] || stop 'Promotion not confirmed'
 promotion_confirmed=true
-phase='release creation'
+set_phase 'release creation'
 fresh_guard
 attempt data http "$work" POST "$origin/api/v1/repos/$repository/releases" "$work/post.json" "$work/payload.json" > "$work/post.status"
-phase='final publication verification'
+set_phase 'final publication verification'
 scan
 tag_state
 [[ "$remote_oid" == "$oid" && "$remote_commit" == "$commit" && -n "$release_record" ]] || stop 'Release creation not confirmed'

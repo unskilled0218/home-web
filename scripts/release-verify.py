@@ -16,6 +16,7 @@ import uuid
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from temporary import parent as temporary_parent
+from release_progress import Progress, message
 
 
 def data_module():
@@ -45,31 +46,28 @@ def verification_environment(work):
 
 
 def gate(name, arguments, root, env, seconds):
-  print("Verify: " + name, flush=True)
+  progress = Progress("Verify: " + name, local=True, environment=env)
   try:
-    code, result = DATA.capture(arguments, 16777216, seconds, environment=env, cwd=root)
+    code, result = DATA.capture(arguments, 16777216, seconds, environment=env, cwd=root, progress=progress)
   except DATA.Refusal as error:
+    progress.finish("failed: " + str(error))
     raise DATA.Refusal(f"Verification failed ({name}): {error}") from error
+  except BaseException:
+    progress.finish("failed or interrupted")
+    raise
+  progress.finish("completed" if code == 0 else "failed, exit " + str(code))
   if code:
-    # Local tests execute without publication credentials. Keep failure context bounded.
-    diagnostic = (result["stdout"] + result["stderr"])[-8192:].decode("utf-8", "replace")
-    print(diagnostic, file=sys.stderr)
+    # Diagnostics already passed through the stateful stream sanitizer, including EOF.
     raise DATA.Refusal(f"Verification failed ({name}), exit {code}; publication did not begin")
-  skipped = [line for line in (result["stdout"] + result["stderr"]).decode("utf-8", "replace").splitlines()
-             if "# SKIP" in line or " ... skipped " in line or line.startswith("OK (skipped=") or
-             (line.startswith("ℹ skipped ") and line.strip() != "ℹ skipped 0")]
-  for line in skipped[-10:]:
-    print("Verification report: " + line[:500], flush=True)
-  for line in (result["stdout"] + result["stderr"]).decode("utf-8", "replace").splitlines()[-12:]:
-    if line.startswith(("Ran ", "OK", "ℹ tests ", "ℹ pass ", "ℹ fail ", "ℹ skipped ")):
-      print(name + ": " + line, flush=True)
 
 
 def local(root, work, commit):
   root, work = Path(root), Path(work)
   source = work / "verification-source"
+  message("Verify: export committed source snapshot")
   DATA.snapshot(str(root), commit, str(source))
   env = verification_environment(work)
+  message("Verify: metadata and runtime prerequisites")
   node_version = DATA.command(["node", "-p", "process.versions.node"]).decode().strip()
   DATA.require(int(node_version.split(".")[0]) >= 24, "Install Node 24 or later")
   version = (source / "VERSION").read_text().strip()
@@ -88,13 +86,23 @@ def local(root, work, commit):
   gate("locked development dependencies", ["npm", "ci", "--ignore-scripts", "--fetch-retries=0", "--fetch-timeout=60000"], source, env, 300)
   gate("JavaScript syntax", ["npm", "run", "check"], source, env, 120)
   gate("application tests", ["npm", "test", "--", "--test-concurrency=1"], source, env, 1200)
-  gate("release tests", ["python3", "-B", "-m", "unittest", "discover", "-s", "test/release-template", "-v"], source, env, 1200)
+  gate("release tests", ["python3", "-B", "-u", "-m", "unittest", "discover", "-s", "test/release-template", "-v"], source, env, 1200)
   gate("production packaging", ["node", "scripts/check-production.js"], source, env, 180)
-  print("Local verification passed; no publication credentials used", flush=True)
+  message("Local verification passed; no publication credentials used")
 
 
 def docker(*args, seconds=15):
-  return DATA.command(["docker", *args], limit=1048576, seconds=seconds).decode().strip()
+  label = "Docker runtime " + args[0]
+  progress = Progress(label)
+  try:
+    status, result = DATA.capture(["docker", *args], limit=1048576, seconds=seconds, progress=progress)
+    if status:
+      raise DATA.CommandFailed("Command failed: docker")
+  except BaseException:
+    progress.finish("failed or interrupted")
+    raise
+  progress.finish("command completed")
+  return result["stdout"].decode().strip()
 
 
 def daemon_identity():
@@ -135,6 +143,7 @@ def cleanup(work):
   path = Path(work) / "smoke-resources.json"
   if not path.exists():
     return
+  message("Verify runtime: exact owned-resource cleanup")
   manifest = DATA.document(path)
   deadline = manifest.setdefault("cleanup_deadline", time.monotonic() + 60)
   save_manifest(path, manifest)
@@ -175,7 +184,7 @@ def image_smoke(root, work, reference, commit):
       architecture = member["platform"]["architecture"]
       platform = "linux/" + architecture
       image = config["image"] + "@" + member["digest"]
-      print("Verify runtime: " + platform, flush=True)
+      message("Verify runtime: " + platform + " pull, readiness and graceful shutdown")
       docker("pull", "--platform", platform, image, seconds=300)
       platform_deadline = time.monotonic() + 120
       resources = {}
@@ -253,5 +262,5 @@ if __name__ == "__main__":
   try:
     main()
   except (DATA.Refusal, OSError, ValueError, RuntimeError, KeyError) as error:
-    print("Verification stopped: " + (str(error) if isinstance(error, DATA.Refusal) else "invalid input or cleanup unconfirmed"), file=sys.stderr)
+    message("Verification stopped: " + (str(error) if isinstance(error, DATA.Refusal) else "invalid input or cleanup unconfirmed"))
     sys.exit(1)

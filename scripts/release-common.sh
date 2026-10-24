@@ -12,6 +12,8 @@ stop() {
   exit 1
 }
 run() { data run "$1" "$2" "$work/command.out" "${@:3}"; }
+set_phase() { phase=$1; printf 'Release phase: %s\n' "$phase" >&2; }
+run_progress() { data run-progress "$1" "$2" "$work/command.out" "$phase" "${@:3}"; }
 builder_ready() {
   printf 'Verify: %s (running linux/amd64 and linux/arm64; no bootstrap)\n' "$phase"
   run 1048576 60 docker buildx inspect || stop 'Cannot inspect selected Buildx builder; ask the host administrator to prepare its backend separately'
@@ -74,7 +76,7 @@ publication_guard() {
 }
 associate_package() {
   local expected_oid=$1
-  phase='package association'
+  set_phase 'package association'
   publication_guard "$expected_oid"
   # Linking may be the one completed-retry write; do not claim no writes after an uncertain POST.
   mutation_started=true

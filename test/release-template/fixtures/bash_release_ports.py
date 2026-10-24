@@ -141,6 +141,8 @@ if tool == "git":
   sys.exit(result.returncode)
 
 if tool == "docker":
+  if state.get("sensitive_external_output"):
+    print("AUTHENTICATED_RESPONSE_SENTINEL", file=sys.stderr, flush=True)
   selection = docker_selection()
   with (base / "docker-selections").open("a") as output:
     output.write(json.dumps(selection) + "\n")
@@ -177,6 +179,10 @@ if tool == "docker":
     assert "UNRELATED_AUTH_SENTINEL" not in json.dumps(config)
   elif arguments[:2] == ["buildx", "build"]:
     event("build")
+    if state.get("build_wait"):
+      (base / "build-waiting").touch()
+      while not (base / "finish-build").exists():
+        time.sleep(.02)
     if state.get("hang_build"):
       time.sleep(20)
     context = Path(arguments[-1])
@@ -218,6 +224,8 @@ if tool == "docker":
   sys.exit(0)
 
 assert tool == "curl"
+if state.get("sensitive_external_output"):
+  print("AUTHENTICATED_RESPONSE_SENTINEL", file=sys.stderr, flush=True)
 assert arguments[0] == "-q" and "--location" not in arguments and "--insecure" not in arguments
 auth = Path(arguments[arguments.index("--config") + 1])
 assert auth.stat().st_mode & 0o077 == 0

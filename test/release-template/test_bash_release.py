@@ -44,7 +44,7 @@ class BashInterfaceTests(unittest.TestCase):
       (root / "scripts").mkdir(parents=True)
       config = json.loads((ROOT / "scripts/release.json").read_text())
       for name in ("scripts/release.sh", "scripts/release-common.sh", "scripts/release-data.py", "scripts/release.json",
-                   "scripts/release-verify.py", "scripts/release_process.py", "scripts/temporary.py", "scripts/temporary.js",
+                   "scripts/release-verify.py", "scripts/release_process.py", "scripts/release_progress.py", "scripts/temporary.py", "scripts/temporary.js",
                    "scripts/check-syntax.js", "scripts/check-production.js",
                    "VERSION", "Dockerfile", ".dockerignore", config["notes"]):
         target = root / name
@@ -319,7 +319,7 @@ class BashPublicationTests(unittest.TestCase):
     self.root.mkdir()
     self.bin.mkdir()
     (self.root / "scripts").mkdir()
-    for name in ("release.sh", "release-common.sh", "release-data.py", "release.json", "release-verify.py", "release_process.py",
+    for name in ("release.sh", "release-common.sh", "release-data.py", "release.json", "release-verify.py", "release_process.py", "release_progress.py",
                  "temporary.py", "temporary.js", "check-syntax.js", "check-production.js"):
       shutil.copyfile(ROOT / "scripts" / name, self.root / "scripts" / name)
     for name in ("Dockerfile", ".dockerignore", ".gitignore"):

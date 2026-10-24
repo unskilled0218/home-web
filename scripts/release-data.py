@@ -17,10 +17,12 @@ import sys
 import tarfile
 import time
 import tempfile
+from contextlib import nullcontext
 from urllib.parse import quote, urlencode, urlsplit
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from release_process import TreeOwner
 from temporary import parent as temporary_parent
+from release_progress import ConsoleBoundary, Progress, message
 
 
 API_LIMIT = 4194304
@@ -33,6 +35,7 @@ ITEM_LIMIT = 100000
 READ_SECONDS = 60
 MARKER = "container-release-bash/1\n"
 PLATFORMS = ["linux/amd64", "linux/arm64"]
+ACTIVE_PROGRESS = None
 
 
 class Refusal(Exception):
@@ -135,14 +138,15 @@ def settings(root):
   require(len(release_version) <= 16, "Version exceeds supported registry-tag length")
   script_hash = sha(b"".join(name.encode() + b"\x00" + read(regular(root, "scripts/" + name)) for name in
                              ("release.sh", "release-common.sh", "release-data.py", "release-verify.py", "release_process.py",
-                              "temporary.py", "temporary.js", "check-syntax.js", "check-production.js")))
+                               "release_progress.py", "temporary.py", "temporary.js", "check-syntax.js", "check-production.js")))
   return config | {"gitea": config["gitea"].rstrip("/"), "version": release_version, "tag": "v" + release_version,
                    "config_hash": sha(read(root / "scripts/release.json", ANNOTATION_LIMIT)), "script_hash": script_hash}
 
 
-def capture(arguments, limit=REF_LIMIT, seconds=READ_SECONDS, input_data=None, streams=None, environment=None, cwd=None):
+def capture(arguments, limit=REF_LIMIT, seconds=READ_SECONDS, input_data=None, streams=None, environment=None, cwd=None, progress=None):
   """Drain bounded pipes concurrently; terminate the whole owned process group on failure."""
   extra = streams or {}
+  progress = progress or ACTIVE_PROGRESS
   pipes, readers, limits = {}, {}, {}
   for name, cap in extra.items():
     reader, writer = os.pipe()
@@ -172,9 +176,11 @@ def capture(arguments, limit=REF_LIMIT, seconds=READ_SECONDS, input_data=None, s
       os.set_blocking(process.stdin.fileno(), False)
       selector.register(process.stdin.fileno(), selectors.EVENT_WRITE, "stdin")
     deadline = time.monotonic() + seconds
-    while selector.get_map():
+    while selector.get_map() or process.poll() is None:
       if time.monotonic() >= deadline:
         raise CommandFailed("Command timed out")
+      if progress is not None and process.poll() is None:
+        progress.tick()
       for key, _ in selector.select(min(0.1, max(0, deadline - time.monotonic()))):
         name = key.data
         if name == "stdin":
@@ -191,9 +197,13 @@ def capture(arguments, limit=REF_LIMIT, seconds=READ_SECONDS, input_data=None, s
         chunk = os.read(key.fd, min(65536, limits[name] + 1 - len(buffers[name])))
         if not chunk:
           selector.unregister(key.fd)
+          if progress is not None and name in ("stdout", "stderr"):
+            progress.eof(name)
           continue
         buffers[name].extend(chunk)
         require(len(buffers[name]) <= limits[name], "Command output exceeds byte limit")
+        if progress is not None and name in ("stdout", "stderr"):
+          progress.feed(name, chunk)
     remaining = max(0.001, deadline - time.monotonic())
     status = process.wait(timeout=remaining)
     return status, {key: bytes(value) for key, value in buffers.items()}
@@ -690,6 +700,18 @@ def dispatch(args):
   elif action == "run":
     limit, seconds, output, *arguments = args
     Path(output).write_bytes(command(arguments, int(limit), float(seconds)))
+  elif action == "run-progress":
+    limit, seconds, output, label, *arguments = args
+    progress = Progress(label)
+    try:
+      status, result = capture(arguments, int(limit), float(seconds), progress=progress)
+      if status:
+        raise CommandFailed("Command failed: " + Path(arguments[0]).name)
+      Path(output).write_bytes(result["stdout"])
+    except BaseException:
+      progress.finish("failed or interrupted; command outcome requires verification")
+      raise
+    progress.finish("command completed; remote acceptance still requires verification")
   elif action == "run-input":
     limit, seconds, output, source_file, *arguments = args
     Path(output).write_bytes(command(arguments, int(limit), float(seconds), read(source_file, 4096)))
@@ -773,14 +795,18 @@ def dispatch(args):
         cleanup_status = 1
         try:
           owner.cleanup(child)
-          cleanup_status, _ = capture([sys.executable, "-B", str(Path(root) / "scripts/release-verify.py"),
-                                       "cleanup", root, work], CONFIG_LIMIT, 60, environment=environment)
+          cleanup_progress = Progress("owned resource cleanup")
+          try:
+            cleanup_status, _ = capture([sys.executable, "-B", str(Path(root) / "scripts/release-verify.py"),
+                                         "cleanup", root, work], CONFIG_LIMIT, 60, environment=environment, progress=cleanup_progress)
+          finally:
+            cleanup_progress.finish("completed" if cleanup_status == 0 else "failed or unconfirmed")
         finally:
           discard_auth(work)
           if cleanup_status == 0:
             shutil.rmtree(work)
           else:
-            print("Owned cleanup unconfirmed; sanitized evidence retained at " + work, file=sys.stderr)
+            message("Owned cleanup unconfirmed; sanitized evidence retained at " + work)
       return status if cleanup_status == 0 else 1
     finally:
       os.close(fd)
@@ -800,10 +826,22 @@ if __name__ == "__main__":
     raise Refusal("Operation interrupted")
   signal.signal(signal.SIGTERM, interrupted)
   signal.signal(signal.SIGINT, interrupted)
-  try:
-    require(sys.version_info >= (3, 11), "Python 3.11 or later is required")
-    sys.exit(dispatch(sys.argv[1:]))
-  except (Refusal, OSError, ValueError, RuntimeError, KeyError, TypeError, IndexError, AttributeError, RecursionError, subprocess.SubprocessError) as exc:
-    # Never relay raw remote bodies, command stderr, config values, or credential paths.
-    print("Release stopped: " + (str(exc) if isinstance(exc, Refusal) else "Invalid or unavailable input"), file=sys.stderr)
-    sys.exit(2 if isinstance(exc, CommandFailed) else 1)
+  labels = {"package-ready": "package readiness", "inventory": "publication inventory", "image": "immutable image evidence",
+            "package-ensure": "package association", "package-check": "package association verification"}
+  action = sys.argv[1] if len(sys.argv) > 1 else ""
+  with ConsoleBoundary() if action == "locked" else nullcontext():
+    progress = Progress(labels[action]) if action in labels else None
+    ACTIVE_PROGRESS = progress
+    try:
+      require(sys.version_info >= (3, 11), "Python 3.11 or later is required")
+      status = dispatch(sys.argv[1:])
+    except (Refusal, OSError, ValueError, RuntimeError, KeyError, TypeError, IndexError, AttributeError, RecursionError, subprocess.SubprocessError) as exc:
+      # Never relay raw remote bodies, command stderr, config values, or credential paths.
+      if progress:
+        progress.finish("failed or interrupted")
+      message("Release stopped: " + (str(exc) if isinstance(exc, Refusal) else "Invalid or unavailable input"))
+      status = 2 if isinstance(exc, CommandFailed) else 1
+    else:
+      if progress:
+        progress.finish("completed")
+    sys.exit(status)
