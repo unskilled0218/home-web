@@ -671,7 +671,7 @@ def advertised_platforms(text):
   advertised = {value for node in nodes if node["status"] == "running" for value in node["platforms"]}
   require(all(any(value == platform or re.fullmatch(re.escape(platform) + r"/[a-zA-Z0-9._-]+(?:/[a-zA-Z0-9._-]+)*", value)
                   for value in advertised) for platform in PLATFORMS),
-          "Builder must advertise linux/amd64 and linux/arm64 on running nodes; inspect Buildx or ask the host administrator about QEMU/binfmt")
+          "Builder must advertise linux/amd64 and linux/arm64 on running nodes; inspect Buildx or ask the host administrator to prepare the selected backend and native/QEMU/binfmt support separately; no automatic bootstrap")
 
 
 def dispatch(args):

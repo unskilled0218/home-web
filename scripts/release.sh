@@ -50,15 +50,17 @@ printf 'Release target: %s / %s (%s)\n' "$repository" "$image" "$tag"
 phase='source preflight'
 commit=$(data source "$root") || stop 'Cannot verify release source'
 data payload "$root" "$commit" "$work/payload.json"
+phase='early builder preflight'
+original_docker_context=${DOCKER_CONTEXT-}
+original_docker_config=${DOCKER_CONFIG:-$HOME/.docker}
+data buildx-capture "$work" || stop 'Cannot identify selected Buildx executable; inspect Docker plugin discovery'
+builder_ready
 phase='automatic local verification'
 python3 -B "$root/scripts/release-verify.py" local "$root" "$work" "$commit"
 data source "$root" "$commit" >/dev/null
-phase='builder preflight'
-original_docker_context=${DOCKER_CONTEXT-}
-original_docker_config=${DOCKER_CONFIG:-$HOME/.docker}
-data buildx-capture "$work"
-run 1048576 60 docker buildx inspect --bootstrap
-data platforms "$work/command.out"
+phase='builder readiness recheck'
+data buildx-check "$work" || stop 'Cannot verify original Buildx executable after local verification'
+builder_ready
 # Validate captured notes before reading credentials or doing any registry write.
 data payload "$root" "$commit" "$work/payload.json"
 data auth "$root" "$work"

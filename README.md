@@ -2,7 +2,7 @@
 
 A self-hosted photo dashboard with a clock, weather forecasts, an optional Baikal calendar, and Linkwarden bookmarks. Designed for a trusted local network.
 
-Version 0.17.36: [release notes](docs/releases/0.17.36.md). After one-time setup and committing/pushing clean `main`, run `bash scripts/release.sh` to verify and release both image platforms. See [release operations](docs/releases.md).
+Version 0.17.37: [release notes](docs/releases/0.17.37.md). After one-time setup and committing/pushing clean `main`, run `bash scripts/release.sh` to check builder AMD64/ARM64 readiness before lengthy verification and release. See [release operations](docs/releases.md).
 
 - [dashboard](#dashboard)
   - [Quick start](#quick-start)

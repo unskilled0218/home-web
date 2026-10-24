@@ -26,7 +26,12 @@ if tool == "python3":
         output.write(value + "\n")
       if state.get("verify_failure") == value:
         sys.exit(1)
+    if action == "local" and state.get("replace_plugin_after_verification"):
+      (base / "bin/buildx-plugin").write_text("#!/bin/sh\nexit 1\n")
     sys.exit(0)
+  if len(arguments) > 2 and arguments[1].endswith("release-data.py") and arguments[2] == "auth":
+    with (base / "events").open("a") as output:
+      output.write("auth\n")
   os.execv(sys.executable, [sys.executable, *arguments])
 
 if tool in ("npm", "node"):
@@ -75,7 +80,7 @@ def docker_selection():
   buildx = Path(os.environ.get("BUILDX_CONFIG") or str(directory / "buildx"))
   current = json.loads((buildx / "current").read_text()) if (buildx / "current").exists() else {}
   builder = os.environ.get("BUILDX_BUILDER") or current.get("Name", "default")
-  return {"operation": arguments[:2], "context": context, "endpoint": endpoint, "tls": tls, "builder": builder,
+  return {"operation": arguments[:2], "arguments": arguments, "context": context, "endpoint": endpoint, "tls": tls, "builder": builder,
           "tls_verify": os.environ.get("DOCKER_TLS_VERIFY"), "cert_path": os.environ.get("DOCKER_CERT_PATH")}
 
 
@@ -151,10 +156,16 @@ if tool == "docker":
     print(json.dumps([{"Name": "buildx", "Path": str(plugin)}]))
   elif arguments[:2] == ["buildx", "inspect"]:
     event("builder")
-    if state.get("inspection_failure"):
+    assert arguments == ["buildx", "inspect"], "Readiness must never bootstrap or select another builder"
+    state["inspection_reads"] = state.get("inspection_reads", 0) + 1
+    save()
+    responses = state.get("inspections")
+    inspection = responses[min(state["inspection_reads"] - 1, len(responses) - 1)] if responses else state.get(
+      "inspection", "Name: fixture\nNodes:\nName: node\nStatus: running\nPlatforms: " +
+      ("linux/amd64" if state.get("unsupported") else "linux/amd64, linux/arm64"))
+    if state.get("inspection_failure") or inspection is None:
       sys.exit(1)
-    print(state.get("inspection", "Name: fixture\nNodes:\nName: node\nStatus: running\nPlatforms: " +
-                    ("linux/amd64" if state.get("unsupported") else "linux/amd64, linux/arm64")))
+    print(inspection)
   elif arguments[:2] == ["context", "show"]:
     print(selection["context"])
   elif arguments[0] == "login":

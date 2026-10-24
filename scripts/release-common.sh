@@ -12,6 +12,11 @@ stop() {
   exit 1
 }
 run() { data run "$1" "$2" "$work/command.out" "${@:3}"; }
+builder_ready() {
+  printf 'Verify: %s (running linux/amd64 and linux/arm64; no bootstrap)\n' "$phase"
+  run 1048576 60 docker buildx inspect || stop 'Cannot inspect selected Buildx builder; ask the host administrator to prepare its backend separately'
+  data platforms "$work/command.out" || stop 'Selected builder is not ready; ask the host administrator to prepare running AMD64/ARM64 backends separately'
+}
 login() {
   data buildx-check "$work" || stop 'Cannot verify selected Buildx executable'
   data run-input 1048576 60 "$work/login.out" "$work/token" docker login "$registry_host" \

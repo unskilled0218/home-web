@@ -129,7 +129,9 @@ class BashPublicationTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(self.events().count("verify:dependencies"), 1)
         self.assert_no_writes()
-        self.assertNotIn("builder", self.events())
+        self.assertEqual(self.events().count("builder"), 1)
+        self.assertEqual(self.events()[0], "builder")
+        self.assertNotIn("auth", self.events())
         self.assertNotIn("login", self.events())
 
   def test_runtime_failure_stops_before_tag_and_promotion(self):
@@ -228,9 +230,85 @@ class BashPublicationTests(unittest.TestCase):
         result = self.release()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("running nodes", result.stderr)
-        self.assertEqual(self.events(), ["verify:dependencies", "verify:syntax", "verify:application", "verify:release", "verify:packaging", "builder"])
+        self.assertEqual(self.events(), ["builder"])
+        self.assertIn("publication did not begin", result.stderr.lower())
     self.change(inspection_failure=True)
-    self.assertNotEqual(self.release().returncode, 0)
+    (self.base / "events").write_text("")
+    failed = self.release()
+    self.assertNotEqual(failed.returncode, 0)
+    self.assertIn("Cannot inspect selected Buildx builder", failed.stderr)
+    self.assertEqual(self.events(), ["builder"])
+    self.assert_no_writes()
+
+  def test_backend_lifecycle_never_bootstraps_or_removes_shared_resources(self):
+    sentinel = self.base / "shared-builder-resources.json"
+    sentinel.write_text('{"container":"shared-buildkit","volume":"shared-state"}')
+    initial = sentinel.read_bytes()
+    self.environment["GIT_TOKEN"] = "/missing/token"
+    for status in ("stopped", "inactive"):
+      with self.subTest(status=status):
+        inspection = f"Name: fixture\nDriver: docker-container\nNodes:\nName: backend\nStatus: {status}\nPlatforms: linux/amd64, linux/arm64"
+        self.change(inspection=inspection)
+        (self.base / "events").write_text("")
+        result = self.release()
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("prepare", result.stderr)
+        self.assertIn("separately", result.stderr)
+        self.assertEqual(self.events(), ["builder"])
+        self.assertEqual(sentinel.read_bytes(), initial)
+        selections = [json.loads(line) for line in (self.base / "docker-selections").read_text().splitlines()]
+        self.assertTrue(all(row["operation"] in (["info", "--format"], ["buildx", "inspect"]) for row in selections))
+        self.assertTrue(all("--bootstrap" not in row["arguments"] for row in selections))
+
+  def test_missing_plugin_stops_before_inspection_verification_or_auth(self):
+    (self.bin / "buildx-plugin").unlink()
+    self.environment["GIT_TOKEN"] = "/missing/token"
+    result = self.release()
+    self.assertNotEqual(result.returncode, 0)
+    self.assertIn("Cannot identify selected Buildx executable", result.stderr)
+    self.assertEqual(self.events(), [])
+    self.assert_no_writes()
+
+  def test_running_backend_union_allows_unrelated_stopped_node(self):
+    self.change(inspection="Name: fixture\nNodes:\nName: amd\nStatus: running\nPlatforms: linux/amd64*\n"
+                           "Name: arm\nStatus: running\nPlatforms: linux/arm64/v8\n"
+                           "Name: unused\nStatus: stopped\nPlatforms: linux/amd64, linux/arm64")
+    result = self.release()
+    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+    self.assert_verification_order()
+
+  def test_late_platform_loss_or_failed_inspection_precedes_credentials(self):
+    supported = "Name: fixture\nNodes:\nName: node\nStatus: running\nPlatforms: linux/amd64, linux/arm64"
+    stopped = supported.replace("Status: running", "Status: stopped")
+    sentinel = self.base / "shared-builder-resources.json"
+    sentinel.write_text('{"container":"shared-buildkit","volume":"shared-state"}')
+    initial = sentinel.read_bytes()
+    for response in (supported.replace(", linux/arm64", ""), stopped, "malformed", None):
+      with self.subTest(response=response):
+        self.change(inspections=[supported, response], inspection_reads=0)
+        self.environment["GIT_TOKEN"] = "/missing/token"
+        (self.base / "events").write_text("")
+        result = self.release()
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertIn("builder readiness recheck", result.stdout + result.stderr)
+        self.assertIn("publication did not begin", result.stderr.lower())
+        self.assert_verification_order(auth=False)
+        self.assert_no_writes()
+        self.assertNotIn("auth", self.events())
+        self.assertNotIn("login", self.events())
+        self.assertEqual(sentinel.read_bytes(), initial)
+        selections = [json.loads(line) for line in (self.base / "docker-selections").read_text().splitlines()]
+        self.assertTrue(all(row["operation"] in (["info", "--format"], ["buildx", "inspect"]) for row in selections))
+
+  def test_plugin_changed_during_verification_is_not_recaptured(self):
+    self.change(replace_plugin_after_verification=True)
+    self.environment["GIT_TOKEN"] = "/missing/token"
+    result = self.release()
+    self.assertNotEqual(result.returncode, 0)
+    self.assertIn("Buildx executable changed", result.stderr)
+    self.assertEqual(self.events().count("builder"), 1)
+    self.assertEqual(self.events().count("verify:packaging"), 1)
+    self.assertNotIn("auth", self.events())
     self.assert_no_writes()
 
   def setUp(self):
@@ -311,6 +389,19 @@ class BashPublicationTests(unittest.TestCase):
   def assert_no_writes(self):
     self.assertFalse(set(self.events()) & {"build", "tag-push", "promote", "release-post", "package-link"}, self.events())
 
+  def assert_verification_order(self, auth=True):
+    events = self.events()
+    builder = [index for index, value in enumerate(events) if value == "builder"]
+    self.assertEqual(len(builder), 2, events)
+    expected = ["verify:" + gate for gate in ("dependencies", "syntax", "application", "release", "packaging")]
+    self.assertEqual(events[builder[0] + 1:builder[1]], expected)
+    for value in expected:
+      self.assertEqual(events.count(value), 1, events)
+    if auth:
+      self.assertEqual(events.count("auth"), 1, events)
+      self.assertLess(builder[1], events.index("auth"))
+      self.assertLess(events.index("auth"), events.index("login"))
+
   def predecessor(self):
     data = helper_module()
     body = data.canonical({"previous": "verified fixture alias"})
@@ -371,6 +462,8 @@ class BashPublicationTests(unittest.TestCase):
     self.assertEqual({row["builder"] for row in selections}, {expected_builder})
     self.assertEqual({row["tls_verify"] for row in selections}, {self.environment.get("DOCKER_TLS_VERIFY")})
     self.assertEqual({row["cert_path"] for row in selections}, {self.environment.get("DOCKER_CERT_PATH")})
+    self.assertEqual(sum(row["operation"] == ["buildx", "inspect"] for row in selections), 2)
+    self.assertTrue(all("--bootstrap" not in row["arguments"] for row in selections))
 
   def assert_promotion_read_refuses(self, fault):
     predecessor = self.predecessor()
@@ -535,6 +628,7 @@ class BashPublicationTests(unittest.TestCase):
     result = self.release()
     self.assertEqual(result.returncode, 0, result.stderr)
     self.assertIn("Publication verified: v1.0.0", result.stdout)
+    self.assert_verification_order()
     for action in ("build", "tag-push", "promote", "release-post"):
       self.assertEqual(self.events().count(action), 1, action)
     state = self.state()
@@ -547,6 +641,7 @@ class BashPublicationTests(unittest.TestCase):
       result = self.release()
       self.assertEqual(result.returncode, 0, result.stderr)
       self.assert_no_writes()
+      self.assert_verification_order()
       self.assertFalse(any(e.startswith("registry:rt-") for e in self.events()))
       self.assertEqual(self.git("ls-remote", "--tags", "origin", "refs/tags/v1.0.0").split()[0], oid)
 
@@ -580,10 +675,12 @@ class BashPublicationTests(unittest.TestCase):
   def test_unbound_interrupted_build_reuses_verified_staging(self):
     self.change(lose_build=True)
     self.assertNotEqual(self.release().returncode, 0)
+    (self.base / "events").write_text("")
     self.change(lose_build=False)
     result = self.release()
     self.assertEqual(result.returncode, 0, result.stderr)
-    self.assertEqual(self.events().count("build"), 1)
+    self.assertNotIn("build", self.events())
+    self.assert_verification_order()
 
   def test_preflight_refusals_do_not_write(self):
     for flag in ("wrong_remote", "wrong_main", "unsupported", "null_inventory", "malformed", "oversized", "realm_foreign"):
