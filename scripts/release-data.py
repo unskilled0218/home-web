@@ -430,9 +430,19 @@ def package_record_linked(record, config, target_id):
 
 def supported_link_server(work, config):
   server = api_document(work, config["gitea"] + "/api/v1/version")
-  require(isinstance(server, dict) and isinstance(server.get("version"), str) and
-          re.fullmatch(r"1\.25\.(0|[1-9][0-9]*)", server["version"]),
-          "Package link writes require supported stable Gitea 1.25.x; server association safety is unverified")
+  version = server.get("version") if isinstance(server, dict) else None
+  if isinstance(version, str) and re.fullmatch(r"1\.25\.(0|[1-9][0-9]*)", version):
+    return
+  if version == "28.2.0":
+    # Exact-release source contract and discovery evidence: docs/releases.md.
+    # A version string alone does not distinguish Gitea from other products.
+    schema = api_document(work, config["gitea"] + "/swagger.v1.json")
+    info = schema.get("info") if isinstance(schema, dict) else None
+    if (isinstance(info, dict) and info.get("title") == "Gitea API" and
+        info.get("version") == version):
+      return
+  raise Refusal("Package link writes require verified stable Gitea 1.25.x or Gitea 28.2.0 API metadata; "
+                "server association safety is unverified; inspect server identity and compatibility")
 
 
 def package_readiness(work, config):

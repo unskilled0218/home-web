@@ -2,7 +2,7 @@
 
 A self-hosted photo dashboard with a clock, weather forecasts, an optional Baikal calendar, and Linkwarden bookmarks. Designed for a trusted local network.
 
-Version 0.17.38: [release notes](docs/releases/0.17.38.md). After one-time setup and committing/pushing clean `main`, run `bash scripts/release.sh` for early AMD64/ARM64 readiness, live verification logs, and safe release progress. See [release operations](docs/releases.md).
+Version 0.17.39: [release notes](docs/releases/0.17.39.md). Release package linking now supports verified Gitea `28.2.0` API metadata alongside stable `1.25.x`. See [release operations](docs/releases.md) for setup, safety requirements, and live progress.
 
 - [dashboard](#dashboard)
   - [Quick start](#quick-start)

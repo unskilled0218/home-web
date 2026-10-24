@@ -171,7 +171,7 @@ class BashPublicationTests(unittest.TestCase):
     self.assertEqual(self.release().returncode, 0)
 
   def test_readiness_blocks_unsupported_missing_package_before_any_writes(self):
-    self.change(gitea_version="28.2.0")
+    self.change(gitea_version="28.2.1")
     result = self.release()
     self.assertNotEqual(result.returncode, 0)
     self.assertIn("stable Gitea 1.25.x", result.stderr)
@@ -180,19 +180,26 @@ class BashPublicationTests(unittest.TestCase):
 
   def test_readiness_on_28_server_exact_unlinked_and_conflicting_packages(self):
     self.predecessor()
-    for linked, succeeds in ((None, False), (self.target_repository() | {"id": 99}, False),
+    # Refusals first, then create the publication and exercise its read-only retry.
+    for linked, succeeds in ((self.target_repository() | {"id": 99}, False), (None, True),
                              (self.target_repository(), True)):
       with self.subTest(linked=linked):
         self.change(gitea_version="28.2.0", linked_repository=linked)
         (self.base / "events").write_text("")
         result = self.release()
         self.assertEqual(result.returncode == 0, succeeds, result.stderr)
-        self.assertNotIn("package-link", self.events())
         if not succeeds:
+          self.assertNotIn("package-link", self.events())
           self.assert_no_writes()
           self.assertNotIn("login", self.events())
+        elif linked is None:
+          self.assertEqual(self.events().count("package-link"), 1)
+          self.assertEqual(self.events().count("http:GET:/swagger.v1.json"), 2)
+          self.assertEqual(self.state()["linked_repository"], self.target_repository())
         else:
+          self.assertNotIn("package-link", self.events())
           self.assertNotIn("http:GET:/api/v1/version", self.events())
+          self.assertNotIn("http:GET:/swagger.v1.json", self.events())
           self.assertLess(self.events().index("http:GET:/api/v1/packages/fixtures/container/application-hello/latest"),
                           self.events().index("login"))
 
@@ -1056,6 +1063,36 @@ class BashPublicationTests(unittest.TestCase):
     self.assertEqual(self.events().count("package-link"), 1)
     self.assertEqual(self.state()["package_reads"], 3, "Includes read-only readiness; HTTP refusals must not reconcile")
 
+  def test_gitea_28_fresh_lost_response_and_hidden_link_retry_preserve_associations(self):
+    unrelated = {"foreign-package": {"repository": {"id": 999}}}
+    self.change(gitea_version="28.2.0", link_fault="lost", unrelated_packages=unrelated)
+    result = self.release()
+    self.assertEqual(result.returncode, 0, result.stderr)
+    self.assertEqual(self.events().count("package-link"), 1)
+    self.assertEqual(self.state()["linked_repository"], self.target_repository())
+    self.assertEqual(self.state()["unrelated_packages"], unrelated)
+    self.assertLess(self.events().index("http:GET:/swagger.v1.json"), self.events().index("build"))
+    # Completed publication may not authorize replacement of an invisible foreign link.
+    foreign = self.target_repository() | {"id": 99, "full_name": "fixtures/private", "name": "private"}
+    self.change(linked_repository=foreign, hide_link=True, link_fault=None)
+    (self.base / "events").write_text("")
+    result = self.release()
+    self.assertNotEqual(result.returncode, 0)
+    self.assertNotIn("Publication verified", result.stdout)
+    self.assert_no_publication_writes()
+    self.assertEqual(self.events().count("package-link"), 1)
+    self.assertEqual(self.state()["linked_repository"], foreign)
+    self.assertEqual(self.state()["unrelated_packages"], unrelated)
+    self.assertFalse(any("unlink" in event or "DELETE" in event for event in self.events()))
+
+  def test_gitea_28_discovery_failure_stops_before_publication_writes(self):
+    self.change(gitea_version="28.2.0", association_fault={"resource": "discovery", "kind": "unauthorized"})
+    result = self.release()
+    self.assertNotEqual(result.returncode, 0)
+    self.assertIn("http:GET:/swagger.v1.json", self.events())
+    self.assert_no_writes()
+    self.assertNotIn("login", self.events())
+
   def test_unsupported_server_refuses_link_writes_but_allows_existing_correct_link(self):
     self.change(gitea_version="1.24.6")
     result = self.release()
@@ -1260,6 +1297,73 @@ class BashDataTests(unittest.TestCase):
         self.assertNotIn("PRIVATE_REMOTE_BODY", str(raised.exception))
         self.assertEqual(read.call_count, 3)
         http.assert_not_called()
+
+  def test_link_server_policy_requires_exact_gitea_28_discovery_and_retains_gitea_125(self):
+    config, _, _ = self.association_records()
+    schema = {"info": {"title": "Gitea API", "version": "28.2.0"}}
+    for version in ("1.25.0", "1.25.19", "28.2.0"):
+      with self.subTest(version=version), patch.object(self.data, "api_document", side_effect=[{"version": version}, schema]) as read:
+        self.data.supported_link_server("unused", config)
+        self.assertEqual(read.call_count, 2 if version == "28.2.0" else 1)
+        if version == "28.2.0":
+          self.assertEqual(read.call_args.args[1], config["gitea"] + "/swagger.v1.json")
+    for version in (None, 28, True, [], "28.2.1", "28.1.0", "28.3.0", "28.2.00", "v28.2.0", "28.2.0-dev",
+                    "28.2.0-rc1", "28.2.0+custom", "28.2.0\n", "1.25.00", "1.25.0-dev", "1.26.0"):
+      with self.subTest(version=version), patch.object(self.data, "api_document", return_value={"version": version}) as read:
+        with self.assertRaises(self.data.Refusal):
+          self.data.supported_link_server("unused", config)
+        self.assertEqual(read.call_count, 1)
+
+  def test_gitea_28_ambiguous_or_failed_discovery_never_authorizes_post(self):
+    config, repository, package = self.association_records()
+    schemas = (None, [], {}, {"info": None}, {"info": []}, {"info": {}},
+               {"info": {"title": "Forgejo API", "version": "28.2.0"}},
+               {"info": {"title": "Gitea API", "version": "28.2.1"}},
+               {"info": {"title": "Gitea API", "version": 28}},
+               {"info": {"title": "PRIVATE_REMOTE_BODY", "version": "28.2.0"}},
+               self.data.CommandFailed("HTTPS request failed"), self.data.Refusal("Invalid JSON input"))
+    for schema in schemas:
+      with self.subTest(schema=schema), patch.object(self.data, "api_document", side_effect=[repository, package, {"version": "28.2.0"}, schema]), \
+           patch.object(self.data, "http") as http:
+        with self.assertRaises(self.data.Refusal) as raised:
+          self.data.package_association("unused", config, ensure=True)
+        self.assertNotIn("PRIVATE_REMOTE_BODY", str(raised.exception))
+        http.assert_not_called()
+
+  def test_gitea_28_discovery_uses_existing_bounded_http_failure_contract(self):
+    config, _, _ = self.association_records()
+    for reply in (self.http_reply(404, b"PRIVATE_REMOTE_BODY"), self.http_reply(401, b"PRIVATE_REMOTE_BODY"),
+                  self.http_reply(500, b"PRIVATE_REMOTE_BODY"), self.http_reply(302, b"PRIVATE_REMOTE_BODY"),
+                  self.http_reply(200, b"{broken")):
+      with self.subTest(reply=reply), patch.object(self.data, "capture", side_effect=[self.http_reply(200, b'{"version":"28.2.0"}'), reply]):
+        # Malformed JSON raises ValueError, handled by the existing CLI boundary.
+        with self.assertRaises((self.data.Refusal, ValueError)) as raised:
+          self.data.supported_link_server("unused", config)
+        self.assertNotIn("PRIVATE_REMOTE_BODY", str(raised.exception))
+
+  def test_gitea_28_association_retains_one_post_exact_readback_and_explicit_refusal(self):
+    config, repository, package = self.association_records()
+    schema = {"info": {"title": "Gitea API", "version": "28.2.0"}}
+    correct = package | {"repository": repository}
+    cases = ((201, correct, True), (self.data.CommandFailed("HTTPS request failed"), correct, True),
+             (self.data.CommandFailed("HTTPS request failed"), package, False),
+             (201, package | {"repository": repository | {"id": 99}}, False),
+             (201, None, False), (201, self.data.Refusal("Command output exceeds byte limit"), False),
+             (403, correct, False), (400, correct, False), (200, correct, False))
+    for post, readback, succeeds in cases:
+      replies = [(200, {}, self.data.canonical(record)) for record in
+                 (repository, package, {"version": "28.2.0"}, schema, repository, package)]
+      replies += [post if isinstance(post, Exception) else (post, {}, b""),
+                  readback if isinstance(readback, Exception) else (200, {}, self.data.canonical(readback))]
+      with self.subTest(post=post, readback=readback), patch.object(self.data, "http", side_effect=replies) as http:
+        if succeeds:
+          self.data.package_association("unused", config, ensure=True)
+        else:
+          with self.assertRaises(self.data.Refusal):
+            self.data.package_association("unused", config, ensure=True)
+        methods = [call.args[1] for call in http.call_args_list]
+        self.assertEqual(methods.count("POST"), 1)
+        self.assertEqual(http.call_count, 7 if isinstance(post, int) and post != 201 else 8)
 
   def test_lost_link_response_requires_exact_readback_not_another_post(self):
     config, repository, package = self.association_records()

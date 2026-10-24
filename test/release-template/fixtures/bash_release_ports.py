@@ -240,6 +240,10 @@ event("http:" + method + ":" + route)
 if route == "/api/v1/version" and method == "GET":
   association_resource = "version"
   body = {"version": state.get("gitea_version", "1.25.0")}
+elif route == "/swagger.v1.json" and method == "GET":
+  association_resource = "discovery"
+  # Public Gitea 28.2.0 schema info, not an invented product field on /version.
+  body = state.get("server_schema", {"info": {"title": "Gitea API", "version": state.get("gitea_version", "1.25.0")}})
 elif route == "/api/v1/repos/fixtures/application" and method == "GET":
   association_resource = "target"
   body = target_repository
@@ -257,6 +261,9 @@ elif route == "/api/v1/packages/fixtures/container/application-hello/-/link/appl
   if fault in ("transport", "timeout"):
     sys.exit(28 if fault == "timeout" else 7)
   if state.get("linked_repository") is not None:
+    # Both supported Gitea contracts reject pkg.RepoID > 0 before SetRepositoryLink.
+    # 28.2.0 source: 829b49c1, services/packages/package_update.go:20-39.
+    # This check uses stored association, not the possibly hidden GET representation.
     status = 400
   elif fault in ("denied", "missing", "server", "wrong_status"):
     status = {"denied": 403, "missing": 404, "server": 500, "wrong_status": 200}[fault]
