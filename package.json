@@ -1,6 +1,6 @@
 {
   "name": "dashboard",
-  "version": "0.17.34",
+  "version": "0.17.35",
   "private": true,
   "description": "A self-hosted photo dashboard with a clock, weather forecasts, CalDAV events, and Linkwarden bookmarks.",
   "type": "module",

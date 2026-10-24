@@ -5,11 +5,12 @@
 - [Checks](#checks)
   - [Table of Contents](#table-of-contents)
   - [Server photo rotation](#server-photo-rotation)
+  - [Container release adoption](#container-release-adoption)
   - [Photo inventory memory benchmark](#photo-inventory-memory-benchmark)
   - [Photo lookahead and browser resources](#photo-lookahead-and-browser-resources)
   - [Local and Global settings](#local-and-global-settings)
   - [Weather air quality](#weather-air-quality)
-- [Direct layout editing](#direct-layout-editing)
+  - [Direct layout editing](#direct-layout-editing)
 
 ```sh
 npm test
@@ -50,6 +51,16 @@ Fullscreen-reference tests cover pure estimate/fallback/confirmation state, safe
 Automatic-key checks cover pure no-write configuration, database-relative defaults, restricted parent/file creation, atomic winner races, partial-write/publication cleanup, explicit-secret precedence, restart credential continuity, and lost-key refusal. Home Assistant TLS checks use `HOME_ASSISTANT_CA_FILE` for real loopback registry/service sessions, hostname verification, unrelated HTTPS trust isolation, and actual development-child trust changes. No live account, key, database, mount, or user `.env` is used.
 
 Run `node scripts/check-production.js` for the opt-in packaging smoke. It copies only runtime/manifests into `/tmp/opencode`, installs locked production dependencies there, verifies local Undici resolution and absence of Playwright, then checks actual readiness/HTTP/automatic key/IPC shutdown with isolated storage and disabled NFS. It never replaces the working dependency tree. Registry/tooling failures are reported; a passing production-tree smoke is not built-image verification. Compose configuration parsing and actual image build/runtime checks remain separately recorded.
+
+## Container release adoption
+
+Run `python3 -B -m unittest discover -s test/release-template -v` with Python 3.11+, Bash, and Git. The suite imports the pinned template's interface, bounded-data, and fake-port publication coverage, with home-web readiness/guard/platform cases. It uses owned temporary Git repositories and fixture credentials, never production services. No Python packages are required. `npm test` separately checks synchronized `VERSION`/npm/notes/configuration metadata, image/Compose runtime contracts, and disabled/unsupported CLI behavior. Run `./scripts/release.sh --validate`, `bash -n scripts/release.sh scripts/release-common.sh`, and `node --check test/release-config.test.js` as well.
+
+The real no-argument entry point is unconditionally disabled and has no bypass. Interface tests keep that guard intact, check refusal even with missing tools and bypass-like environment variables, and verify no helper/credential/state/external effects. Underlying publication tests copy only required scripts and safe fixture inputs into an owned temporary repository, install fake command ports, and remove the exact guard block only from the temporary script before its fixture commit. Guard location/count and fixture ownership are asserted. This is a test-source transformation, not an operator procedure or enablement proof.
+
+Builder characterization preserves canonical, variant, and starred advertisements from running nodes, multi-node aggregation, stopped/error-node refusal, malformed/empty output, missing targets, inspection failure, and zero publication writes on refusal. It does not relax strict published-manifest identity/platform validation. Readiness cases prove exact existing associations work read-only on server `28.2.0`, while missing/unlinked/conflicting or unavailable/malformed evidence refuses before publication writes. Final association checks still detect later changes. Fake-port tests verify digest promotion without rebuilding and conservative retry states; they do not certify live registry APIs, Packages-tab rendering, Docker plugin discovery, ARM64 execution, or power-loss behavior.
+
+N1/N2 remain unresolved. A separately reviewed activation change must demonstrate that predecessor reappearance after confirmed promotion blocks release POST and config-local Buildx plugin selection is preserved across preflight/private auth. The guard must remain until both regressions and operational package readiness are established. See [release operations](releases.md) for provenance, prerequisites, and the deliberate temporary loss of publishing. Built-image verification is distinct from `node scripts/check-production.js`, which tests an isolated production file tree.
 
 ## Server photo rotation
 

@@ -2,7 +2,7 @@ FROM node:24-bookworm-slim
 
 ARG APP_VERSION=unknown
 ARG VCS_REF=unknown
-ARG SOURCE_URL=ssh://git@git.lan/dev/home-web.git
+ARG SOURCE_URL=https://git.lan/dev/home-web
 
 LABEL org.opencontainers.image.title="home-web" \
   org.opencontainers.image.description="Self-hosted LAN dashboard" \

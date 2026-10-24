@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "gitea": "https://git.lan",
+  "repository": "dev/home-web",
+  "image": "git.lan/dev/home-web",
+  "username": "dev",
+  "token_file": "~/.config/git/token",
+  "notes": "docs/releases/0.17.35.md",
+  "platforms": ["linux/amd64", "linux/arm64"]
+}

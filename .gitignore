@@ -11,3 +11,7 @@ photos/
 dist/
 playwright-report/
 test-results/
+.template-operation.lock
+.release-template/
+.template-transaction/
+__pycache__/
