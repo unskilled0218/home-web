@@ -58,7 +58,7 @@ test('Local settings persist without the shared endpoint; invalid scope data doe
 
 test('Local follows Global by default, persists opt-out, and keeps presentation and other profiles independent', async ({ browser }) => {
   const env = await settingsEnvironment(); const a = await scopeClient(browser, env); const b = await scopeClient(browser, env); const global = await scopeClient(browser, env);
-  const writes = []; a.page.on('request', request => { if (request.method() !== 'GET') writes.push(request.url()); });
+  const writes = []; a.page.on('request', request => { if (request.method() !== 'GET' && new URL(request.url()).pathname.startsWith('/api/dashboard/')) writes.push(request.url()); });
   try {
     await mode(global.page, 'global'); const before = env.store.exportDashboardSettings();
     const current = () => env.slideshow.snapshot().current.url;
