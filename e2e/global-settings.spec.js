@@ -1,5 +1,6 @@
 import { expect } from '@playwright/test';
 import { globalTest as test, globalFirefox as firefox } from './global-fixtures.js';
+import { saveCategory } from './category-settings.js';
 import { once } from 'node:events';
 import { createStore } from '../src/db.js';
 import { createDashboardServer } from '../src/app.js';
@@ -23,22 +24,22 @@ async function client(browser, env, { legacy, mobile = false } = {}) {
   const context = await browser.newContext({ baseURL: env.base, locale: 'en-US', viewport: { width: mobile ? 390 : 1200, height: 800 } });
   if (legacy) await context.addInitScript((value) => { if (!localStorage.getItem('dashboard.preferences.v1')) localStorage.setItem('dashboard.preferences.v1', JSON.stringify(value)); }, legacy);
   const page = await context.newPage(); await page.clock.install({ time: instant });
-  await page.goto('/'); await expect(page.locator('#settings-status')).toHaveText('Preferences are shared across all browsers.');
+  await page.goto('/'); await expect(page.locator('#settings-status')).toHaveText('General settings use Global shared values.');
   return { page, close: () => context.close() };
 }
 const preferences = (page) => page.evaluate((key) => JSON.parse(localStorage.getItem(key))?.preferences, cacheKey);
 async function open(page, tab = 'General') { await page.locator('#open-settings').click(); await page.getByRole('tab', { name: tab, exact: true }).click(); }
-async function save(page) { await page.getByRole('button', { name: 'Save preferences', exact: true }).click(); await expect(page.locator('#settings-status')).toHaveText('Preferences saved for all browsers.'); }
+const save = saveCategory;
 async function tick(page) { await page.clock.fastForward(5000); }
 
 test('all Settings categories share through a real server across isolated desktop/mobile clients', async ({ browser }) => {
   const env = await environment(); const a = await client(browser, env); const b = await client(browser, env, { mobile: true });
   try {
     await open(a.page); await a.page.getByRole('combobox', { name: 'Position', exact: true }).selectOption('right'); await a.page.getByLabel('Overall scale', { exact: true }).fill('1.2');
-    await a.page.locator('[name="mobileTimeVisible"]').uncheck(); await a.page.getByRole('tab', { name: 'Time', exact: true }).click(); await a.page.getByLabel('Timezone', { exact: true }).fill('Asia/Tokyo'); await a.page.getByLabel('Show seconds', { exact: true }).uncheck();
-    await a.page.getByRole('tab', { name: 'Weather', exact: true }).click(); await a.page.getByRole('combobox', { name: 'Temperature', exact: true }).selectOption('fahrenheit'); await a.page.getByLabel('Weather scale on mobile', { exact: true }).fill('1.3');
-    await a.page.getByRole('tab', { name: 'Calendar', exact: true }).click(); await a.page.getByLabel('Calendar scale', { exact: true }).fill('1.2');
-    await a.page.getByRole('tab', { name: 'General', exact: true }).click(); await a.page.getByLabel('Hide bookmarks in fullscreen', { exact: true }).check();
+    await save(a.page); await a.page.getByRole('tab', { name: 'Time', exact: true }).click(); await a.page.locator('[name="mobileTimeVisible"]').uncheck(); await a.page.getByLabel('Timezone', { exact: true }).fill('Asia/Tokyo'); await a.page.getByLabel('Show seconds', { exact: true }).uncheck(); await save(a.page);
+    await a.page.getByRole('tab', { name: 'Weather', exact: true }).click(); await a.page.getByRole('combobox', { name: 'Temperature', exact: true }).selectOption('fahrenheit'); await a.page.getByLabel('Weather scale on mobile', { exact: true }).fill('1.3'); await save(a.page);
+    await a.page.getByRole('tab', { name: 'Calendar', exact: true }).click(); await a.page.getByLabel('Calendar scale', { exact: true }).fill('1.2'); await save(a.page);
+    await a.page.getByRole('tab', { name: 'Bookmarks', exact: true }).click(); await a.page.getByLabel('Hide bookmarks in fullscreen', { exact: true }).check(); await save(a.page);
     await a.page.getByRole('tab', { name: 'Images', exact: true }).click(); await a.page.getByLabel('Background color', { exact: true }).fill('#123456'); await a.page.getByLabel('Interval (seconds)', { exact: true }).fill('120'); await save(a.page);
     await tick(b.page); await expect(b.page.locator('body')).toHaveCSS('background-color', 'rgb(18, 52, 86)'); await expect(b.page.locator('#clock')).toBeHidden(); await expect(b.page.locator('#weather')).toHaveCSS('font-size', '20.8px');
     expect(await preferences(b.page)).toEqual(env.store.getDashboardPreferences().preferences);
@@ -54,9 +55,9 @@ test('concurrent dialogs preserve drafts, reject stale saves, and explicitly rel
     await b.page.getByRole('tab', { name: 'Bookmarks', exact: true }).click(); await b.page.getByLabel('Linkwarden URL', { exact: true }).fill('https://draft.test'); await b.page.getByRole('tab', { name: 'General', exact: true }).click();
     await a.page.getByRole('tab', { name: 'Images', exact: true }).click(); await a.page.getByLabel('Background color', { exact: true }).fill('#123456'); await save(a.page);
     await tick(b.page); await expect(b.page.locator('body')).toHaveCSS('background-color', 'rgb(18, 52, 86)'); await expect(b.page.getByLabel('Overall scale', { exact: true })).toHaveValue('1.7');
-    await b.page.getByRole('button', { name: 'Save preferences', exact: true }).click(); await expect(b.page.locator('#settings-status')).toContainText('changed in another browser');
+    await b.page.locator('#save-preferences').click(); await expect(b.page.locator('#settings-status')).toContainText('revision changed');
     expect(env.store.getDashboardPreferences().preferences.scale).toBe(1);
-    await b.page.getByRole('button', { name: 'Reload shared preferences', exact: true }).click(); await expect(b.page.getByLabel('Overall scale', { exact: true })).toHaveValue('1');
+    await b.page.locator('#reload-shared-preferences').click(); await expect(b.page.getByLabel('Overall scale', { exact: true })).toHaveValue('1');
     await b.page.getByRole('tab', { name: 'Bookmarks', exact: true }).click(); await expect(b.page.getByLabel('Linkwarden URL', { exact: true })).toHaveValue('https://draft.test'); await b.page.getByRole('tab', { name: 'General', exact: true }).click();
     await b.page.getByLabel('Overall scale', { exact: true }).fill('1.7'); await save(b.page); expect(env.store.getDashboardPreferences().preferences.color).toBe('#123456');
   } finally { await a.close(); await b.close(); await env.close(); }

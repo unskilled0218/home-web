@@ -70,41 +70,12 @@
         <div class="settings-panels">
           <section id="settings-panel-general" role="tabpanel" aria-labelledby="settings-tab-general" tabindex="0">
             <h3>General</h3><p class="settings-description">Position and overall scale apply to desktop. Choose which sections appear over the background without changing connections or selections.</p>
-            <fieldset id="settings-scope-controls"><legend>Settings scope</legend>
-              <label>Use settings for<select id="settings-scope"><option value="local">Local — this browser</option><option value="global">Global — all Global browsers</option></select></label>
-              <p class="settings-description">This choice belongs to this browser profile only. Other browsers keep their own mode. Shared connections and device management can be changed in Global mode.</p>
-              <p id="scope-status" role="status"></p>
+            <fieldset id="settings-scope-controls"><legend>Global settings transfer</legend>
+              <p>Export always reads Global values. Import requires General Global and replaces all Global categories, not just General. Local values and category choices stay unchanged; Local image followers track the shared slideshow.</p>
               <div class="integration-actions"><button id="export-global-settings" type="button">Export global settings</button><label>Global settings file<input id="global-settings-file" type="file" accept="application/json,.json"></label><button id="import-global-settings" type="button" disabled>Import global settings</button></div>
               <p id="settings-transfer-status" role="status"></p>
             </fieldset>
-            <fieldset id="background-display"><legend>Display on background</legend>
-              <fieldset><legend>Desktop</legend>
-                <label class="toggle"><input name="timeVisible" form="preferences" type="checkbox">Time</label>
-                <label class="toggle"><input name="weatherVisible" form="preferences" type="checkbox">Weather</label>
-                <label class="toggle"><input name="calendarVisible" form="preferences" type="checkbox">Calendar</label>
-                <label class="toggle"><input name="bookmarksVisible" form="preferences" type="checkbox">Bookmarks</label>
-                <label class="toggle"><input name="homeAssistantVisible" form="preferences" type="checkbox">Home Assistant</label>
-                <label class="toggle"><input name="wolVisible" form="preferences" type="checkbox">Wake-on-LAN</label>
-              </fieldset>
-              <fieldset><legend>Mobile</legend>
-                <label class="toggle"><input name="mobileTimeVisible" form="preferences" type="checkbox">Time</label>
-                <label class="toggle"><input name="mobileWeatherVisible" form="preferences" type="checkbox">Weather</label>
-                <label class="toggle"><input name="mobileCalendarVisible" form="preferences" type="checkbox">Calendar</label>
-                <label class="toggle"><input name="mobileBookmarksVisible" form="preferences" type="checkbox">Bookmarks</label>
-                <label class="toggle"><input name="mobileHomeAssistantVisible" form="preferences" type="checkbox">Home Assistant</label>
-                <label class="toggle"><input name="mobileWolVisible" form="preferences" type="checkbox">Wake-on-LAN</label>
-              </fieldset>
-              <p class="settings-description">Mobile applies up to and including 600px wide. Edit either profile on any screen. Changes apply after Save preferences.</p>
-            </fieldset>
-            <fieldset><legend>Fullscreen visibility</legend>
-              <label class="toggle"><input name="hideTimeFullscreen" form="preferences" type="checkbox">Hide time in fullscreen</label>
-              <label class="toggle"><input name="hideWeatherFullscreen" form="preferences" type="checkbox">Hide weather in fullscreen</label>
-              <label class="toggle"><input name="hideCalendarFullscreen" form="preferences" type="checkbox">Hide calendar in fullscreen</label>
-              <label class="toggle"><input name="hideBookmarksFullscreen" form="preferences" type="checkbox">Hide bookmarks in fullscreen</label>
-              <label class="toggle"><input name="hideHomeAssistantFullscreen" form="preferences" type="checkbox">Hide Home Assistant in fullscreen</label>
-              <label class="toggle"><input name="hideWolFullscreen" form="preferences" type="checkbox">Hide Wake-on-LAN in fullscreen</label>
-              <p class="settings-description">These options only hide widgets enabled in the active Desktop or Mobile profile. They apply after Save preferences.</p>
-            </fieldset>
+            <section id="category-scope-recovery" hidden><p id="category-scope-error" role="alert"></p><button id="reset-category-scopes" type="button">Reset category scopes to Local</button><p id="category-scope-recovery-status" role="status"></p></section>
             <fieldset><legend>Information layout</legend>
               <label>Position<select name="position" form="preferences"><option value="left">Lower left</option><option value="right">Lower right</option></select></label>
               <label>Overall scale<input name="scale" form="preferences" type="number" min="0.5" max="2" step="0.1"></label>
@@ -113,12 +84,15 @@
           <section id="settings-panel-time" role="tabpanel" aria-labelledby="settings-tab-time" tabindex="0" hidden>
             <h3>Time</h3><p class="settings-description">Choose how your clock looks. Timezone also applies to weather and calendar times.</p>
             <fieldset><legend>Desktop display</legend>
+              <label class="toggle"><input name="timeVisible" form="preferences" type="checkbox">Show time</label>
               <label>Clock scale<input name="timeScale" form="preferences" type="number" min="0.5" max="2" step="0.1"></label>
             </fieldset>
             <fieldset><legend>Mobile display</legend>
               <label>Clock scale on mobile<input name="mobileTimeScale" form="preferences" type="number" min="0.5" max="2" step="0.1"></label>
+              <label class="toggle"><input name="mobileTimeVisible" form="preferences" type="checkbox">Show time on mobile</label>
             </fieldset>
-            <p class="settings-description">Choose visibility in General → Display on background. Mobile scale uses 0.1 increments. Both profiles can be edited on any screen.</p>
+            <label class="toggle"><input name="hideTimeFullscreen" form="preferences" type="checkbox">Hide time in fullscreen</label>
+            <p class="settings-description">Mobile applies up to and including 600px. Both profiles can be edited on any screen.</p>
             <fieldset><legend>Shared format</legend>
               <label>Timezone<input name="timezone" form="preferences" maxlength="80" placeholder="Europe/London" required></label>
               <label>Date style<select name="dateStyle" form="preferences"><option>short</option><option>medium</option><option>long</option><option>full</option></select></label>
@@ -130,11 +104,14 @@
             <h3>Weather</h3><p class="settings-description">Local conditions, forecasts, and units at a glance.</p>
             <fieldset><legend>Desktop display</legend>
               <label>Weather scale<input name="weatherScale" form="preferences" type="number" min="0.5" max="2" step="0.1"></label>
+              <label class="toggle"><input name="weatherVisible" form="preferences" type="checkbox">Show weather</label>
             </fieldset>
             <fieldset><legend>Mobile display</legend>
               <label>Weather scale on mobile<input name="mobileWeatherScale" form="preferences" type="number" min="0.5" max="2" step="0.1"></label>
+              <label class="toggle"><input name="mobileWeatherVisible" form="preferences" type="checkbox">Show weather on mobile</label>
             </fieldset>
-            <p class="settings-description">Choose visibility in General → Display on background. Mobile scale uses 0.1 increments. Units apply to both layouts.</p>
+            <label class="toggle"><input name="hideWeatherFullscreen" form="preferences" type="checkbox">Hide weather in fullscreen</label>
+            <p class="settings-description">Visibility and units follow Weather scope; timezone and time format follow Time scope.</p>
             <fieldset><legend>Shared forecast display</legend>
               <label class="toggle"><input name="weatherHourlyVisible" form="preferences" type="checkbox">Show hourly forecast</label>
               <label class="toggle"><input name="weatherDailyVisible" form="preferences" type="checkbox">Show daily forecast</label>
@@ -145,22 +122,26 @@
               <label>Wind<select name="wind" form="preferences"><option value="kmh">km/h</option><option value="mph">mph</option><option value="ms">m/s</option><option value="kn">knots</option></select></label>
               <label>Precipitation<select name="precipitation" form="preferences"><option value="mm">mm</option><option value="inch">inches</option></select></label>
             </fieldset>
-            <section class="settings-section" aria-labelledby="location-title"><h4 id="location-title">Weather location</h4><p id="current-location">Loading saved weather location…</p><p>Location and display preferences are shared across browsers through this server. Searches go directly to Open-Meteo; the server retrieves and caches weather hourly.</p><form id="location-search"><label>City or place<input id="location-query" type="search" minlength="2" maxlength="120" required></label><button type="submit">Search</button><button id="clear-location" type="button">Clear results</button></form><p id="location-settings-status" role="status"></p><p id="search-status" role="status"></p><ul id="location-results"></ul></section>
+            <section class="settings-section" aria-labelledby="location-title"><h4 id="location-title">Weather location</h4><p id="current-location">Loading saved weather location…</p><p>The saved city follows Weather scope: Local stays in this browser; Global is shared. City selection saves separately from display preferences. Searches go directly to Open-Meteo; this server retrieves forecast data.</p><form id="location-search"><label>City or place<input id="location-query" type="search" minlength="2" maxlength="120" required></label><button type="submit">Search</button><button id="clear-location" type="button">Clear results</button></form><p id="location-settings-status" role="status"></p><p id="search-status" role="status"></p><ul id="location-results"></ul></section>
           </section>
           <section id="settings-panel-calendar" role="tabpanel" aria-labelledby="settings-tab-calendar" tabindex="0" hidden>
             <h3>Calendar</h3><p class="settings-description">Keep upcoming events close with your Baikal calendar.</p>
             <fieldset><legend>Desktop display</legend>
               <label>Calendar scale<input name="calendarScale" form="preferences" type="number" min="0.5" max="2" step="0.1"></label>
+              <label class="toggle"><input name="calendarVisible" form="preferences" type="checkbox">Show calendar</label>
             </fieldset>
             <fieldset><legend>Mobile display</legend>
               <label>Calendar scale on mobile<input name="mobileCalendarScale" form="preferences" type="number" min="0.5" max="2" step="0.1"></label>
+              <label class="toggle"><input name="mobileCalendarVisible" form="preferences" type="checkbox">Show calendar on mobile</label>
             </fieldset>
-            <p class="settings-description">Choose visibility in General → Display on background. Mobile scale uses 0.1 increments. The connection is shared; events refresh when either profile shows the calendar.</p>
+            <label class="toggle"><input name="hideCalendarFullscreen" form="preferences" type="checkbox">Hide calendar in fullscreen</label>
+            <p class="settings-description">The connection remains shared; change it with Calendar Global. Timezone and time format follow Time scope.</p>
             <section class="settings-section" aria-labelledby="calendar-settings-title"><h4 id="calendar-settings-title">Baikal calendar</h4><p>Enter the Baikal server URL. Event calendars are discovered automatically. The password is encrypted on this server and never shown again; leave it blank to retain it when the URL and username are unchanged.</p><form id="calendar-connection"><label>Baikal server URL<input id="calendar-url" name="serverUrl" type="url" maxlength="2048" placeholder="https://baikal.example.test" autocomplete="url" required></label><label>Username<input id="calendar-username" name="username" maxlength="120" autocomplete="username" required></label><label>Password<input id="calendar-password" name="password" type="password" maxlength="2000" autocomplete="current-password"></label><div class="calendar-settings-actions"><button id="connect-calendar" type="submit">Connect calendar</button><button id="disconnect-calendar" type="button">Disconnect calendar</button></div></form><p id="calendar-settings-status" role="status"></p></section>
           </section>
           <section id="settings-panel-bookmarks" role="tabpanel" aria-labelledby="settings-tab-bookmarks" tabindex="0" hidden>
             <h3>Bookmarks</h3><p class="settings-description">Browse links under their folders and choose links for the shared dashboard. Selected links appear without parent folders and open in new tabs in this browser.</p>
             <input name="mobileBookmarksMode" form="preferences" type="hidden">
+            <fieldset><legend>Display</legend><label class="toggle"><input name="bookmarksVisible" form="preferences" type="checkbox">Show bookmarks</label><label class="toggle"><input name="mobileBookmarksVisible" form="preferences" type="checkbox">Show bookmarks on mobile</label><label class="toggle"><input name="hideBookmarksFullscreen" form="preferences" type="checkbox">Hide bookmarks in fullscreen</label></fieldset>
             <fieldset id="bookmark-link-selection"><legend>Dashboard bookmark links</legend><p id="bookmark-selection-status" role="status" tabindex="-1">Loading saved connection…</p><div class="bookmark-selection-actions"><button id="bookmark-reload-folders" type="button">Reload folder</button><button id="bookmark-select-none" type="button">Clear</button></div><ul id="bookmark-link-picker" aria-label="Dashboard bookmark link selections"><li><ul id="bookmark-picker-folders" aria-label="Bookmark folders to browse"></ul></li></ul></fieldset>
             <section class="settings-section" aria-labelledby="linkwarden-title"><h4 id="linkwarden-title">Linkwarden connection</h4><p>The access token is encrypted on this server. Leave it blank to retain a readable saved token when URL and username are unchanged. A new token is required for re-authentication.</p>
               <form id="linkwarden-connection"><label>Linkwarden URL<input id="linkwarden-url" type="url" maxlength="2048" required></label><label>Linkwarden username<input id="linkwarden-username" maxlength="120" required autocomplete="username"></label><label>Linkwarden access token<input id="linkwarden-token" type="password" maxlength="2000" autocomplete="off"></label><div class="calendar-settings-actions"><button id="connect-linkwarden" type="submit">Connect Linkwarden</button><button id="disconnect-linkwarden" type="button">Disconnect Linkwarden</button></div></form>
@@ -169,6 +150,7 @@
           </section>
           <section id="settings-panel-home-assistant" role="tabpanel" aria-labelledby="settings-tab-home-assistant" tabindex="0" hidden>
             <h3>Home Assistant</h3><p class="settings-description">The connection is shared across browsers. Use a dedicated non-admin Home Assistant user on a trusted LAN. Selected devices show read-only sensor snapshots on the dashboard.</p>
+            <fieldset><legend>Display</legend><label class="toggle"><input name="homeAssistantVisible" form="preferences" type="checkbox">Show Home Assistant</label><label class="toggle"><input name="mobileHomeAssistantVisible" form="preferences" type="checkbox">Show Home Assistant on mobile</label><label class="toggle"><input name="hideHomeAssistantFullscreen" form="preferences" type="checkbox">Hide Home Assistant in fullscreen</label></fieldset>
             <p id="home-assistant-status" role="status">Open Settings to load the saved connection.</p>
             <form id="home-assistant-connection">
               <label>Home Assistant URL<input id="home-assistant-url" type="url" maxlength="2048" placeholder="http://homeassistant.local:8123" required autocomplete="url"></label>
@@ -176,12 +158,14 @@
               <p class="settings-description">The token is encrypted on this server and never shown again. Leave it blank to keep a readable saved token for the unchanged URL. A new URL or re-authentication requires a new token. Enter an instance origin without a path, query, fragment, or credentials.</p>
               <div class="integration-actions"><button id="connect-home-assistant" type="submit">Connect Home Assistant</button><button id="disconnect-home-assistant" type="button">Disconnect Home Assistant</button></div>
             </form>
+            <button id="discard-home-assistant-draft" type="button">Discard connection draft</button>
             <p id="home-assistant-settings-status" role="status"></p>
             <fieldset><legend>Dashboard devices</legend><p id="home-assistant-selection-status" role="status" tabindex="-1">Connect Home Assistant to choose devices.</p><ul id="home-assistant-device-picker" aria-label="Home Assistant device selections"></ul></fieldset>
             <p class="settings-description">For a private certificate, set HOME_ASSISTANT_CA_FILE to its public CA bundle in the server's .env and restart it. This trust applies only to Home Assistant. Certificate verification cannot be bypassed here. See <a href="https://www.home-assistant.io/docs/authentication/" target="_blank" rel="noopener noreferrer">Home Assistant authentication</a> for long-lived tokens.</p>
           </section>
           <section id="settings-panel-wol" role="tabpanel" aria-labelledby="settings-tab-wol" tabindex="0" hidden>
             <h3>Wake-on-LAN</h3><p class="settings-description">Manage devices saved on this server for all browsers. This tab does not send wake packets.</p>
+            <fieldset><legend>Display</legend><label class="toggle"><input name="wolVisible" form="preferences" type="checkbox">Show Wake-on-LAN</label><label class="toggle"><input name="mobileWolVisible" form="preferences" type="checkbox">Show Wake-on-LAN on mobile</label><label class="toggle"><input name="hideWolFullscreen" form="preferences" type="checkbox">Hide Wake-on-LAN in fullscreen</label></fieldset>
             <p id="wol-status" role="status">Open Settings to load saved devices.</p><ul id="wol-devices" aria-label="Saved Wake-on-LAN devices"></ul>
             <form id="wol-device-form">
               <h4 id="wol-editor-title">Add device</h4>

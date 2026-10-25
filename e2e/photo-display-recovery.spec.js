@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { settingsEnvironment } from './settings-environment.js';
 import { normalizeDashboardPreferences } from '../public/dashboard-helpers.js';
+import { setCategoryScope, saveCategory } from './category-settings.js';
 
 async function shown(page, url) {
   const image = page.locator('#photos .photo-layer > img').last();
@@ -11,8 +12,7 @@ async function shown(page, url) {
 }
 
 async function scope(page, mode) {
-  await page.locator('#open-settings').click(); await page.locator('#settings-scope').selectOption(mode);
-  await expect(page.locator('#settings-status')).toHaveText(mode === 'local' ? 'Preferences apply to this browser only.' : 'Preferences are shared across all browsers.');
+  await page.locator('#open-settings').click(); await setCategoryScope(page, 'images', mode);
   await page.locator('#close-settings').click();
 }
 
@@ -27,13 +27,13 @@ test('Local opt-out displays real image bytes, rotates independently, and switch
     expect(response.status).toBe(200); expect(response.headers.get('content-type')).toBe('image/png'); expect((await response.arrayBuffer()).byteLength).toBeGreaterThan(0);
     const before = env.store.exportDashboardSettings(); const selection = env.slideshow.snapshot();
     await page.clock.install(); await page.goto(env.base);
-    await expect(page.locator('#settings-scope')).toHaveValue('local');
+    await expect(page.locator('#settings-scope-images')).toHaveValue('local');
     const initial = page.locator('#photos .photo-layer > img').last(); await expect(initial).toBeVisible();
     const initialUrl = await initial.getAttribute('src'); expect(manifest.photos.map(photo => photo.url)).toContain(initialUrl); await shown(page, initialUrl);
     await page.locator('#open-settings').click(); await page.locator('#settings-tab-images').click();
     await page.locator('#follow-global-photos').uncheck();
     await page.locator('[name="order"]').selectOption('name'); await page.locator('[name="interval"]').fill('5'); await page.locator('[name="animation"]').selectOption('none');
-    await page.locator('#save-preferences').click(); await expect(page.locator('#settings-status')).toHaveText('Preferences saved for this browser.'); await page.locator('#close-settings').click();
+    await saveCategory(page); await page.locator('#close-settings').click();
     await shown(page, manifest.photos[0].url); await page.clock.fastForward(5000); await shown(page, manifest.photos[1].url);
     expect(env.store.exportDashboardSettings()).toEqual(before); expect(env.slideshow.snapshot()).toEqual(selection);
     await scope(page, 'global'); await shown(page, shared.current.url);
@@ -66,7 +66,7 @@ for (const playback of ['local-following', 'local-independent', 'global']) test(
     await expect(page.locator('#photo-status')).toHaveText('Using 1 NFS background in this playback sequence.');
     expect(requests.length).toBeGreaterThan(1); expect(new Set(requests).size).toBe(1);
     expect(env.slideshow.snapshot()).toEqual(snapshot); expect(env.store.exportDashboardSettings()).toEqual(before);
-    expect(await page.locator('#settings-scope').inputValue()).toBe(mode); expect(errors).toEqual([]);
+    expect(await page.locator('#settings-scope-images').inputValue()).toBe(mode); expect(errors).toEqual([]);
     expect(metadata.length).toBeGreaterThan(0); expect(new Set(metadata)).toEqual(new Set([playback === 'local-independent' ? '/api/dashboard/photos/local' : '/api/dashboard/slideshow']));
     await page.clock.runFor(5000); await expect(page.locator('#photos .photo-layer')).toHaveCount(1);
   } finally { await page.goto('about:blank'); await env.close(); }

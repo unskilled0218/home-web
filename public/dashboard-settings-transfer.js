@@ -6,12 +6,12 @@ export function createSettingsTransferControls({ document, window, coordinator, 
   const status = text => { get('settings-transfer-status').textContent = text; };
   function rebase() {
     if (!selected) return;
-    const state = coordinator.getState(); selected = { ...selected, token: state.saveToken, weatherRevision: state.snapshot.integrations.weather?.revision, preferencesRevision: state.snapshot.revision };
+    const state = coordinator.getTransferState(); selected = { ...selected, token: state.saveToken, weatherRevision: state.snapshot.integrations.weather?.revision, preferencesRevision: state.snapshot.revision };
   }
   function update() {
-    const state = coordinator.getState();
+    const state = coordinator.getTransferState();
     if (source !== state.source) { source = state.source; generation++; selected = undefined; get('global-settings-file').value = ''; status(''); if (download) { window.URL.revokeObjectURL(download); download = undefined; } }
-    get('import-global-settings').disabled = busy || state.mode !== 'global' || !state.confirmed || state.pending || state.mutating || !selected || !Number.isSafeInteger(selected.weatherRevision) || !canImport();
+    get('import-global-settings').disabled = busy || state.mode !== 'global' || state.scopeError || !state.confirmed || state.pending || state.mutating || !selected || !Number.isSafeInteger(selected.weatherRevision) || !canImport();
     get('export-global-settings').disabled = busy;
   }
   get('global-settings-file').addEventListener('change', async () => {
@@ -20,7 +20,7 @@ export function createSettingsTransferControls({ document, window, coordinator, 
       if (file.size > MAX_SETTINGS_TRANSFER_BYTES) throw new Error('Settings file exceeds 128 KiB.');
       const settings = validateSettingsTransfer(parseSettingsJson(await file.text()));
       if (owner !== generation) return;
-      selected = { settings }; rebase(); status('Global settings file ready. Import applies it to Global browsers.');
+      selected = { settings }; rebase(); status('Global settings file ready. Import replaces all Global category values, not Local values or category choices.');
     } catch (error) { if (owner === generation) status(error.message); }
     finally { update(); }
   }, options);
@@ -38,7 +38,7 @@ export function createSettingsTransferControls({ document, window, coordinator, 
     if (!selected || !canImport() || busy) return; const owner = generation; busy = true; update();
     try {
       await coordinator.importGlobal(selected.settings, { preferencesRevision: selected.preferencesRevision, weatherRevision: selected.weatherRevision }, selected.token);
-      if (owner === generation) { status('Global settings imported. Local preferences and mode choices were not changed. Local followers continue tracking the shared slideshow.'); selected = undefined; get('global-settings-file').value = ''; }
+      if (owner === generation) { status('Global settings imported. Local preferences and category choices were not changed. Local followers continue tracking the shared slideshow.'); selected = undefined; get('global-settings-file').value = ''; }
     } catch (error) { if (owner === generation) status(error.message); }
     finally { busy = false; update(); }
   }, options);

@@ -1,7 +1,8 @@
 import { test as base, firefox } from '@playwright/test';
+import { seedScopes } from './category-settings.js';
 
 // Shared-behavior scenarios opt in explicitly; new scope scenarios use Playwright's base test.
-const seedGlobal = context => context.addInitScript(() => localStorage.setItem('dashboard.settings-scope.v1', JSON.stringify({ schema: 1, mode: 'global' })));
+const seedGlobal = context => seedScopes(context);
 function globalBrowser(browser) {
   return new Proxy(browser, { get(target, name) {
     if (name === 'newContext') return async options => { const context = await target.newContext(options); await seedGlobal(context); return context; };

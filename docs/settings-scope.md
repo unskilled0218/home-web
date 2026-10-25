@@ -1,39 +1,56 @@
 # Settings scope
 
 - [Settings scope](#settings-scope)
-  - [Choose Local or Global](#choose-local-or-global)
-  - [Storage and switching](#storage-and-switching)
-  - [Weather and photos](#weather-and-photos)
-  - [Installation resources](#installation-resources)
+  - [Choose a scope per category](#choose-a-scope-per-category)
+  - [Category ownership](#category-ownership)
+  - [Saving and conflicts](#saving-and-conflicts)
+  - [Storage and recovery](#storage-and-recovery)
+  - [Weather and images](#weather-and-images)
+  - [Installation resources and transfers](#installation-resources-and-transfers)
 
-## Choose Local or Global
+## Choose a scope per category
 
-Open Settings → General → Settings scope. **Local — this browser** is the default. Each browser profile independently remembers its mode. Changing A to Local does not change B/C's mode: browsers already using Global continue using Global and synchronizing with each other.
+Each Settings panel has its own **Local — this browser** or **Global — shared category** selector. Mix Global Time with Local Weather, or choose any other combination across General, Time, Weather, Calendar, Bookmarks, Home Assistant, Wake-on-LAN, and Images. Changing one choice does not change another category or another browser profile. Tabs in the same profile share these choices through storage events.
 
-Local owns time format/timezone, weather city/units, visibility/fullscreen options, selected bookmarks/devices, both layout profiles, and image presentation. Local follows Global image selection by default; turn off **Images → Show the same image as Global** and save to use Local order/interval. Local changes do not publish global settings. **Global — all Global browsers** uses the existing server-side preference record and revision conflicts. Joining Global reads current shared settings; it does not copy Local values into them. Returning to Local restores the profile's local values.
+Fresh profiles default every category to Local. Without a new category map, a valid old `dashboard.settings-scope.v1` choice seeds all categories with that mode; absent/invalid old modes default to Local. Reads never copy Local values into Global or rewrite either preference record. Switching to Global reads existing server values, and switching back restores Local values. Global caches are never Local defaults. Reload all open tabs after upgrading; older clients do not understand mixed scopes.
 
-## Storage and switching
+## Category ownership
 
-The mode lives in `dashboard.settings-scope.v1`; Local preferences and weather location live separately in `dashboard.local-settings.v1`. Both belong to this dashboard origin in the browser profile. Tabs in the same profile share those values through storage events; independent profiles/contexts do not. Clearing site data removes them. Private browsing/storage restrictions can prevent persistent saves; failures retain the previous confirmed state and draft rather than reporting success. A Local preview works without a healthy global settings endpoint.
+- General: position, overall scale, and both Desktop/Mobile widget layouts, including geometry and layer order. Direct layout editing follows General scope.
+- Time: clock visibility/scales, timezone, date style, 12-hour format, seconds, and fullscreen hiding. Effective Time timezone/format also governs weather/calendar timestamps, regardless of their scopes.
+- Weather: visibility/scales, hourly/daily forecast display, temperature/wind/precipitation units, fullscreen hiding, and saved city.
+- Calendar: visibility/scales and fullscreen hiding. Calendar connection data remains a shared server resource.
+- Bookmarks: visibility, fullscreen hiding, selected links, and the retained mobile display compatibility preference. Linkwarden credentials remain shared.
+- Home Assistant: visibility, fullscreen hiding, and selected devices. Its connection remains shared.
+- Wake-on-LAN: visibility and fullscreen hiding. Managed devices and wake history remain shared.
+- Images: order, interval, transitions, filename display, opacity, background, color, and blur. Local Images also retains its separate **Show the same image as Global** option.
 
-The Local record also stores `followGlobalPhotos` outside shared preferences. Fresh, legacy, and existing records without that field default to on; an explicitly saved false stays off. Saving preferences and this option is atomic under one Local revision. Unrelated weather/layout saves preserve it. Reading old records does not rewrite them. Older cached application versions reject the extended record because their validation is strict; reload the updated application before editing Local settings.
+Visibility and fullscreen controls now live in each widget's own panel, not General. Both Desktop/Mobile profiles can be edited from any screen; the mobile breakpoint remains 600px inclusive.
 
-Without a Local record, valid legacy `dashboard.preferences.v1` values can restore the old browser configuration, including its city. Global caches are never used as Local defaults. Legacy values are retained until an explicit Local save succeeds. Updated Global clients no longer automatically publish legacy preferences into an uninitialized server record. Existing global SQLite settings are preserved.
+## Saving and conflicts
 
-Save or discard edits before changing scope in the same tab. If another tab changes scope while a form/layout draft is open, reload/discard that draft before saving it; old-source drafts cannot write into the new scope even when revision numbers coincide. Global writes already admitted by the server may still commit after a tab changes scope. Aborting a browser wait does not roll back SQLite. Local read-before-write revision checks catch already-changed drafts, but truly simultaneous multi-tab writes use last-successful-write semantics because browser storage has no transactional compare-and-swap.
+The footer saves or reloads only the selected category. Tab switches retain unsaved drafts without applying them; invalid fields in another category do not block the selected category's Save. Connection forms and city selection remain separate explicit actions. Closing/reopening Settings discards unsaved display drafts. Reloading one category does not clear another category's draft or integration credentials.
 
-## Weather and photos
+Save or discard a category's edits before changing its scope. Category reload discards display edits without clearing connection credentials; Home Assistant also provides **Discard connection draft**, and Wake-on-LAN provides **Cancel edit**. A storage event that changes its source keeps a dirty draft but disables Save until reload. Scope-only changes in unrelated categories preserve valid tokens and runtime owners. There is still one preference revision per backing store: saving any category to that same store can stale another captured draft. Reload explicitly rather than silently rebasing. Failed persistence keeps confirmed values and the unsaved draft.
 
-Local city choices remain in browser storage. `/api/weather/local` queries data for those coordinates/timezone without changing the global saved location or persisted weather cache. The server keeps at most 16 volatile Local keys and 512 KiB of normalized data, admits at most two provider requests, and retries retained keys hourly, including failed attempts. Inactive keys can be evicted. Pending data is polled every five seconds and settled data every minute while visible. Units change presentation without another provider retrieval. No Local location means no Local weather query. Coordinates reach the server for retrieval; this is not a private server account or a persistent server-side per-browser configuration.
+Every scoped mutation rereads the persisted category map immediately before dispatch, including when storage events are delayed. Invalid/unreadable maps block writes. This is not an atomic cross-tab lock: truly simultaneous storage writes use last-successful-write semantics, and a scope change after admission cannot roll back a server request. An aborted/timed-out request may already have committed. Local categories can save offline or while unrelated Global work is pending; Global categories require confirmed server state.
 
-Local photos follow `/api/dashboard/slideshow?version=2` by default, using the same server-selected image and rotation as Global, including images beyond the independent Local pool's 100-image limit. Local transition, filename, opacity, blur, and background preferences remain independent. Order/Interval are disabled while following, but their saved Local values are retained. The checkbox is hidden in Global mode. Edits apply only after Save. Polling and decoding delays mean transitions are not frame-perfect synchronized.
+## Storage and recovery
 
-Turn off **Show the same image as Global** and save for independent ordering/rotation through `/api/dashboard/photos/local`. Hidden pages pause playback/discovery; resume reads fresh metadata. Following never runs independent Local rotation or manifest polling. Only one photo player is active. Switching scope or saving a playback-source change disposes the old player and clears its frame, so a solid background can appear until the replacement decodes; independent playback restarts with saved order/interval, not its old runtime cursor. Presentation-only updates keep the layer. Transient failures within an unchanged source retain the last-good image; confirmed disabled/empty sources clear it. See [NFS backgrounds](nfs-backgrounds.md).
+`dashboard.category-scopes.v1` stores `{ schema: 1, revision, scopes }` with exactly eight Local/Global choices. The old scope key is retained for migration but no longer written by new clients; once the new map exists, legacy scope-key changes do not redefine it. `dashboard.local-settings.v1` still stores Local preferences, weather location, and `followGlobalPhotos`. Existing valid `dashboard.preferences.v1` data restores Local preferences/city when the newer Local record is absent, and is removed only after a successful explicit Local save.
 
-Global weather continues persisted startup/hourly retrieval, even when all viewers are closed or Local. Its location and photo cursor do not change because a Local browser chooses another city, image order, or interval.
+Corrupt scope-map data keeps the last confirmed choices for preview, or Local preview on startup, but is not write authority. **General → Reset category scopes to Local** requires confirmation and replaces only the corrupt category map. It preserves Local preferences, city, Images follow choice, legacy keys, credentials, server data, and unsaved drafts. Reload retained drafts after recovery. An observed concurrent repair or failed storage operation prevents overwrite/success reporting. Do not clear all site data just to repair this map. Blocked browser storage must first be enabled by the browser/user; unreadable storage cannot safely be overwritten.
 
-## Installation resources
+## Weather and images
 
-Integration credentials/accounts, NFS mounts, managed Wake-on-LAN devices, and wake history remain server resources. Local can read shared integration content with independent display selections; connection/device-management controls require Global mode. This UI scope is not a server authorization role. Normal Wake buttons retain their separate explicit action behavior.
+Weather Local keeps its city in browser storage and queries `/api/weather/local`, a bounded volatile server cache without changing Global location/cache records. Weather Global uses the persisted installation location and startup/hourly provider retrieval. Time scope can change display/provider timezone without changing Weather's city or owning store. Units reproject successful data without another provider retrieval. No Local city means no Local query.
 
-See [global settings import/export](settings-import-export.md) for portable settings files and [dashboard features](dashboard.md) for display controls.
+Global Images follows the server slideshow. Local Images follows that same selection by default, even if every category is Local, without polling Global preferences. Disable **Show the same image as Global** and save Images for independent Local playback of a stable subset of up to 100 eligible images. The follow choice defaults on for old records without it and preserves explicit off values. Local presentation remains independent; Local order/interval are retained but disabled while following.
+
+Only Images source changes or an Images follow toggle replace the photo player; changing Time/Weather/General scope does not reset it. Replacement clears the old frame until a new image decodes. Transient failures within an unchanged source retain the last-good image; confirmed disabled/empty sources clear it. Shared selection is not frame-perfect synchronized transitions. Hidden pages pause browser work and resume the current source. See [NFS backgrounds](nfs-backgrounds.md).
+
+## Installation resources and transfers
+
+Calendar, Linkwarden, and Home Assistant credentials, NFS mounts, managed Wake-on-LAN devices, and wake history remain server resources. Mutation controls require Global for their owning category: Calendar, Bookmarks, Home Assistant, or Wake-on-LAN. Local categories can still read shared content and keep independent display selections. Normal dashboard Wake buttons retain their separate explicit behavior. This UI scope is not server authorization or a per-user account system.
+
+Export always reads raw Global settings, not mixed effective settings. Import requires General Global, fresh raw Global revisions, and no conflicting drafts/actions; it explicitly replaces all Global preferences/location rather than only General. Local records and category choices stay unchanged, while Global-backed categories and Local Images followers can change presentation/selection. See [Global import/export](settings-import-export.md) and [dashboard preferences](dashboard.md).

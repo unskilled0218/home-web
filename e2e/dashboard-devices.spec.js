@@ -1,5 +1,6 @@
 import { expect } from '@playwright/test';
 import { globalTest as test } from './global-fixtures.js';
+import { saveCategory, setPreferenceFlags } from './category-settings.js';
 import { once } from 'node:events';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
@@ -46,12 +47,12 @@ async function environment({ count = 4, selected = false, long = false } = {}) {
 }
 async function client(browser, env, width = 1200, height = 850) {
   const context = await browser.newContext({ viewport: { width, height } }); const page = await context.newPage(); const errors = [];
-  page.on('pageerror', (error) => errors.push(error.message)); await page.clock.install(); await page.goto(env.base); await expect(page.locator('#settings-status')).toHaveText('Preferences are shared across all browsers.');
+  page.on('pageerror', (error) => errors.push(error.message)); await page.clock.install(); await page.goto(env.base); await expect(page.locator('#settings-status')).toHaveText('General settings use Global shared values.');
   return { page, errors, async close() { expect(errors).toEqual([]); await context.close(); } };
 }
 async function open(page) { await page.locator('#open-settings').click(); await page.getByRole('tab', { name: 'Home Assistant', exact: true }).click(); await expect(page.locator('#home-assistant-device-picker input')).not.toHaveCount(0); }
 const checkbox = (page, index) => page.getByRole('checkbox', { name: new RegExp(`^Device ${index} ·`) });
-async function save(page) { await page.locator('#save-preferences').click(); await expect(page.locator('#settings-status')).toHaveText('Preferences saved for all browsers.'); }
+const save = saveCategory;
 async function poll(page, milliseconds = 5000) { await page.clock.fastForward(milliseconds); }
 
 test('selection is read-only, global, revision-aware and durable across reload and restart', async ({ browser }) => {
@@ -74,7 +75,7 @@ test('dirty picker drafts retain focus, reject stale saves and reload without cl
   try {
     await open(a.page); await open(b.page); await checkbox(b.page, 1).check(); await checkbox(b.page, 1).focus(); await b.page.locator('#home-assistant-token').fill('unsent'); await checkbox(b.page, 1).focus();
     await checkbox(a.page, 0).check(); await save(a.page); await poll(b.page, 30000); await expect(checkbox(b.page, 1)).toBeChecked(); await expect(checkbox(b.page, 1)).toBeFocused(); await expect(checkbox(b.page, 0)).not.toBeChecked();
-    await b.page.locator('#save-preferences').click(); await expect(b.page.locator('#settings-status')).toContainText('changed in another browser'); await expect(checkbox(b.page, 1)).toBeChecked();
+    await b.page.locator('#save-preferences').click(); await expect(b.page.locator('#settings-status')).toContainText('revision changed'); await expect(checkbox(b.page, 1)).toBeChecked();
     await b.page.locator('#reload-shared-preferences').click(); await expect(checkbox(b.page, 0)).toBeChecked(); await expect(checkbox(b.page, 1)).not.toBeChecked(); await expect(b.page.locator('#home-assistant-token')).toHaveValue('unsent');
     await checkbox(b.page, 1).check(); await b.page.locator('#close-settings').click(); await open(b.page); await expect(checkbox(b.page, 1)).not.toBeChecked(); await expect(b.page.locator('#home-assistant-token')).toHaveValue('');
   } finally { await a.close(); await b.close(); await env.close(); }
@@ -113,13 +114,13 @@ test('hidden device overlays retain snapshots, connections and pending Wake comp
     env.blockWake(); await a.page.getByRole('button', { name: 'Wake Office PC', exact: true }).click(); await expect.poll(() => env.sent).toBe(1);
     const before = env.store.getDashboardPreferences().preferences;
     await a.page.locator('#open-settings').click();
-    for (const name of ['homeAssistantVisible', 'wolVisible']) await a.page.locator(`[name="${name}"]`).uncheck();
-    await save(a.page); await a.page.locator('#close-settings').click(); await expect(a.page.locator('#dashboard-devices')).toBeHidden();
+    await setPreferenceFlags(a.page, { homeAssistantVisible: false, wolVisible: false });
+    await a.page.locator('#close-settings').click(); await expect(a.page.locator('#dashboard-devices')).toBeHidden();
     env.releaseWake(); await expect(a.page.locator('#dashboard-wol-action-status')).toContainText('does not confirm'); expect(env.auditCount()).toBe(1);
     await poll(a.page); await expect(a.page.locator('#dashboard-devices')).toBeHidden();
     await a.page.locator('#open-settings').click();
-    for (const name of ['homeAssistantVisible', 'wolVisible']) await a.page.locator(`[name="${name}"]`).check();
-    await save(a.page); await a.page.locator('#close-settings').click();
+    await setPreferenceFlags(a.page, { homeAssistantVisible: true, wolVisible: true });
+    await a.page.locator('#close-settings').click();
     await expect(a.page.locator('#dashboard-ha-devices')).toContainText('20.00 °C'); await expect(a.page.getByRole('button', { name: 'Wake Office PC', exact: true })).toBeEnabled();
     expect(env.store.getDashboardPreferences().preferences.homeAssistantDeviceSelections).toEqual(before.homeAssistantDeviceSelections); expect(env.sent).toBe(1);
     expect((await (await fetch(env.base + '/api/home-assistant')).json()).homeAssistant.configured).toBe(true);
@@ -189,5 +190,35 @@ test('Settings disposal detaches its view without disposing injected controllers
       return { continued, detached, alive, mutations, timers: timers.size };
     });
     expect(result).toEqual({ continued: true, detached: true, alive: true, mutations: 0, timers: 0 });
+  } finally { await a.close(); await env.close(); }
+});
+
+test('integration forms use separate category guards and reject persisted ownership changes before work', async ({ browser }) => {
+  const env = await environment(); const a = await client(browser, env);
+  try {
+    const result = await a.page.evaluate(async () => {
+      const { createIntegrationSettings } = await import('/dashboard-integration-settings.js');
+      const { createSettingsScope } = await import('/dashboard-settings-scope.js');
+      const { categoryScopes } = await import('/dashboard-settings-categories.js');
+      const clone = document.getElementById('settings-dialog').cloneNode(true);
+      const doc = { getElementById: id => clone.querySelector(`#${id}`), createElement: tag => document.createElement(tag) };
+      const scopes = categoryScopes(); scopes.wol = 'global';
+      const values = new Map([['dashboard.category-scopes.v1', JSON.stringify({ schema: 1, revision: 1, scopes })]]);
+      const coordinator = createSettingsScope({ storage: { getItem: key => values.get(key) ?? null }, onSnapshot() {} });
+      let haWrites = 0; let wolWrites = 0;
+      const homeAssistant = { getState: () => ({ discovered: true, encryptionReady: true }), refresh: async () => {}, subscribe: () => () => {}, connect: async () => { haWrites++; } };
+      const wol = { getState: () => ({ discovered: true, devices: [] }), refresh: async () => {}, subscribe: () => () => {}, save: async () => { wolWrites++; } };
+      const view = createIntegrationSettings({ document: doc, homeAssistant, wol, canMutate: id => coordinator.getCategoryState(id).mode === 'global', captureMutation: id => coordinator.getCategoryState(id).saveToken, beginMutation: (id, token) => coordinator.beginIntegrationAction(id, token) });
+      view.open(); doc.getElementById('home-assistant-url').value = 'https://draft.test'; doc.getElementById('home-assistant-token').value = 'secret draft';
+      doc.getElementById('home-assistant-connection').dispatchEvent(new Event('submit', { cancelable: true }));
+      const haDisabled = doc.getElementById('connect-home-assistant').disabled; const wolEnabled = !doc.getElementById('save-wol-device').disabled;
+      scopes.wol = 'local'; values.set('dashboard.category-scopes.v1', JSON.stringify({ schema: 1, revision: 2, scopes }));
+      doc.getElementById('wol-name').value = 'Draft PC'; doc.getElementById('wol-mac').value = 'AA:BB:CC:DD:EE:FF'; doc.getElementById('wol-broadcast').value = '192.168.1.255';
+      doc.getElementById('wol-device-form').dispatchEvent(new Event('submit', { cancelable: true })); await Promise.resolve();
+      const status = doc.getElementById('wol-settings-status').textContent; const draft = doc.getElementById('wol-name').value;
+      view.dispose(); coordinator.dispose(); return { haDisabled, wolEnabled, haWrites, wolWrites, status, draft };
+    });
+    expect(result).toMatchObject({ haDisabled: true, wolEnabled: true, haWrites: 0, wolWrites: 0, draft: 'Draft PC' });
+    expect(result.status).toContain('source or revision changed');
   } finally { await a.close(); await env.close(); }
 });

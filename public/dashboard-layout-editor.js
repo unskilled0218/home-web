@@ -60,7 +60,7 @@ export function createDashboardLayoutEditor({ document, window, view, getState, 
       button.disabled = busy || Boolean(gesture) || (['front', 'forward'].includes(button.dataset.layer) ? targetIndex === 5 : targetIndex === 0);
     }
     toggle.disabled = busy; close.disabled = busy;
-    get('save').disabled = busy || !state.confirmed || session.revision === null || Boolean(gesture) || (state.saveToken && state.saveToken.split(':').slice(0, 2).join(':') !== String(session.revision).split(':').slice(0, 2).join(':'));
+    get('save').disabled = busy || !state.confirmed || session.revision === null || Boolean(gesture) || state.source !== session.source;
     get('cancel').disabled = busy; get('reload').disabled = busy || !state.confirmed || Boolean(gesture); get('reset').disabled = busy || Boolean(gesture) || !session.draft[session.mode]; get('fullscreen').disabled = busy || !document.fullscreenEnabled;
   }
   function render(preserveRaw = true) {

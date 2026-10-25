@@ -1,109 +1,161 @@
 import { createSettingsSync } from './dashboard-settings-sync.js';
 import { normalizeDashboardPreferences, legacyDashboardPreferences, normalizeLocation, SETTINGS_KEY } from './dashboard-helpers.js';
-import { SCOPE_KEY, LOCAL_SETTINGS_KEY, parseSettingsJson, validateScope, validateLocalSettings, validateSettingsTransfer, validateConfigurationMetadata, MAX_SETTINGS_TRANSFER_BYTES } from './dashboard-settings-data.js';
+import { SCOPE_KEY, CATEGORY_SCOPES_KEY, LOCAL_SETTINGS_KEY, parseSettingsJson, validateScope, validateCategoryScopes, validateLocalSettings, validateSettingsTransfer, validateConfigurationMetadata, MAX_SETTINGS_TRANSFER_BYTES } from './dashboard-settings-data.js';
+import { CATEGORY_IDS, settingsCategory, categoryScopes, composeCategoryPreferences, patchCategory } from './dashboard-settings-categories.js';
 import { requestDashboardJson } from './dashboard-request.js';
 
 const unavailable = () => ({ weather: { available: false }, calendar: { available: false }, linkwarden: { available: false } });
+const serviceCategory = name => ({ linkwarden: 'bookmarks', 'home-assistant': 'home-assistant', wol: 'wol', weather: 'weather', calendar: 'calendar' })[name] ?? name;
 export function createSettingsScope({ storage, onSnapshot, onState = () => {}, captureObservers = () => ({}), fetchImpl = fetch, schedule = setTimeout, cancel = clearTimeout }) {
-  let mode = 'local'; let epoch = 0; let error = ''; let visible = true; let disposed = false; let started = false; let pending = false; let actions = 0;
-  let global; let metadata; let timer; let local = { schema: 1, revision: 0, preferences: normalizeDashboardPreferences(), weatherLocation: null, followGlobalPhotos: true };
+  let scopes = { schema: 1, revision: 0, scopes: categoryScopes() }; const epochs = Object.fromEntries(CATEGORY_IDS.map(id => [id, 0]));
+  let scopeError = ''; let localError = ''; let corruptRaw; let global; let metadata; let timer; let visible = true; let started = false; let disposed = false; let importing = false;
+  const actions = new Map();
+  let local = { schema: 1, revision: 0, preferences: normalizeDashboardPreferences(), weatherLocation: null, followGlobalPhotos: true };
   const api = (url, options = {}) => requestDashboardJson(url, { fetchImpl, schedule, cancel, ...options });
-  try { const raw = storage?.getItem(SCOPE_KEY); if (raw) mode = validateScope(parseSettingsJson(raw)); } catch { error = 'Settings scope could not be read. Using Local preview.'; }
+  const anyGlobal = () => CATEGORY_IDS.some(id => scopes.scopes[id] === 'global');
+  function readScopes() {
+    const raw = storage?.getItem(CATEGORY_SCOPES_KEY);
+    if (raw !== null && raw !== undefined) return validateCategoryScopes(parseSettingsJson(raw));
+    let mode = 'local'; try { const legacy = storage?.getItem(SCOPE_KEY); if (legacy) mode = validateScope(parseSettingsJson(legacy)); } catch { /* Invalid legacy mode is a Local default, not write authority for Global. */ }
+    return { schema: 1, revision: 0, scopes: categoryScopes(mode) };
+  }
   function readLocal() {
     const raw = storage?.getItem(LOCAL_SETTINGS_KEY);
     if (raw) return validateLocalSettings(parseSettingsJson(raw));
     const legacy = storage?.getItem(SETTINGS_KEY); const old = legacy ? parseSettingsJson(legacy) : null;
     return { schema: 1, revision: 0, preferences: legacyDashboardPreferences(old) ?? normalizeDashboardPreferences(), weatherLocation: normalizeLocation(old?.location), followGlobalPhotos: true };
   }
-  try { local = readLocal(); } catch { error = 'Local settings could not be read. Save to replace this preview.'; }
+  try { scopes = readScopes(); } catch { scopeError = 'Category scopes could not be read. Use General to recover the scope map.'; try { corruptRaw = storage?.getItem(CATEGORY_SCOPES_KEY); } catch { /* Unreadable storage cannot be recovered by overwriting it. */ } }
+  try { local = readLocal(); } catch { localError = 'Local settings could not be read. Save to replace this preview.'; }
+  function globalState() { return global?.getState() ?? { snapshot: { initialized: false, revision: 0, preferences: normalizeDashboardPreferences(), integrations: unavailable() }, confirmed: false, pending: false, cache: false }; }
+  function categoryState(id) {
+    settingsCategory(id); const mode = scopes.scopes[id]; const base = mode === 'global' ? globalState() : { confirmed: true, pending: false, cache: false, snapshot: { revision: local.revision }, error: localError };
+    const source = JSON.stringify([id, mode, epochs[id]]);
+    return { category: id, mode, source, revision: base.snapshot.revision, saveToken: JSON.stringify([source, base.snapshot.revision]), confirmed: base.confirmed && !scopeError, cache: base.cache, pending: base.pending || mode === 'global' && importing, mutating: (actions.get(id) ?? 0) > 0, error: scopeError || base.error || '', snapshot: { preferences: effectivePreferences() } };
+  }
+  function effectivePreferences() { return composeCategoryPreferences(scopes.scopes, local.preferences, globalState().snapshot.preferences); }
   function state() {
-    const base = mode === 'global' && global ? global.getState() : { snapshot: { initialized: true, revision: local.revision, preferences: local.preferences, integrations: unavailable() }, confirmed: true, cache: false, pending: false };
-    return { ...base, mode, source: `${mode}:${epoch}`, saveToken: `${mode}:${epoch}:${base.snapshot.revision}`, weatherLocation: mode === 'local' ? local.weatherLocation : null, followGlobalPhotos: local.followGlobalPhotos, pending: pending || base.pending, mutating: actions > 0, error: error || base.error || '' };
+    const shared = globalState();
+    return { scopes: { ...scopes.scopes }, scopeRevision: scopes.revision, scopeError, recoverable: corruptRaw !== undefined && corruptRaw !== null, categories: Object.fromEntries(CATEGORY_IDS.map(id => [id, categoryState(id)])), snapshot: { preferences: effectivePreferences(), integrations: shared.snapshot.integrations }, weatherLocation: scopes.scopes.weather === 'local' ? local.weatherLocation : shared.snapshot.integrations.weather?.location ?? null, followGlobalPhotos: local.followGlobalPhotos, pending: importing || shared.pending, mutating: actions.size > 0 };
   }
   const emit = () => { if (!disposed) onState(state()); };
   function publish(observers = {}) { if (!disposed) onSnapshot(state().snapshot, observers); emit(); }
   function ensureGlobal() {
     if (global) return;
-    global = createSettingsSync({ storage, fetchImpl, schedule, cancel, captureObservers, onSnapshot(value, observers) { if (mode === 'global' && !disposed) { onSnapshot(value, observers); emit(); } }, onState() { if (mode === 'global') emit(); } });
-    global.setVisible(visible && mode === 'global');
+    global = createSettingsSync({ storage, fetchImpl, schedule, cancel, captureObservers, onSnapshot(_value, observers) { if (!disposed) publish(observers); }, onState() { if (!disposed) emit(); } });
+    global.setVisible(visible && anyGlobal());
+  }
+  function adoptScopes(next, reset = false) {
+    let changed = reset;
+    for (const id of CATEGORY_IDS) if (reset || next.scopes[id] !== scopes.scopes[id]) { epochs[id]++; changed = true; }
+    scopes = next; scopeError = ''; corruptRaw = undefined;
+    return changed;
+  }
+  function syncScopes() {
+    try { return adoptScopes(readScopes()); }
+    catch (failure) { scopeError = 'Category scopes could not be read. Use General to recover the scope map.'; try { corruptRaw = storage?.getItem(CATEGORY_SCOPES_KEY); } catch { corruptRaw = undefined; } throw failure; }
   }
   function stopMetadata() { cancel(timer); timer = undefined; metadata?.abort(); metadata = undefined; }
   async function refreshMetadata() {
-    if (disposed || !visible || mode !== 'local' || metadata) return;
-    const owner = new AbortController(); metadata = owner; const captured = captureObservers(); const source = epoch;
+    if (disposed || !visible || metadata) return;
+    const owner = new AbortController(); metadata = owner; const captured = captureObservers();
     try {
       const value = validateConfigurationMetadata(await api('/api/dashboard/configuration', { signal: owner.signal }));
-      if (!owner.signal.aborted && epoch === source && mode === 'local') for (const name of ['calendar', 'linkwarden']) if (value[name]?.available) captured[name]?.(value[name]);
-    } catch { /* Read-only metadata failure must not disable Local settings. */ }
-    finally { if (metadata === owner) { metadata = undefined; if (!disposed && visible && mode === 'local') timer = schedule(() => { timer = undefined; void refreshMetadata(); }, 5000); } }
+      if (!owner.signal.aborted && !disposed) for (const name of ['calendar', 'linkwarden']) if (scopes.scopes[serviceCategory(name)] === 'local' && value[name]?.available) captured[name]?.(value[name]);
+    } catch { /* Installation reads do not determine preference ownership. */ }
+    finally { if (metadata === owner) { metadata = undefined; if (!disposed && visible) timer = schedule(() => { timer = undefined; void refreshMetadata(); }, 5000); } }
   }
-  function refresh() {
-    if (mode === 'global') { ensureGlobal(); return global.refresh(); }
-    try { local = readLocal(); error = ''; publish(); } catch { error = 'Local settings could not be reloaded. The previous preview is retained.'; emit(); }
-    return refreshMetadata();
+  function updatePolling() {
+    if (!started || disposed) return;
+    if (anyGlobal()) ensureGlobal();
+    global?.setVisible(visible && anyGlobal());
+    if (!visible || ['calendar', 'bookmarks'].every(id => scopes.scopes[id] === 'global')) stopMetadata();
+    else if (!metadata && !timer) void refreshMetadata();
   }
-  function validateToken(token) { if (token !== state().saveToken) throw new Error('Settings source or revision changed. Reload preferences before saving.'); }
-  function persistLocal(next, token) {
-    validateToken(token);
-    const savedMode = storage?.getItem(SCOPE_KEY);
-    let persistedMode = 'local'; try { if (savedMode) persistedMode = validateScope(parseSettingsJson(savedMode)); } catch { /* Explicit Local save may recover an invalid mode preview. */ }
-    if (persistedMode !== 'local') throw new Error('Settings scope changed in another tab. Reload preferences.');
-    let current; try { current = readLocal(); } catch { if (!error) throw new Error('Local settings changed or became unreadable. Reload before replacing them.'); current = local; }
-    if (current.revision !== local.revision) { local = current; publish(); throw new Error('Local settings changed in another tab. Reload preferences.'); }
+  async function refresh() {
+    try { syncScopes(); } catch { /* Preserve the last map for display, never writes. */ }
+    try { local = readLocal(); localError = ''; } catch { localError = 'Local settings could not be reloaded. The previous preview is retained.'; }
+    updatePolling(); publish();
+    if (anyGlobal()) { ensureGlobal(); await global.refresh(); }
+  }
+  function admitMutation(id, token, { globalOnly = false, confirmed = true } = {}) {
+    if (disposed) throw new Error('Settings have been disposed.');
+    let changed;
+    try { changed = syncScopes(); } catch { emit(); throw new Error(scopeError); }
+    if (changed) { updatePolling(); publish(); }
+    const current = categoryState(id);
+    if (token !== current.saveToken) throw new Error(`${settingsCategory(id).label} settings source or revision changed. Reload this category before saving.`);
+    if (globalOnly && current.mode !== 'global') throw new Error(`Select Global ${settingsCategory(id).label} settings before changing server resources.`);
+    if (confirmed && !current.confirmed) throw new Error(`Reload ${settingsCategory(id).label} settings before saving.`);
+    return current;
+  }
+  function persistLocal(id, token, next) {
+    let current;
+    try { current = readLocal(); } catch { if (!localError) throw new Error('Local settings became unreadable. Reload before saving.'); current = local; }
+    if (current.revision !== local.revision) { local = current; publish(); throw new Error('Local settings changed in another tab. Reload this category.'); }
     const value = validateLocalSettings({ ...next, schema: 1, revision: current.revision + 1 });
     if (!storage) throw new Error('Browser storage is unavailable. Local settings were not saved.');
-    storage.setItem(LOCAL_SETTINGS_KEY, JSON.stringify(value)); local = value; error = '';
-    try { storage.removeItem(SETTINGS_KEY); } catch { /* The committed local record is authoritative. */ }
-    publish(); return state().snapshot;
+    admitMutation(id, token); storage.setItem(LOCAL_SETTINGS_KEY, JSON.stringify(value)); local = value; localError = '';
+    try { storage.removeItem(SETTINGS_KEY); } catch { /* Committed Local data is authoritative. */ }
+    publish(); return categoryState(id);
   }
-  async function changeScope(next, { canChange = true, persist = true } = {}) {
-    if (!['local', 'global'].includes(next)) throw new Error('Invalid settings scope.');
-    if (disposed || next === mode) return;
-    if (persist && (!canChange || state().pending || actions)) throw new Error('Save or discard pending edits before changing settings scope.');
-    if (persist) { if (!storage) throw new Error('Browser storage is unavailable. Scope was not saved.'); storage.setItem(SCOPE_KEY, JSON.stringify({ schema: 1, mode: next })); }
-    epoch++; error = ''; stopMetadata(); global?.setVisible(false); mode = next;
-    if (mode === 'local') { try { local = readLocal(); } catch { error = 'Local settings could not be loaded.'; } }
-    else ensureGlobal();
-    publish();
-    if (started && visible) { if (mode === 'global') global.setVisible(true); await refresh(); }
+  async function changeScope(id, mode, { canChange = true } = {}) {
+    settingsCategory(id); if (!['local', 'global'].includes(mode)) throw new Error('Invalid category scope.');
+    const revision = scopes.revision; const changed = syncScopes(); if (changed) { updatePolling(); publish(); }
+    if (revision !== scopes.revision) throw new Error('Category choices changed in another tab. Review them before changing scope.');
+    const current = categoryState(id); if (current.mode === mode) return;
+    if (!canChange || current.pending || current.mutating) throw new Error(`Save or discard ${settingsCategory(id).label} edits and pending actions before changing scope.`);
+    if (!storage) throw new Error('Browser storage is unavailable. Scope was not saved.');
+    const next = validateCategoryScopes({ schema: 1, revision: scopes.revision + 1, scopes: { ...scopes.scopes, [id]: mode } });
+    storage.setItem(CATEGORY_SCOPES_KEY, JSON.stringify(next)); adoptScopes(next); updatePolling(); publish();
+    if (mode === 'global' && started) await global.refresh();
   }
-  function storageChanged(event) {
-    if (disposed || ![null, SCOPE_KEY, LOCAL_SETTINGS_KEY].includes(event.key)) return;
-    try {
-      const raw = storage?.getItem(SCOPE_KEY); let next = 'local';
-      try { if (raw) next = validateScope(parseSettingsJson(raw)); } catch { /* Corrupt scope data defaults to Local, never Global. */ }
-      if (next !== mode) { void changeScope(next, { persist: false }); return; }
-      if (mode === 'local') { local = readLocal(); error = ''; publish(); }
-    } catch { error = 'Changed browser settings could not be read.'; emit(); }
+  async function resetScopes(confirm) {
+    const captured = storage?.getItem(CATEGORY_SCOPES_KEY);
+    if (captured === null || captured === undefined) throw new Error('There is no corrupt category map to reset.');
+    let valid = false; try { validateCategoryScopes(parseSettingsJson(captured)); valid = true; } catch { /* Recovery replaces only an invalid map. */ }
+    if (valid) throw new Error('Category choices are valid. Reload them instead.');
+    if (!await confirm('Reset only this browser’s category choices to Local? Saved preferences, weather location, image-follow choice, credentials, and server records will not be deleted. Unsaved drafts will require reload.')) return false;
+    if (storage.getItem(CATEGORY_SCOPES_KEY) !== captured) { try { syncScopes(); updatePolling(); publish(); } catch { emit(); } throw new Error('Category choices changed during recovery. Review them before retrying.'); }
+    const next = validateCategoryScopes({ schema: 1, revision: 1, scopes: categoryScopes() });
+    storage.setItem(CATEGORY_SCOPES_KEY, JSON.stringify(next)); adoptScopes(next, true); updatePolling(); publish(); return true;
+  }
+  function beginIntegrationAction(name, token) {
+    const id = serviceCategory(name); admitMutation(id, token, { globalOnly: name !== 'weather' });
+    actions.set(id, (actions.get(id) ?? 0) + 1); const releaseGlobal = scopes.scopes[id] === 'global' && ['weather', 'calendar', 'linkwarden'].includes(name) ? global?.beginIntegrationAction(name) : null;
+    emit(); let done = false;
+    const release = () => { if (done) return; done = true; const count = (actions.get(id) ?? 1) - 1; if (count) actions.set(id, count); else actions.delete(id); releaseGlobal?.(); emit(); };
+    release.check = () => admitMutation(id, token, { globalOnly: name !== 'weather' });
+    return release;
   }
   return {
-    getState: state,
-    async start() { if (disposed) return; started = true; if (mode === 'global') { ensureGlobal(); global.setVisible(visible); } publish(); await refresh(); },
-    refresh,
-    changeScope,
-    async save(preferences, token, options = {}) {
-      if (pending) throw new Error('A settings import is already pending.');
-      validateToken(token);
+    getState: state, getCategoryState: categoryState,
+    getTransferState() { const base = globalState(); const general = categoryState('general'); return { ...base, mode: general.mode, source: general.source, saveToken: general.saveToken, pending: importing || base.pending, mutating: actions.size > 0, scopeError }; },
+    async start() { if (disposed) return; started = true; updatePolling(); publish(); await refresh(); },
+    refresh, changeScope, resetScopes, admitMutation, beginIntegrationAction,
+    async saveCategory(id, patch, token, options = {}) {
+      const current = admitMutation(id, token); if (current.pending) throw new Error('A settings save or import is already pending.');
       const hasFollow = Object.hasOwn(options, 'followGlobalPhotos');
-      if (hasFollow && (mode !== 'local' || typeof options.followGlobalPhotos !== 'boolean')) throw new Error('A boolean photo-following option can only be saved in Local scope.');
-      if (mode === 'local') return persistLocal({ ...local, preferences, ...(hasFollow ? { followGlobalPhotos: options.followGlobalPhotos } : {}) }, token);
-      ensureGlobal(); return global.save(preferences, state().snapshot.revision);
+      if (hasFollow && (id !== 'images' || current.mode !== 'local' || typeof options.followGlobalPhotos !== 'boolean')) throw new Error('The photo-follow option belongs to Local Images only.');
+      const preferences = patchCategory(id, current.mode === 'local' ? local.preferences : globalState().snapshot.preferences, patch);
+      if (current.mode === 'local') return persistLocal(id, token, { ...local, preferences, ...(hasFollow ? { followGlobalPhotos: options.followGlobalPhotos } : {}) });
+      ensureGlobal(); return global.save(preferences, current.revision, () => admitMutation(id, token));
     },
-    saveLocalLocation(location, token = state().saveToken) { if (mode !== 'local') throw new Error('Local scope is not active.'); return persistLocal({ ...local, weatherLocation: location }, token); },
-    beginIntegrationAction(name) { actions++; const release = mode === 'global' && ['weather', 'calendar', 'linkwarden'].includes(name) ? global?.beginIntegrationAction(name) : null; emit(); let done = false; return () => { if (done) return; done = true; actions--; release?.(); emit(); }; },
+    saveLocalLocation(location, token) { const current = admitMutation('weather', token); if (current.mode !== 'local') throw new Error('Local Weather is not active.'); return persistLocal('weather', token, { ...local, weatherLocation: location }); },
     async exportGlobal() { return validateSettingsTransfer(await api('/api/dashboard/settings/export', { maxBytes: MAX_SETTINGS_TRANSFER_BYTES })); },
     async importGlobal(settings, expected, token) {
-      validateToken(token); if (mode !== 'global' || pending || actions || !state().confirmed) throw new Error('Select confirmed Global settings before importing.');
-      if (!['preferencesRevision', 'weatherRevision'].every(key => Number.isSafeInteger(expected[key]) && expected[key] >= 0)) throw new Error('Reload both global preferences and weather configuration before importing.');
-      const source = epoch; pending = true; emit();
+      const current = admitMutation('general', token, { globalOnly: true });
+      if (current.pending || actions.size) throw new Error('Wait for shared settings actions before importing.');
+      if (!['preferencesRevision', 'weatherRevision'].every(key => Number.isSafeInteger(expected[key]) && expected[key] >= 0) || expected.preferencesRevision !== globalState().snapshot.revision) throw new Error('Reload Global preference and weather revisions before importing.');
+      const validated = validateSettingsTransfer(settings); ensureGlobal(); importing = true; emit();
       try {
-        const value = await api('/api/dashboard/settings/import', { method: 'POST', maxBytes: MAX_SETTINGS_TRANSFER_BYTES, body: { settings: validateSettingsTransfer(settings), ...expected } });
-        if (source === epoch && mode === 'global') global.adoptCommittedSnapshot(value.snapshot);
-        return value;
-      } finally { pending = false; emit(); }
+        admitMutation('general', token, { globalOnly: true });
+        const value = await api('/api/dashboard/settings/import', { method: 'POST', maxBytes: MAX_SETTINGS_TRANSFER_BYTES, body: { settings: validated, ...expected } });
+        global.adoptCommittedSnapshot(value.snapshot); return value;
+      } finally { importing = false; emit(); }
     },
-    storageChanged,
-    setVisible(next) { visible = next; if (next && started) storageChanged({ key: null }); global?.setVisible(next && mode === 'global'); if (!next) stopMetadata(); else if (started && mode === 'local') void refreshMetadata(); },
-    dispose() { disposed = true; epoch++; stopMetadata(); global?.dispose(); }
+    storageChanged(event) { if (!disposed && [null, CATEGORY_SCOPES_KEY, SCOPE_KEY, LOCAL_SETTINGS_KEY].includes(event.key)) void refresh(); },
+    setVisible(next) { visible = next; updatePolling(); if (next && started) void refresh(); },
+    dispose() { disposed = true; stopMetadata(); global?.dispose(); }
   };
 }

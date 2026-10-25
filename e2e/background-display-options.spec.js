@@ -1,5 +1,6 @@
 import { expect } from '@playwright/test';
 import { globalTest as test } from './global-fixtures.js';
+import { saveCategory, setPreferenceFlags, categoryTab } from './category-settings.js';
 import { once } from 'node:events';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { createStore } from '../src/db.js';
@@ -22,12 +23,11 @@ async function environment() {
   await start();
   return { get base() { return base; }, get store() { return store; }, async restart() { await stop(); await start(); }, async close() { await stop(); rmSync(directory, { recursive: true, force: true }); } };
 }
-async function ready(page, env) { await page.goto(env.base); await expect(page.locator('#settings-status')).toHaveText('Preferences are shared across all browsers.'); }
-async function save(page) { await page.locator('#save-preferences').click(); await expect(page.locator('#settings-status')).toHaveText('Preferences saved for all browsers.'); }
+async function ready(page, env) { await page.goto(env.base); await expect(page.locator('#settings-status')).toHaveText('General settings use Global shared values.'); }
+const save = saveCategory;
 async function setFlags(page, flags) {
   await page.locator('#open-settings').click();
-  for (const [name, value] of Object.entries(flags)) await page.locator(`[name="${name}"]`).setChecked(value);
-  await save(page); await page.locator('#close-settings').click();
+  await setPreferenceFlags(page, flags); await page.locator('#close-settings').click();
 }
 
 test('each checkbox affects only its profile after save, preserves choices, and survives restart', async ({ page }) => {
@@ -39,6 +39,7 @@ test('each checkbox affects only its profile after save, preserves choices, and 
       await page.setViewportSize({ width: mobile ? 390 : 1200, height: 800 });
       for (const [name, id] of Object.entries(sections)) {
         await page.locator('#open-settings').click();
+        await categoryTab(page, name === 'homeAssistant' ? 'home-assistant' : name);
         await page.locator(`[name="${field(name, mobile)}"]`).uncheck();
         await expect(page.locator(`#${id}`)).toBeVisible();
         await save(page); await page.locator('#close-settings').click(); await expect(page.locator(`#${id}`)).toBeHidden();
@@ -61,7 +62,7 @@ for (const width of [1200, 601, 600]) test(`fullscreen visibility controls affec
     await page.setViewportSize({ width, height: 900 }); await ready(page, env);
     const flags = Object.fromEntries(Object.keys(sections).map(name => [fullscreenField(name), false]));
     for (const [name, id] of Object.entries(sections)) {
-      await page.locator('#open-settings').click(); await page.locator(`[name="${fullscreenField(name)}"]`).check();
+      await page.locator('#open-settings').click(); await categoryTab(page, name === 'homeAssistant' ? 'home-assistant' : name); await page.locator(`[name="${fullscreenField(name)}"]`).check();
       expect(env.store.getDashboardPreferences().preferences[fullscreenField(name)]).toBe(false);
       await save(page); await page.locator('#close-settings').click(); await expect(page.locator(`#${id}`)).toBeVisible();
       await page.locator('#fullscreen').click(); await expect(page.locator(`#${id}`)).toBeHidden();
@@ -89,10 +90,10 @@ test('remote fullscreen flags apply immediately without rebasing dirty drafts', 
     await b.locator('#fullscreen').click();
     await setFlags(a, Object.fromEntries(Object.keys(sections).map(name => [fullscreenField(name), true])));
     await b.clock.fastForward(5000); await expect(b.locator('#dashboard-content')).toBeHidden(); await expect(b.locator('#open-settings')).toBeVisible();
-    await b.locator('#open-settings').click(); await b.locator('[name="hideTimeFullscreen"]').uncheck();
+    await b.locator('#open-settings').click(); await categoryTab(b, 'time'); await b.locator('[name="hideTimeFullscreen"]').uncheck();
     await setFlags(a, { hideWeatherFullscreen: false }); await b.clock.fastForward(5000);
-    await expect(b.locator('#weather')).toBeVisible(); await expect(b.locator('[name="hideWeatherFullscreen"]')).toBeChecked();
-    await b.locator('#save-preferences').click(); await expect(b.locator('#settings-status')).toContainText('changed in another browser');
+    await expect(b.locator('#weather')).toBeVisible(); await expect(b.locator('[name="hideWeatherFullscreen"]')).not.toBeChecked();
+    await b.locator('#save-preferences').click(); await expect(b.locator('#settings-status')).toContainText('revision changed');
     expect(env.store.getDashboardPreferences().preferences.hideTimeFullscreen).toBe(true);
     await b.locator('#reload-shared-preferences').click(); await expect(b.locator('[name="hideWeatherFullscreen"]')).not.toBeChecked();
     await b.locator('#close-settings').click(); await b.evaluate(() => document.exitFullscreen()); await expect(b.locator('#clock')).toBeVisible();
@@ -132,11 +133,11 @@ test('remote visibility retains dirty revisions, rejects stale save, and reload 
   const env = await environment(); const a = await browser.newPage(); const b = await browser.newPage();
   try {
     await b.clock.install(); await ready(a, env); await ready(b, env);
-    await b.locator('#open-settings').click(); await b.locator('[name="wolVisible"]').uncheck();
-    await b.locator('#settings-tab-home-assistant').click(); await b.locator('#home-assistant-url').fill('http://draft.test'); await b.locator('#settings-tab-general').click();
+    await b.locator('#open-settings').click(); await categoryTab(b, 'wol'); await b.locator('[name="wolVisible"]').uncheck();
+    await b.locator('#settings-tab-home-assistant').click(); await b.locator('#home-assistant-url').fill('http://draft.test'); await categoryTab(b, 'wol');
     await setFlags(a, { homeAssistantVisible: false, bookmarksVisible: false });
-    await b.clock.fastForward(5000); await expect(b.locator('#dashboard-ha')).toBeHidden(); await expect(b.locator('#bookmarks')).toBeHidden(); await expect(b.locator('[name="homeAssistantVisible"]')).toBeChecked();
-    await b.locator('#save-preferences').click(); await expect(b.locator('#settings-status')).toContainText('changed in another browser'); expect(env.store.getDashboardPreferences().preferences.wolVisible).toBe(true);
+    await b.clock.fastForward(5000); await expect(b.locator('#dashboard-ha')).toBeHidden(); await expect(b.locator('#bookmarks')).toBeHidden(); await expect(b.locator('[name="homeAssistantVisible"]')).not.toBeChecked();
+    await b.locator('#save-preferences').click(); await expect(b.locator('#settings-status')).toContainText('revision changed'); expect(env.store.getDashboardPreferences().preferences.wolVisible).toBe(true);
     await b.locator('#reload-shared-preferences').click(); await expect(b.locator('[name="homeAssistantVisible"]')).not.toBeChecked();
     await b.locator('#settings-tab-home-assistant').click(); await expect(b.locator('#home-assistant-url')).toHaveValue('http://draft.test');
   } finally { await a.close(); await b.close(); await env.close(); }
@@ -146,7 +147,7 @@ test('background-only fullscreen tools remain reachable and exit never restores 
   const env = await environment();
   try {
     await ready(page, env); await setFlags(page, { ...hidden, bookmarksVisible: true });
-    await page.locator('#open-settings').click(); await page.locator('[name="hideBookmarksFullscreen"]').check(); await save(page); await page.locator('#close-settings').click();
+    await page.locator('#open-settings').click(); await categoryTab(page, 'bookmarks'); await page.locator('[name="hideBookmarksFullscreen"]').check(); await save(page); await page.locator('#close-settings').click();
     await page.locator('#fullscreen').click(); await expect(page.locator('#fullscreen')).toHaveText('Exit fullscreen'); await expect(page.locator('#bookmarks')).toBeHidden(); await expect(page.locator('#open-settings')).toBeVisible();
     await setFlags(page, { bookmarksVisible: false }); await page.locator('#fullscreen').click(); await expect(page.locator('#bookmarks')).toBeHidden();
     await page.locator('#fullscreen').click(); await expect(page.locator('#open-settings')).toBeVisible(); await expect(page.locator('#fullscreen')).toBeVisible(); await page.locator('#fullscreen').click();

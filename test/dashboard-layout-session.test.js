@@ -19,7 +19,7 @@ test('entry baseline and revision are immutable and complete; only explicit relo
   const initial = state(); const session = createLayoutSession(); session.load(initial, 'desktop');
   session.edit({ x: 30 }, reference); session.mode = 'mobile'; session.arrange('custom');
   initial.snapshot.preferences.color = '#ffffff'; initial.snapshot.revision = 9;
-  const payload = session.payload(); assert.equal(payload.revision, 7); assert.equal(payload.preferences.color, '#000000'); assert.ok(payload.preferences.widgetLayout.desktop); assert.ok(payload.preferences.widgetLayout.mobile);
+  const payload = session.payload(); assert.equal(payload.revision, 7); assert.deepEqual(Object.keys(payload.preferences), ['widgetLayout']); assert.ok(payload.preferences.widgetLayout.desktop); assert.ok(payload.preferences.widgetLayout.mobile);
   payload.preferences.widgetLayout.desktop.items[0].x = 999; assert.notEqual(session.draft.desktop.items[0].x, 999);
   session.load(initial, session.mode); assert.equal(session.revision, 9); assert.equal(session.changed(), false); assert.equal(session.draft.desktop, null); assert.equal(session.draft.mobile, null);
 });

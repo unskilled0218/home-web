@@ -24,11 +24,12 @@ export function createSettingsSync({ onSnapshot, onState = () => {}, captureObse
     }
     return result;
   }
-  async function api(url, { method = 'GET', body, controller = new AbortController() } = {}) {
+  async function api(url, { method = 'GET', body, controller = new AbortController(), beforeWrite } = {}) {
     const deadline = schedule(() => controller.abort(), timeoutMs); let response;
     try {
       const aborted = new Promise((_resolve, reject) => controller.signal.addEventListener('abort', () => reject(new Error('Shared settings request timed out or was canceled.')), { once: true }));
       return await Promise.race([(async () => {
+        beforeWrite?.();
         response = await fetchImpl(url, { method, signal: controller.signal, credentials: 'same-origin', headers: { Accept: 'application/json', ...(body && { 'Content-Type': 'application/json' }) }, ...(body && { body: JSON.stringify(body) }) });
         if (controller.signal.aborted) { await response.body?.cancel().catch(() => {}); throw new Error('Shared settings request canceled.'); }
         if (Number(response.headers?.get('content-length')) > 65536) throw new Error('Shared settings response is too large.');
@@ -78,12 +79,12 @@ export function createSettingsSync({ onSnapshot, onState = () => {}, captureObse
     getState: state,
     start: refresh, refresh,
     adoptCommittedSnapshot(value) { if (disposed || write) throw new Error('Global settings are busy.'); invalidate(); accept(validateDashboardSnapshot(value), observers()); arm(); },
-    async save(preferences, revision) {
+    async save(preferences, revision, beforeWrite) {
       if (write || disposed) throw new Error('A shared preference save is already pending.');
       validateDashboardPreferences(preferences); invalidate(); const request = generation; const owner = { controller: new AbortController() }; write = owner; emit();
       const captured = observers();
       try {
-        const value = await api('/api/dashboard/settings', { method: 'PUT', body: { revision, preferences }, controller: owner.controller });
+        const value = await api('/api/dashboard/settings', { method: 'PUT', body: { revision, preferences }, controller: owner.controller, beforeWrite });
         if (write === owner && !disposed) accept(value, captured);
         return value;
       } catch (failure) {

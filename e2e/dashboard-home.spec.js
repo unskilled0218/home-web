@@ -1,5 +1,7 @@
 import { expect } from '@playwright/test';
 import { globalTest as base } from './global-fixtures.js';
+import { saveCategory, categoryTab } from './category-settings.js';
+import { CATEGORY_IDS, SETTINGS_CATEGORIES } from '../public/dashboard-settings-categories.js';
 import { normalizeForecast } from '../public/weather-data.js';
 import { rawForecast } from '../test/fixtures/weather.js';
 import { normalizeDashboardPreferences, validateDashboardPreferences } from '../public/dashboard-helpers.js';
@@ -33,7 +35,7 @@ async function seedPreferences(page, preferences) {
 }
 
 async function displayToggle(page, name, checked) {
-  await page.getByRole('tab', { name: 'General', exact: true }).click();
+  const category = CATEGORY_IDS.find(id => SETTINGS_CATEGORIES[id].keys.includes(name)); await categoryTab(page, category);
   await page.locator(`[name="${name}"]`).setChecked(checked);
 }
 
@@ -124,8 +126,7 @@ async function mobileGeometry(page) {
 }
 
 async function savePreferences(page) {
-  await page.getByRole('button', { name: 'Save preferences', exact: true }).click();
-  await expect(page.locator('#settings-status')).toHaveText('Preferences saved for all browsers.');
+  await saveCategory(page);
 }
 
 test('home initializes the photo dashboard without widget requests and handles unconfigured services', async ({ page }) => {
@@ -160,9 +161,9 @@ test('existing preferences load at home and edits survive reload and legacy redi
   await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(18, 52, 86)');
   await page.locator('#open-settings').click();
   await page.locator('[name="position"]').selectOption('left');
+  await savePreferences(page);
   await displayToggle(page, 'timeVisible', true);
-  await page.getByRole('button', { name: 'Save preferences', exact: true }).click();
-  await expect(page.locator('#settings-status')).toHaveText('Preferences saved for all browsers.');
+  await savePreferences(page);
   const saved = await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).preferences, settingsKey);
   expect(saved.position).toBe('left');
   expect(saved.timeVisible).toBe(true);
@@ -198,15 +199,14 @@ for (const width of [1200, 320, 390]) test(`Settings remains usable at ${width}p
       const tabBounds = await tab.boundingBox(); const panelBounds = await panel.boundingBox();
       expect(tabBounds.x + tabBounds.width).toBeLessThanOrEqual(panelBounds.x);
       expect(await page.locator('.settings-panels').evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
-      await expect(page.getByRole('button', { name: 'Save preferences', exact: true })).toBeInViewport();
+      await expect(page.locator('#save-preferences')).toBeInViewport();
       await expect(page.locator('#close-settings')).toBeInViewport();
     }
   }
   await page.getByRole('tab', { name: 'Time', exact: true }).click();
   await page.getByLabel('Timezone', { exact: true }).fill('UTC');
   await page.locator('[name="seconds"]').uncheck();
-  await page.getByRole('button', { name: 'Save preferences', exact: true }).click();
-  await expect(page.locator('#settings-status')).toHaveText('Preferences saved for all browsers.');
+  await savePreferences(page);
   await page.locator('#close-settings').click();
   await expect(dialog).toBeHidden();
   await expect(page.locator('#home-grid, .widget-move, .widget-resize')).toHaveCount(0);
@@ -271,13 +271,14 @@ test('legacy mobile defaults start at the top even with unconfigured or hidden c
   expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).preferences, settingsKey)).toMatchObject(legacy);
   await page.locator('#open-settings').click();
   for (const name of ['mobileTimeVisible', 'mobileWeatherVisible', 'mobileCalendarVisible']) {
-    await displayToggle(page, name, false);
+    await displayToggle(page, name, false); await savePreferences(page);
   }
   await savePreferences(page); await page.locator('#close-settings').click();
   for (const id of ['clock', 'weather', 'calendar']) await expect(page.locator(`#${id}`)).toBeHidden();
   await mobileGeometry(page);
   await page.locator('#open-settings').click();
   await expect(page.locator('#settings-dialog')).toBeVisible();
+  await categoryTab(page, 'weather');
   await expect(page.locator('[name="mobileWeatherVisible"]')).toBeVisible();
 });
 
@@ -305,10 +306,13 @@ test('mobile preferences save across tabs and reload without changing desktop va
   await seedPreferences(page, desktop); await page.goto('/'); await page.locator('#open-settings').click();
   await displayToggle(page, 'mobileTimeVisible', false); await page.getByRole('tab', { name: 'Time', exact: true }).click();
   await page.getByLabel('Clock scale on mobile', { exact: true }).fill('1.2');
+  await savePreferences(page);
   await page.getByRole('tab', { name: 'Weather', exact: true }).click();
   await page.getByLabel('Weather scale on mobile', { exact: true }).fill('0.8');
+  await savePreferences(page);
   await displayToggle(page, 'mobileCalendarVisible', false); await page.getByRole('tab', { name: 'Calendar', exact: true }).click();
   await page.getByLabel('Calendar scale on mobile', { exact: true }).fill('1.7');
+  await savePreferences(page);
   await page.getByRole('tab', { name: 'Time', exact: true }).click(); await expect(page.getByLabel('Clock scale on mobile', { exact: true })).toHaveValue('1.2');
   await savePreferences(page);
   const saved = await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).preferences, settingsKey);
@@ -336,15 +340,15 @@ test('fractional stored mobile scales remain valid when saving an unrelated pref
   expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).preferences, settingsKey)).toMatchObject({ position: 'right', mobileTimeScale: 1.3, mobileWeatherScale: 0.6, mobileCalendarScale: 1.1 });
 });
 
-test('invalid hidden mobile scales reveal their panel and preserve other drafts', async ({ page }) => {
+test('invalid mobile scales block only their category while another category can save', async ({ page }) => {
   await page.goto('/'); await page.locator('#open-settings').click();
   await page.getByRole('tab', { name: 'Time', exact: true }).click(); await page.getByLabel('Clock scale on mobile', { exact: true }).fill('3');
   await page.getByRole('tab', { name: 'Weather', exact: true }).click(); await page.getByLabel('Weather scale on mobile', { exact: true }).fill('1.4');
-  await page.getByRole('button', { name: 'Save preferences', exact: true }).click();
+  await savePreferences(page); await categoryTab(page, 'time'); await page.locator('#save-preferences').click();
   await expect(page.getByRole('tab', { name: 'Time', exact: true })).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByLabel('Clock scale on mobile', { exact: true })).toBeFocused();
   expect(await page.evaluate(() => localStorage.getItem('dashboard.preferences.v1'))).toBeNull();
-  await page.getByLabel('Clock scale on mobile', { exact: true }).fill('1.3'); await savePreferences(page);
+  await page.locator('#reload-shared-preferences').click(); await expect(page.locator('#settings-status')).toContainText('Time settings reloaded.'); await page.getByLabel('Clock scale on mobile', { exact: true }).fill('1.3'); await savePreferences(page);
   expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).preferences, settingsKey)).toMatchObject({ mobileTimeScale: 1.3, mobileWeatherScale: 1.4 });
 });
 
@@ -369,6 +373,7 @@ test('shared format and units apply in both layouts outside the profile display 
   await expect(time.getByRole('group', { name: 'Desktop display', exact: true }).locator('[name="timezone"]')).toHaveCount(0);
   await expect(time.getByRole('group', { name: 'Shared format', exact: true }).getByLabel('Timezone', { exact: true })).toHaveCount(1);
   await page.getByLabel('Timezone', { exact: true }).fill('Asia/Tokyo'); await page.getByLabel('12-hour clock', { exact: true }).uncheck(); await page.getByLabel('Show seconds', { exact: true }).uncheck();
+  await savePreferences(page);
   await page.getByRole('tab', { name: 'Weather', exact: true }).click();
   const weather = page.getByRole('tabpanel', { name: 'Weather', exact: true });
   await expect(weather.getByRole('group', { name: 'Desktop display', exact: true }).locator('[name="temperature"]')).toHaveCount(0);
@@ -529,7 +534,7 @@ for (const width of [390, 1200]) test(`fullscreen bookmark hiding releases space
   await page.locator('#open-settings').click(); await page.getByRole('tab', { name: 'Bookmarks', exact: true }).click();
   const child = page.locator(`details[data-selection-id="${mock.ids[1]}"]`); await child.locator(':scope > summary').click();
   const openBefore = await child.evaluate((node) => node.open);
-  await page.getByRole('tab', { name: 'General', exact: true }).click();
+  await page.getByRole('tab', { name: 'Bookmarks', exact: true }).click();
   await page.getByLabel('Hide bookmarks in fullscreen', { exact: true }).check(); await savePreferences(page); await page.locator('#close-settings').click();
   const requests = mock.requests.folders.length; await page.locator('#fullscreen').click(); await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(true); await expect(page.locator('#bookmarks')).toBeHidden();
   await expect(page.locator('body')).not.toHaveClass(/bookmarks-shown/);
@@ -539,7 +544,7 @@ for (const width of [390, 1200]) test(`fullscreen bookmark hiding releases space
   await page.evaluate(() => document.exitFullscreen());
   await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(false);
   await expect(page.locator('#bookmarks')).toBeVisible(); await expect(child).toHaveJSProperty('open', openBefore); expect(mock.requests.folders.length).toBe(requests);
-  await page.locator('#open-settings').click(); await page.getByLabel('Hide bookmarks in fullscreen', { exact: true }).uncheck(); await savePreferences(page); await page.locator('#close-settings').click();
+  await page.locator('#open-settings').click(); await categoryTab(page, 'bookmarks'); await page.getByLabel('Hide bookmarks in fullscreen', { exact: true }).uncheck(); await savePreferences(page); await page.locator('#close-settings').click();
   await page.locator('#fullscreen').click(); await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(true); await expect(page.locator('#bookmarks')).toBeVisible(); await page.evaluate(() => document.exitFullscreen());
 });
 
@@ -552,6 +557,7 @@ test('bookmark-only preference saves and fullscreen keep the photo and unrelated
   await page.goto('/'); await expect(page.getByRole('link', { name: 'Deep bookmark', exact: true })).toBeVisible(); await expect(page.locator('#photos .photo-layer img')).toBeVisible();
   await page.locator('#open-settings').click();
   await page.evaluate(() => { window.savedPhoto = document.querySelector('.photo-layer'); }); const before = calls.length;
+  await categoryTab(page, 'bookmarks');
   await page.getByLabel('Hide bookmarks in fullscreen', { exact: true }).check(); await savePreferences(page); await page.locator('#close-settings').click();
   await page.locator('#fullscreen').click(); await expect(page.locator('#bookmarks')).toBeHidden(); await page.evaluate(() => document.exitFullscreen()); await expect(page.locator('#bookmarks')).toBeVisible();
   const selections = await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).preferences.bookmarkLinkSelections, settingsKey);
@@ -630,7 +636,7 @@ test('tabs support pointer and vertical keyboard navigation with one selected pa
   await page.keyboard.press('Tab');
   await expect(page.getByRole('tabpanel', { name: 'General', exact: true })).toBeFocused();
   await page.keyboard.press('Tab');
-  await expect(page.locator('[name="timeVisible"]')).toBeFocused();
+  await expect(page.locator('#settings-scope-general')).toBeFocused();
   await page.keyboard.press('Shift+Tab');
   await page.keyboard.press('Shift+Tab');
   await expect(general).toBeFocused();
@@ -646,7 +652,7 @@ test('tabs support pointer and vertical keyboard navigation with one selected pa
   await expect(general).toHaveAttribute('aria-selected', 'true');
 });
 
-test('tab switches retain drafts and saving includes hidden panels without submitting service forms', async ({ page }) => {
+test('tab switches retain drafts and category saves exclude hidden panels and service forms', async ({ page }) => {
   const serviceMutations = [];
   page.on('request', (request) => {
     if (request.method() !== 'GET' && new URL(request.url()).pathname.startsWith('/api/calendar')) serviceMutations.push(request.method());
@@ -666,21 +672,20 @@ test('tab switches retain drafts and saving includes hidden panels without submi
   await page.getByRole('tab', { name: 'General', exact: true }).click();
   await expect(page.getByLabel('Overall scale', { exact: true })).toHaveValue('1.2');
   expect(await page.evaluate((key) => localStorage.getItem(key), settingsKey)).toBe(original);
-  await page.getByRole('button', { name: 'Save preferences', exact: true }).click();
-  await expect(page.locator('#settings-status')).toHaveText('Preferences saved for all browsers.');
+  await savePreferences(page);
   const saved = await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).preferences, settingsKey);
-  expect(saved).toMatchObject({ position: 'right', scale: 1.2, seconds: false, interval: 90 });
+  expect(saved).toMatchObject({ position: 'right', scale: 1.2, seconds: true, interval: 60 });
   expect(serviceMutations).toEqual([]);
   await page.reload();
   await page.locator('#open-settings').click();
   await expect(page.getByLabel('Overall scale', { exact: true })).toHaveValue('1.2');
   await page.getByRole('tab', { name: 'Time', exact: true }).click();
-  await expect(page.getByLabel('Show seconds', { exact: true })).not.toBeChecked();
+  await expect(page.getByLabel('Show seconds', { exact: true })).toBeChecked();
   await page.getByRole('tab', { name: 'Images', exact: true }).click();
-  await expect(page.getByLabel('Interval (seconds)', { exact: true })).toHaveValue('90');
+  await expect(page.getByLabel('Interval (seconds)', { exact: true })).toHaveValue('60');
 });
 
-test('saving reveals each hidden invalid preference without losing other drafts', async ({ page }) => {
+test('saving validates only the active category without losing invalid drafts elsewhere', async ({ page }) => {
   await page.goto('/');
   await page.locator('#open-settings').click();
   const original = await page.evaluate((key) => localStorage.getItem(key), settingsKey);
@@ -689,19 +694,17 @@ test('saving reveals each hidden invalid preference without losing other drafts'
   await page.getByLabel('Timezone', { exact: true }).fill('');
   await page.getByRole('tab', { name: 'Images', exact: true }).click();
   await page.getByLabel('Interval (seconds)', { exact: true }).fill('120');
-  const save = page.getByRole('button', { name: 'Save preferences', exact: true });
-  await save.click();
+  await savePreferences(page); const save = page.locator('#save-preferences'); await categoryTab(page, 'general'); await save.click();
   await expect(page.getByRole('tab', { name: 'General', exact: true })).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByLabel('Overall scale', { exact: true })).toBeFocused();
-  expect(await page.evaluate((key) => localStorage.getItem(key), settingsKey)).toBe(original);
+  expect(await page.evaluate((key) => localStorage.getItem(key), settingsKey)).not.toBe(original);
   await page.getByLabel('Overall scale', { exact: true }).fill('1.3');
-  await save.click();
+  await page.locator('#reload-shared-preferences').click(); await expect(page.locator('#settings-status')).toContainText('General settings reloaded.'); await page.getByLabel('Overall scale', { exact: true }).fill('1.3'); await savePreferences(page); await categoryTab(page, 'time'); await save.click();
   await expect(page.getByRole('tab', { name: 'Time', exact: true })).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByLabel('Timezone', { exact: true })).toBeFocused();
-  expect(await page.evaluate((key) => localStorage.getItem(key), settingsKey)).toBe(original);
-  await page.getByLabel('Timezone', { exact: true }).fill('UTC');
-  await save.click();
-  await expect(page.locator('#settings-status')).toHaveText('Preferences saved for all browsers.');
+  expect(await page.evaluate((key) => localStorage.getItem(key), settingsKey)).not.toBe(original);
+  await page.locator('#reload-shared-preferences').click(); await expect(page.locator('#settings-status')).toContainText('Time settings reloaded.'); await page.getByLabel('Timezone', { exact: true }).fill('UTC');
+  await savePreferences(page);
   expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).preferences, settingsKey)).toMatchObject({ scale: 1.3, timezone: 'UTC', interval: 120 });
 });
 
@@ -723,8 +726,7 @@ test('native form ownership isolates display preferences from search and calenda
   expect(ownership.names).not.toContain('password');
   expect(ownership).toMatchObject({ search: 'location-search', calendar: 'calendar-connection', password: 'calendar-connection', save: 'preferences', nested: 0 });
   await page.locator('#open-settings').click();
-  await page.getByRole('button', { name: 'Save preferences', exact: true }).click();
-  await expect(page.locator('#settings-status')).toHaveText('Preferences saved for all browsers.');
+  await savePreferences(page);
 });
 
 test('Clear results preserves the selected weather location, displayed weather, query, and drafts', async ({ page }) => {
@@ -897,13 +899,13 @@ for (const width of [601, 600]) test(`hourly and daily visibility save independe
     await page.locator('#open-settings').click(); await page.locator('#settings-tab-weather').click();
     await page.locator('[name="weatherHourlyVisible"]').setChecked(hourly); await page.locator('[name="weatherDailyVisible"]').setChecked(daily);
     expect(await page.locator('#hourly').evaluate(node => node.hidden)).toBe(before);
-    await page.locator('#save-preferences').click(); await expect(page.locator('#settings-status')).toHaveText('Preferences saved for all browsers.');
+    await savePreferences(page);
     await page.locator('#close-settings').click();
     await expect(page.locator('#hourly')).toBeVisible({ visible: hourly }); await expect(page.locator('#daily')).toBeVisible({ visible: daily });
     await expect(page.locator('#forecast-details')).toBeVisible({ visible: hourly || daily });
     await expect(page.locator('#current-weather-values .temperature')).toHaveText('12 °C');
     await expect(page.locator('#current-weather-subvalues')).toContainText('US AQI: 20'); await expect(page.locator('#weather-updated')).toBeVisible();
-    await page.locator('#fullscreen').click();
+    await page.bringToFront(); await page.locator('#fullscreen').click(); await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(true);
     await expect(page.locator('#hourly')).toBeVisible({ visible: hourly }); await expect(page.locator('#daily')).toBeVisible({ visible: daily });
     await expect(page.locator('#current-weather-values .temperature')).toHaveText('12 °C'); await page.evaluate(() => document.exitFullscreen());
     expect(mock.requests).toEqual(requests);

@@ -1,5 +1,6 @@
 import { expect } from '@playwright/test';
 import { globalTest as test, globalFirefox as firefox } from './global-fixtures.js';
+import { saveCategory, setPreferenceFlags } from './category-settings.js';
 import { once } from 'node:events';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { createStore } from '../src/db.js';
@@ -21,7 +22,7 @@ async function environment(preferences = {}, services = {}) {
   return { secret, get base() { return base; }, get store() { return store; }, async restart() { await stop(); await start(); }, async close() { await stop(); rmSync(directory, { recursive: true, force: true }); } };
 }
 const layout = () => ({ ...defaultWidgetLayout(), desktop: initialWidgetProfile('desktop'), mobile: initialWidgetProfile('mobile') });
-async function ready(page, env) { await page.goto(env.base); await expect(page.locator('#settings-status')).toHaveText('Preferences are shared across all browsers.'); }
+async function ready(page, env) { await page.goto(env.base); await expect(page.locator('#settings-status')).toHaveText('General settings use Global shared values.'); }
 async function enter(page) { await page.locator('#edit-layout').click(); await expect(page.locator('#layout-toolbar')).toBeVisible(); await expect(page.locator('#layout-details')).toBeHidden(); }
 async function details(page) { await page.locator('#layout-toggle').click(); await expect(page.locator('#layout-details')).toBeVisible(); }
 async function open(page) { await enter(page); await details(page); }
@@ -41,10 +42,10 @@ test('Custom fullscreen hiding and forecast toggles retain both profile geometri
       await page.setViewportSize({ width, height: 900 }); await settleFrames(page);
       const mode = width <= 600 ? 'mobile' : 'desktop';
       await page.locator('#open-settings').click(); await page.locator('#settings-tab-general').click();
-      for (const name of ['Time', 'Weather', 'Calendar', 'Bookmarks', 'HomeAssistant', 'Wol']) await page.locator(`[name="hide${name}Fullscreen"]`).check();
+      await setPreferenceFlags(page, Object.fromEntries(['Time', 'Weather', 'Calendar', 'Bookmarks', 'HomeAssistant', 'Wol'].map(name => [`hide${name}Fullscreen`, true])));
       await page.locator('#settings-tab-weather').click();
       await page.locator('[name="weatherHourlyVisible"]').uncheck(); await page.locator('[name="weatherDailyVisible"]').uncheck();
-      await page.locator('#save-preferences').click(); await expect(page.locator('#settings-status')).toHaveText('Preferences saved for all browsers.'); await page.locator('#close-settings').click();
+      await saveCategory(page); await page.locator('#close-settings').click();
       await expect(page.locator('#forecast-details')).toBeHidden(); await expect(page.locator('#current-weather-values .temperature')).toHaveText('12 °C');
       await page.locator('#fullscreen').click(); await expect(page.locator('#widget-surface')).toBeHidden(); await expect(page.locator('#open-settings')).toBeVisible();
       expect(storedLayout(env)).toEqual(widgetLayout);
@@ -52,7 +53,7 @@ test('Custom fullscreen hiding and forecast toggles retain both profile geometri
       await assertProjectedBoxes(page, widgetLayout, mode);
       await page.locator('#open-settings').click(); await page.locator('#settings-tab-weather').click();
       await page.locator('[name="weatherHourlyVisible"]').check(); await page.locator('[name="weatherDailyVisible"]').check();
-      await page.locator('#save-preferences').click(); await expect(page.locator('#settings-status')).toHaveText('Preferences saved for all browsers.'); await page.locator('#close-settings').click();
+      await saveCategory(page); await page.locator('#close-settings').click();
       await expect(page.locator('#hourly')).toBeVisible(); await expect(page.locator('#daily')).toBeVisible();
       await settleFrames(page); await assertProjectedBoxes(page, widgetLayout, mode); expect(storedLayout(env)).toEqual(widgetLayout);
     }
@@ -353,8 +354,8 @@ test('polls preserve focused raw fields and captured gestures across unchanged, 
     await page.clock.fastForward(5000); await expect(page.locator('#layout-w')).toBeDisabled();
     const remote = env.store.getDashboardPreferences(); env.store.saveDashboardPreferences({ ...remote.preferences, color: '#112233' }, remote.revision);
     await page.clock.fastForward(5000); await expect(page.locator('#layout-w')).toBeDisabled(); await page.mouse.move(point.x + 20, point.y); await page.mouse.up();
-    await expect(page.locator('#layout-w')).toHaveValue('181'); await page.locator('#layout-save').click(); await expect(page.locator('#layout-status')).toContainText('changed in another browser');
-    expect(writes[0].revision).toBe(base.revision); expect(writes[0].preferences.color).toBe(base.preferences.color); expect(writes[0].preferences.widgetLayout.mobile).toEqual(base.preferences.widgetLayout.mobile);
+    await expect(page.locator('#layout-w')).toHaveValue('181'); await page.locator('#layout-save').click(); await expect(page.locator('#layout-status')).toContainText('revision changed');
+    expect(writes).toEqual([]); expect(env.store.getDashboardPreferences().revision).toBeGreaterThan(base.revision);
     await page.locator('#layout-cancel').click(); await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(17, 34, 51)');
   } finally { await page.goto('about:blank'); await env.close(); }
 });
@@ -382,12 +383,12 @@ test('unrelated Settings clean refresh and dirty conflicts preserve complete rem
     env.store.saveDashboardPreferences({ ...remote.preferences, widgetLayout: changed }, remote.revision); await page.clock.fastForward(5000);
     // Opening Settings may still own an earlier GET; wait for the actual new confirmation before dirtying the form.
     await expect.poll(async () => { await page.clock.runFor(500); return page.evaluate(() => JSON.parse(localStorage.getItem('dashboard.shared-settings.v1')).revision); }).toBe(2);
-    await page.getByLabel('Overall scale', { exact: true }).fill('1.1'); await page.locator('#save-preferences').click(); await expect(page.locator('#settings-status')).toHaveText('Preferences saved for all browsers.');
+    await page.getByLabel('Overall scale', { exact: true }).fill('1.1'); await saveCategory(page);
     expect(writes[0].preferences.widgetLayout).toEqual(changed); expect(writes[0].revision).toBe(2);
     await page.getByLabel('Overall scale', { exact: true }).fill('1.2'); await page.locator('#settings-tab-home-assistant').click(); await page.locator('#home-assistant-url').fill('https://unsaved.test');
     const before = env.store.getDashboardPreferences(); const latest = layout(); latest.mobile = null; env.store.saveDashboardPreferences({ ...before.preferences, widgetLayout: latest }, before.revision); await page.clock.fastForward(5000);
-    await page.locator('#settings-tab-general').click(); await page.locator('#save-preferences').click(); await expect(page.locator('#settings-status')).toContainText('changed in another browser');
-    expect(writes[1].preferences.widgetLayout).toEqual(changed); expect(writes[1].revision).toBe(3); expect(storedLayout(env)).toEqual(latest);
+    await page.locator('#settings-tab-general').click(); await page.locator('#save-preferences').click(); await expect(page.locator('#settings-status')).toContainText('revision changed');
+    expect(writes).toHaveLength(1); expect(storedLayout(env)).toEqual(latest);
     await page.locator('#settings-tab-home-assistant').click(); await expect(page.locator('#home-assistant-url')).toHaveValue('https://unsaved.test'); await page.locator('#close-settings').click();
   } finally { await page.goto('about:blank'); await env.close(); }
 });
@@ -455,7 +456,7 @@ test('editor DOM lifecycle restores prior inert state and one reference lock; la
     await expect(page.locator('#layout-widget')).toHaveValue('weather'); await pixel(page, 'w', 177);
     await page.evaluate(() => { const f = window.editorFixture; f.state.snapshot = { revision: 5, preferences: { ...f.state.snapshot.preferences, color: '#123456' } }; f.editor.observe(); f.editor.refreshSurface(); });
     await expect(page.locator('#layout-w')).toHaveValue('177'); await page.locator('#layout-save').click();
-    expect(await page.evaluate(() => { const f = window.editorFixture; return { locks: f.locks, revision: f.writes[0].revision, color: f.writes[0].preferences.color }; })).toEqual({ locks: 1, revision: 3, color: '#000000' });
+    expect(await page.evaluate(() => { const f = window.editorFixture; return { locks: f.locks, revision: f.writes[0].revision, keys: Object.keys(f.writes[0].preferences) }; })).toEqual({ locks: 1, revision: 3, keys: ['widgetLayout'] });
     await page.evaluate(() => { const f = window.editorFixture; f.editor.dispose(); f.editor.dispose(); f.resolve(); });
     await expect(page.locator('#layout-toolbar')).toBeHidden(); await expect(page.locator('#layout-frames')).toBeHidden(); await expect(page.locator('#clock')).toHaveAttribute('inert', ''); await expect(page.locator('#weather')).not.toHaveAttribute('inert');
     await page.locator('#layout-toggle').dispatchEvent('click'); await expect(page.locator('#layout-details')).toBeHidden(); await expect(page.locator('#layout-toggle')).toHaveAttribute('aria-expanded', 'false'); await expect(page.locator('[data-layer-row]')).toHaveCount(0);
@@ -504,7 +505,7 @@ test('custom arrangement saves geometry/layers and reset/cancel preserve indepen
     const first = structuredClone(storedLayout(env)); expect(first.mobile).toBeNull();
     const clock = await page.locator('#clock').evaluate(node => ({ width: node.style.width, height: node.style.height })); expect(clock).toEqual({ width: '210px', height: '130px' });
     await page.locator('#open-settings').click(); await page.getByLabel('Overall scale', { exact: true }).fill('1.2');
-    await expect(page.locator('#edit-layout')).toBeDisabled(); await page.locator('#save-preferences').click(); await expect(page.locator('#settings-status')).toHaveText('Preferences saved for all browsers.'); await page.locator('#close-settings').click(); await open(page);
+    await expect(page.locator('#edit-layout')).toBeDisabled(); await saveCategory(page); await page.locator('#close-settings').click(); await open(page);
     await page.locator('#layout-reset').click(); await page.locator('#layout-cancel').click();
     await page.locator('#open-settings').click(); await expect(page.getByLabel('Overall scale', { exact: true })).toHaveValue('1.2'); await page.locator('#close-settings').click();
     expect(storedLayout(env)).toEqual(first);
@@ -570,8 +571,8 @@ test('custom cards stay within each viewport without resize writes, including ti
     }
     expect(writes).toBe(0); expect(env.store.getDashboardPreferences()).toEqual(original);
     await page.setViewportSize({ width: 1200, height: 800 }); await page.locator('#open-settings').click();
-    for (const name of ['time', 'weather', 'calendar', 'bookmarks', 'homeAssistant', 'wol']) await page.locator(`[name="${name}Visible"]`).uncheck();
-    await page.locator('#save-preferences').click(); await expect(page.locator('#settings-status')).toHaveText('Preferences saved for all browsers.'); await page.locator('#close-settings').click(); await expect(page.locator('#widget-surface')).toBeHidden();
+    await setPreferenceFlags(page, Object.fromEntries(['time', 'weather', 'calendar', 'bookmarks', 'homeAssistant', 'wol'].map(name => [`${name}Visible`, false])));
+    await page.locator('#close-settings').click(); await expect(page.locator('#widget-surface')).toBeHidden();
     await open(page); await expect(page.locator('#layout-w')).toBeEnabled(); await expect(page.locator('#layout-frames')).toBeVisible();
     await page.locator('#layout-cancel').click(); await page.locator('#fullscreen').click(); await expect(page.locator('#open-settings')).toBeVisible(); await expect(page.locator('#edit-layout')).toBeHidden(); await page.locator('#fullscreen').click();
   } finally { await page.goto('about:blank'); await env.close(); }
@@ -584,7 +585,7 @@ test('remote layout conflicts preserve dirty geometry; failed writes retain only
     await pixel(b, 'w', 170);
     await pixel(a, 'w', 240); await save(a); await b.clock.fastForward(5000);
     await expect(b.locator('#layout-w')).toHaveValue('170');
-    await b.locator('#layout-save').click(); await expect(b.locator('#layout-status')).toContainText('changed in another browser');
+    await b.locator('#layout-save').click(); await expect(b.locator('#layout-status')).toContainText('revision changed');
     await expect(b.locator('#layout-w')).toHaveValue('170');
     await b.locator('#layout-reload').click(); await expect(b.locator('#layout-w')).toHaveValue('240');
     const saved = structuredClone(storedLayout(env));

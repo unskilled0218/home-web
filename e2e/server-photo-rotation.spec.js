@@ -120,7 +120,7 @@ test('full Global library stays shared while Settings counts persist across deco
     await a.clock.fastForward(5000); await expect(a.locator('#photo-count')).toContainText('151. Last completed count is stale.');
     env.setUnavailable(false); await env.restart(); await a.locator('#close-settings').click();
     await a.locator('#open-settings').click(); await a.locator('#settings-tab-images').click(); await expect(a.locator('#photo-count')).toHaveText('Global playable image files: 151.');
-    await a.locator('#settings-tab-general').click(); await a.locator('#settings-scope').selectOption('local'); await a.locator('#settings-tab-images').click();
+    await a.locator('#settings-tab-images').click(); await a.locator('#settings-scope-images').selectOption('local');
     await expect(a.locator('#photo-count')).toHaveText('Global playable image files: 151.');
     const local = await (await fetch(env.base + '/api/dashboard/photos/local')).json(); expect(local.count).toBe(100); expect(env.slideshow.snapshot().count).toBe(151);
   } finally { await a.close(); await b.close(); await env.close(); }

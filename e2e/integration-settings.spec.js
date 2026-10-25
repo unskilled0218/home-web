@@ -1,5 +1,6 @@
 import { expect } from '@playwright/test';
 import { globalTest as test } from './global-fixtures.js';
+import { saveCategory } from './category-settings.js';
 import { once } from 'node:events';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
@@ -30,7 +31,7 @@ async function environment() {
 }
 async function client(browser, env, width = 1200) {
   const context = await browser.newContext({ viewport: { width, height: 850 } }); const page = await context.newPage();
-  await page.clock.install(); await page.goto(env.base); await expect(page.locator('#settings-status')).toHaveText('Preferences are shared across all browsers.');
+  await page.clock.install(); await page.goto(env.base); await expect(page.locator('#settings-status')).toHaveText('General settings use Global shared values.');
   return { page, close: () => context.close() };
 }
 async function open(page, name = 'Home Assistant') { await page.locator('#open-settings').click(); await page.getByRole('tab', { name, exact: true }).click(); }
@@ -85,7 +86,7 @@ test('isolated clients share configuration while dirty device, token, and prefer
     await b.page.getByRole('tab', { name: 'General', exact: true }).click(); await b.page.getByLabel('Overall scale', { exact: true }).fill('1.7');
     await b.page.getByRole('tab', { name: 'Wake-on-LAN', exact: true }).click(); await b.page.getByRole('button', { name: 'Edit Office PC', exact: true }).click(); await b.page.locator('#wol-name').fill('My draft');
     env.store.update(env.store.list()[0].id, { ...device, name: 'Remote PC' }); await poll(b.page); await expect(b.page.locator('#wol-devices')).toContainText('Remote PC'); await expect(b.page.locator('#wol-name')).toHaveValue('My draft'); await expect(b.page.locator('#wol-editor-status')).toContainText('Saved values changed');
-    await b.page.getByRole('tab', { name: 'General', exact: true }).click(); await expect(b.page.getByLabel('Overall scale', { exact: true })).toHaveValue('1.7'); await b.page.locator('#save-preferences').click(); await expect(b.page.locator('#settings-status')).toHaveText('Preferences saved for all browsers.');
+    await b.page.getByRole('tab', { name: 'General', exact: true }).click(); await expect(b.page.getByLabel('Overall scale', { exact: true })).toHaveValue('1.7'); await saveCategory(b.page);
     await b.page.getByRole('tab', { name: 'Wake-on-LAN', exact: true }).click(); await expect(b.page.locator('#wol-name')).toHaveValue('My draft');
     env.store.remove(env.store.list()[0].id); await poll(b.page); await expect(b.page.locator('#wol-editor-status')).toContainText('removed in another browser'); await b.page.locator('#save-wol-device').click(); await expect(b.page.locator('#wol-settings-status')).toContainText('removed in another browser'); await expect(b.page.locator('#wol-name')).toHaveValue('My draft'); expect(env.store.list()).toHaveLength(0);
     await b.page.locator('#close-settings').click(); await open(b.page); await expect(b.page.locator('#home-assistant-token')).toHaveValue('');

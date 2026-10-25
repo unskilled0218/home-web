@@ -1,5 +1,6 @@
 import { expect } from '@playwright/test';
 import { globalTest as base } from './global-fixtures.js';
+import { saveCategory } from './category-settings.js';
 import { once } from 'node:events';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { createStore } from '../src/db.js';
@@ -41,12 +42,12 @@ async function environment() {
 const test = base.extend({ env: async ({}, use) => { const env = await environment(); try { await use(env); } finally { await env.close(); } } });
 async function client(browser, env, width = 1200) {
   const context = await browser.newContext({ viewport: { width, height: 850 } }); env.contexts.add(context); const page = await context.newPage(); const errors = [];
-  page.on('pageerror', (error) => errors.push(error.message)); await page.clock.install(); await page.goto(env.url); await expect(page.locator('#settings-status')).toHaveText('Preferences are shared across all browsers.');
+  page.on('pageerror', (error) => errors.push(error.message)); await page.clock.install(); await page.goto(env.url); await expect(page.locator('#settings-status')).toHaveText('General settings use Global shared values.');
   return { page, errors };
 }
 async function open(page) { await page.locator('#open-settings').click(); await page.getByRole('tab', { name: 'Bookmarks', exact: true }).click(); }
 const box = (page, name, folder = 'Root') => page.getByRole('checkbox', { name: new RegExp(`^${name} · ${folder} ·`) });
-async function save(page) { await page.locator('#save-preferences').click(); await expect(page.locator('#settings-status')).toHaveText('Preferences saved for all browsers.'); }
+const save = saveCategory;
 async function poll(page, ms = 5000) { await page.clock.fastForward(ms); }
 
 test('setup and explicit empty stay distinct; picker drafts filter only after saving and survive server restart', async ({ browser, env }) => {
@@ -91,7 +92,7 @@ test('two browsers share choices while dirty selections and credential drafts re
   const a = await client(browser, env); const b = await client(browser, env, 390); await open(a.page); await box(a.page, 'Docs').check(); await save(a.page); await a.page.locator('#close-settings').click();
   await poll(b.page); await expect(b.page.getByRole('link', { name: 'Docs', exact: true })).toBeVisible(); await open(b.page); await box(b.page, 'Same').check(); await b.page.getByLabel('Linkwarden access token', { exact: true }).fill('credential-draft');
   await open(a.page); await a.page.locator('#bookmark-select-none').click(); await save(a.page); await poll(b.page); await expect(box(b.page, 'Same')).toBeChecked(); await expect(b.page.getByLabel('Linkwarden access token', { exact: true })).toHaveValue('credential-draft');
-  await b.page.locator('#save-preferences').click(); await expect(b.page.locator('#settings-status')).toContainText('changed in another browser'); await expect(box(b.page, 'Same')).toBeChecked();
+  await b.page.locator('#save-preferences').click(); await expect(b.page.locator('#settings-status')).toContainText('revision changed'); await expect(box(b.page, 'Same')).toBeChecked();
   await b.page.locator('#reload-shared-preferences').click(); await expect(box(b.page, 'Same')).not.toBeChecked(); await expect(b.page.getByLabel('Linkwarden access token', { exact: true })).toHaveValue('credential-draft'); expect(env.store.getDashboardPreferences().preferences.bookmarkLinkSelections).toEqual([]); expect(a.errors).toEqual([]); expect(b.errors).toEqual([]);
 });
 
@@ -130,8 +131,8 @@ test('pending preference saves disable selection and repair without mutating ano
   let release; const gate = new Promise((resolve) => { release = resolve; });
   await page.route('**/api/dashboard/settings', async (route) => { if (route.request().method() === 'PUT') await gate; await route.continue(); });
   try {
-    await page.locator('#save-preferences').click(); await expect(page.locator('#settings-status')).toHaveText('Saving shared preferences…'); await expect(repair).toBeDisabled(); await expect(box(page, 'Docs', 'Other')).toBeDisabled(); await expect(page.locator('#bookmark-select-none')).toBeDisabled(); await expect(page.locator('#bookmark-reload-folders')).toBeDisabled();
-    release(); await expect(page.locator('#settings-status')).toHaveText('Preferences saved for all browsers.'); await expect(repair).toBeEnabled(); const choices = env.store.getDashboardPreferences().preferences.bookmarkLinkSelections; expect(choices).toHaveLength(2);
+    await page.locator('#save-preferences').click(); await expect(page.locator('#settings-status')).toHaveText('Saving Bookmarks settings…'); await expect(repair).toBeDisabled(); await expect(box(page, 'Docs', 'Other')).toBeDisabled(); await expect(page.locator('#bookmark-select-none')).toBeDisabled(); await expect(page.locator('#bookmark-reload-folders')).toBeDisabled();
+    release(); await expect(page.locator('#settings-status')).toHaveText('Bookmarks settings saved for all Global browsers.'); await expect(repair).toBeEnabled(); const choices = env.store.getDashboardPreferences().preferences.bookmarkLinkSelections; expect(choices).toHaveLength(2);
     await repair.click(); expect(env.store.getDashboardPreferences().preferences.bookmarkLinkSelections).toEqual(choices); await save(page); const changed = env.store.getDashboardPreferences().preferences.bookmarkLinkSelections; expect(changed.map((record) => record.selectionId)).toEqual(choices.map((record) => record.selectionId)); expect(changed.filter((record) => choices.find((old) => old.selectionId === record.selectionId).collectionSelectionId !== record.collectionSelectionId)).toHaveLength(1); expect(errors).toEqual([]);
   } finally { release(); }
 });
@@ -148,6 +149,6 @@ test('bookmark polling pauses while hidden and resumes after persisted-page susp
 for (const width of [1200, 390, 320]) test(`nested duplicate-name selection fits ${width}px and survives mode changes and fullscreen`, async ({ browser, env }) => {
   const { page, errors } = await client(browser, env, width); await open(page); await page.locator('#bookmark-picker-folders summary', { hasText: 'Child' }).click(); await expect(box(page, 'Same', 'Root / Child')).toBeVisible(); await box(page, 'Same', 'Root / Child').check(); await expect(box(page, 'Same', 'Root')).not.toBeChecked(); await save(page); await page.locator('#close-settings').click();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(width); await expect(page.locator('#bookmark-tree a')).toHaveCount(1); await expect(page.locator('#bookmark-tree details, #bookmark-tree summary')).toHaveCount(0); await expect(page.getByRole('link', { name: 'Same', exact: true })).toBeVisible();
-  await open(page); await expect(page.locator('#bookmark-picker-folders details').filter({ has: box(page, 'Same', 'Root / Child') }).last()).toContainText('Same'); await page.getByRole('tab', { name: 'General', exact: true }).click(); await page.getByLabel('Hide bookmarks in fullscreen', { exact: true }).check(); await save(page); await page.locator('#close-settings').click(); await expect(page.locator('#bookmark-tree a')).toHaveCount(1);
+  await open(page); await expect(page.locator('#bookmark-picker-folders details').filter({ has: box(page, 'Same', 'Root / Child') }).last()).toContainText('Same'); await page.getByLabel('Hide bookmarks in fullscreen', { exact: true }).check(); await save(page); await page.locator('#close-settings').click(); await expect(page.locator('#bookmark-tree a')).toHaveCount(1);
   await page.locator('#fullscreen').click(); await expect(page.locator('#bookmarks')).toBeHidden(); await page.evaluate(() => document.exitFullscreen()); await expect(page.locator('#bookmarks')).toBeVisible(); await expect(page.locator('#bookmark-tree a')).toHaveCount(1); expect(errors).toEqual([]);
 });

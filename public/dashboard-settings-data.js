@@ -1,7 +1,9 @@
 import { validateDashboardPreferences } from './dashboard-helpers.js';
 import { validateWeatherLocation } from './weather-data.js';
+import { CATEGORY_IDS } from './dashboard-settings-categories.js';
 
 export const SCOPE_KEY = 'dashboard.settings-scope.v1';
+export const CATEGORY_SCOPES_KEY = 'dashboard.category-scopes.v1';
 export const LOCAL_SETTINGS_KEY = 'dashboard.local-settings.v1';
 export const MAX_SETTINGS_TRANSFER_BYTES = 131072;
 export const jsonBytes = (value) => new TextEncoder().encode(JSON.stringify(value)).byteLength;
@@ -15,6 +17,10 @@ export function parseSettingsJson(raw) {
 export function validateScope(value) {
   if (!exactFields(value, ['schema', 'mode']) || value.schema !== 1 || !['local', 'global'].includes(value.mode)) throw new Error('Invalid settings scope.');
   return value.mode;
+}
+export function validateCategoryScopes(value) {
+  if (!exactFields(value, ['schema', 'revision', 'scopes']) || value.schema !== 1 || !Number.isSafeInteger(value.revision) || value.revision < 0 || !exactFields(value.scopes, CATEGORY_IDS) || CATEGORY_IDS.some(id => !['local', 'global'].includes(value.scopes[id])) || jsonBytes(value) > MAX_SETTINGS_TRANSFER_BYTES) throw new Error('Invalid category scopes. Reset category scopes in General settings.');
+  return { schema: 1, revision: value.revision, scopes: { ...value.scopes } };
 }
 export function validateLocalSettings(value) {
   const keys = ['schema', 'revision', 'preferences', 'weatherLocation'];
