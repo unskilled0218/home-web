@@ -1,0 +1,123 @@
+# plan
+
+- [plan](#plan)
+  - [scope](#scope)
+  - [Implementation Plan](#implementation-plan)
+    - [Summary](#summary)
+    - [1. Define category ownership and browser scope records](#1-define-category-ownership-and-browser-scope-records)
+    - [2. Compose effective settings from independent sources](#2-compose-effective-settings-from-independent-sources)
+    - [3. Add category-bound saves and conflict tokens](#3-add-category-bound-saves-and-conflict-tokens)
+    - [4. Update settings controls and draft sessions](#4-update-settings-controls-and-draft-sessions)
+    - [5. Route weather, images, layout, and installation actions](#5-route-weather-images-layout-and-installation-actions)
+    - [6. Preserve explicit Global import and export](#6-preserve-explicit-global-import-and-export)
+    - [7. Add regression coverage and run verification](#7-add-regression-coverage-and-run-verification)
+    - [8. Update documentation and release metadata](#8-update-documentation-and-release-metadata)
+  - [Acceptance Criteria](#acceptance-criteria)
+  - [Risks And Decisions](#risks-and-decisions)
+
+## scope
+
+Replace the single dashboard-wide Local/Global choice with independent choices for General, Time, Weather, Calendar, Bookmarks, Home Assistant, Wake-on-LAN, and Images. A browser can use Global Time and Local Weather while other categories retain their own choices. Local means this browser profile; Global means the existing server-backed values shared with browsers using Global for that category.
+
+Preserve existing saved Local and Global values, server installation resources, and the optional Local Images follow-Global behavior. This task does not introduce per-user accounts, browser-specific integration credentials, new weather providers, independent server slideshows, or per-field scope switches. Planning does not modify implementation code.
+
+## Implementation Plan
+
+### Summary
+
+Introduce one explicit category-to-preference ownership map, compose one effective dashboard view from the two existing preference records, and save only the active category to its selected store. Keep existing server preference/weather APIs and optimistic revision checks. Use category-specific source identities for drafts and runtime owners instead of a single `mode`, source epoch, and save token.
+
+### 1. Define category ownership and browser scope records
+
+- Add `public/dashboard-settings-categories.js` as the shared browser-side policy module. Export the eight category identifiers, labels, owned preference keys, projection helpers, and validation for category patches. Every `PREFERENCE_KEYS` entry must have exactly one owner; tests must fail on missing or duplicate ownership. Do not duplicate this mapping in DOM traversal, the coordinator, and tests.
+- General owns `position`, `scale`, and `widgetLayout`, including both Desktop/Mobile layouts and z-order. Layout editing is one General-owned configuration, not independently scoped widget geometry.
+- Time owns `timezone`, `dateStyle`, `hour12`, `seconds`, `timeVisible`, `timeScale`, `mobileTimeVisible`, `mobileTimeScale`, and `hideTimeFullscreen`.
+- Weather owns `temperature`, `wind`, `precipitation`, `weatherHourlyVisible`, `weatherDailyVisible`, `weatherVisible`, `weatherScale`, `mobileWeatherVisible`, `mobileWeatherScale`, and `hideWeatherFullscreen`. The saved weather location also follows Weather scope, but remains outside the preference object under its existing location APIs/storage.
+- Calendar owns `calendarVisible`, `calendarScale`, `mobileCalendarVisible`, `mobileCalendarScale`, and `hideCalendarFullscreen`. Bookmarks owns `bookmarksVisible`, `mobileBookmarksVisible`, `hideBookmarksFullscreen`, `mobileBookmarksMode`, and `bookmarkLinkSelections`.
+- Home Assistant owns `homeAssistantVisible`, `mobileHomeAssistantVisible`, `hideHomeAssistantFullscreen`, and `homeAssistantDeviceSelections`. Wake-on-LAN owns `wolVisible`, `mobileWolVisible`, and `hideWolFullscreen`.
+- Images owns `order`, `interval`, `duration`, `animation`, `opacity`, `background`, `color`, `blur`, and `imageInfo`. `followGlobalPhotos` remains an Images-local option in the existing Local record, never a Global preference.
+- In `public/dashboard-settings-data.js`, add a strict browser-only record at `dashboard.category-scopes.v1`: `{ schema: 1, revision, scopes }`, where `revision` is a nonnegative safe integer and `scopes` contains exactly the eight category keys with `local` or `global` values. Retain existing size limits and reject unknown fields/invalid modes. Keep the existing Local settings and Global transfer schemas unchanged.
+- When no new record exists, seed all categories from a valid legacy `dashboard.settings-scope.v1` mode; absent or invalid legacy mode defaults to Local. Existing legacy Local settings migration and `followGlobalPhotos` defaulting remain unchanged. Reading/migrating in memory must not write records or preferences. The first explicit category-scope change writes the complete map; new clients no longer write the old scope key.
+- Scope changes reread the current map, reject an observed revision conflict, and persist only the intended category change over the latest confirmed map. Storage failure leaves the effective map and active owners unchanged. Same-profile storage events adopt category differences; independent profiles remain independent. New-record corruption retains the last confirmed in-memory map, or safe Local preview on startup, with an actionable error rather than publishing values. Treat browser-storage simultaneous writes as last-successful-write, not transactional compare-and-swap.
+
+### 2. Compose effective settings from independent sources
+
+- Refactor `public/dashboard-settings-scope.js` to keep raw Local preferences/location/follow option and raw Global sync state separate. Compute effective preferences by selecting each category's keys from its chosen raw record and validating the complete projection. Never replace either raw record with the mixed projection.
+- Expose `getCategoryState(category)` with that category's mode, source identity/epoch, backing revision, confirmed/cache/error/pending status, and opaque save token. Expose an aggregate effective snapshot for dashboard rendering and explicit raw Global state for transfer operations. Do not pretend a mixed snapshot has one authoritative store revision or one Local/Global mode.
+- Maintain an in-memory epoch per category. A scope change increments only affected category epochs, including changes received from another tab; unrelated category sources remain stable. Category save tokens bind category, chosen store, epoch, and that store's captured revision.
+- Start/reuse one `createSettingsSync` instance when any category is Global, and pause its preference polling when none are Global. A Local Images follower does not need Global preference polling: its slideshow endpoint remains independent. Hidden/persisted-page suspension and disposal must stop owned work and resume fresh state without duplicating timers.
+- Continue read-only calendar/Linkwarden installation discovery even when their display preferences are Local. Filter Global configuration observers according to service ownership: a Global Time update must not make Local Weather adopt a Global city. Where public installation metadata is needed without preference polling, retain the existing compact `/api/dashboard/configuration` path.
+- Apply Global snapshots only to categories currently Global. A late Global read/write/import response may update raw Global state but cannot overwrite Local category values, resurrect a retired owner, or reset unrelated drafts. Cached/unconfirmed Global values remain preview-only for Global saves; Local categories stay editable if the Global endpoint fails.
+
+### 3. Add category-bound saves and conflict tokens
+
+- Replace whole-effective-object saves with an explicit coordinator method such as `saveCategory(category, patch, token, options)`. Reject keys not owned by that category. Merge the allowlisted patch into that store's raw confirmed preference record, validate the resulting full canonical object, and persist only to that store. Preserve all nonowned fields byte-for-byte after canonical validation; never take them from a mixed UI baseline.
+- Local category writes use the existing one-record Local revision/storage transaction. Preserve location and `followGlobalPhotos` unless explicitly changing their owning data. Images-local preference changes and an explicit follow option commit together; reject follow-option changes from other categories or Global Images.
+- Global category writes use the existing full `/api/dashboard/settings` PUT, built from the raw Global snapshot plus only the category patch, with its captured server revision. Do not add a patch endpoint or server category schema. Do not automatically retry rejected writes against a newer revision or initialize Global settings using Local values.
+- Retain conservative store-wide conflict semantics: a committed save to another category in the same store can stale an open draft's token. Keep that draft intact, show a category-specific reload message, and require explicit reload before saving. A change to another category's scope alone does not stale an unchanged store/category token. Do not silently rebase dirty drafts.
+- Keep Global writes serialized through the existing sync owner. Independent Local writes must not be blocked merely because an unrelated Global category is unavailable or has a pending request. Pending state and Save eligibility are category/store-specific, not one dashboard-wide confirmed flag.
+- Weather location saves capture Weather category identity and the appropriate existing location revision. Reject old-source callbacks after Weather scope changes; saving a location does not change category scopes or other preferences. Preserve existing warnings that aborting a browser wait cannot roll back an admitted server write.
+
+### 4. Update settings controls and draft sessions
+
+- Add a labeled Local/Global selector and scope status to each panel in `public/index.html`; remove the dashboard-wide selector. Scope selectors are browser choices, not ordinary shared preference fields. Give them stable category-specific IDs and keep tab keyboard behavior/accessibility intact.
+- Move per-widget visibility and fullscreen controls currently grouped under General into their owning Time, Weather, Calendar, Bookmarks, Home Assistant, and Wake-on-LAN panels. Retain Desktop/Mobile labels and existing input names. Keep General focused on overall layout/scale and explicit Global transfer controls. Update cross-panel guidance so each control is saved by its visible category.
+- Change the shared footer to category-specific actions, such as “Save Time settings” and “Reload Local Weather settings”. Submitting validates and saves only the selected panel's preference controls and picker draft. A bad unsaved control in another panel must not block the active category's save. Do not implement an implicit multi-store “Save all” operation.
+- Add a category-draft/session helper, preferably `public/dashboard-settings-drafts.js`, to own each category's captured token, baseline, dirty values, and stale-source status. Replace `draftDirty`, `draftRevision`, `draftBaseline`, and `settingsSession` assumptions in `public/dashboard.js` where they currently represent the entire dialog. Tab switches preserve other category drafts without saving them.
+- A same-tab category-scope change requires saving/discarding that category's edits and completing its admitted actions; it must not require discarding unrelated category drafts. Offer explicit reload/discard for the affected category. Block General scope changes while the layout editor has unsaved work. Other category changes must not cancel an unrelated layout gesture or reset its captured General source.
+- On remote/storage changes, clean category forms may refresh; dirty forms retain values, focus, picker state, and captured tokens. If the category source changes, disable its stale draft's Save until reload. Closing/reopening the dialog discards unsaved display drafts as before, without changing confirmed values or clearing unrelated integration secrets on ordinary category reload.
+- When saving/reloading a category, fill only that category's form/picker and status. Preserve hidden compatibility preferences such as `mobileBookmarksMode`. Do not normalize absent controls into defaults for other categories.
+
+### 5. Route weather, images, layout, and installation actions
+
+- Replace `activeMode`, `activeSource`, and zero-argument `globalMode()` uses in `public/dashboard.js` with explicit category state lookups. Audit all settings callbacks, connection forms, weather searches, picker handlers, initial startup, visibility, online, pagehide, and persisted pageshow paths; no single-mode fallback should remain.
+- Configure `public/dashboard-weather-scope.js` using Weather's mode/epoch/location only. Units, scales, and weather display come from Weather, while timezone/hour12 continue to come from effective Time settings and affect weather/calendar presentation across category boundaries. A Time change can reconfigure presentation/provider timezone normally, but must not switch the Weather city/store or retire the owner merely because Time changed scope.
+- Configure `public/dashboard-photo-scope.js` using Images' mode/epoch and the saved Images-local `followGlobalPhotos` option. Global Images always follows the server; Local Images retains the existing optional follow behavior, defaulting on. Toggling another category must not clear photo layers, reset image traversal, or start a second photo player. Images source changes retain documented dispose-and-clear behavior.
+- Bind the layout editor and session to General via category-specific `getState` and Save adapters. Submit only `{ widgetLayout }`, not its captured complete effective preference object. Update `public/dashboard-layout-editor.js` and `public/dashboard-layout-session.js` to compare explicit source identity and opaque tokens rather than parsing `split(':').slice(0, 2)`. Other Local/Global category values must never be written through a layout save.
+- Keep installation resources server-owned. Calendar connection mutations require Calendar Global; Linkwarden connection mutations require Bookmarks Global; Home Assistant connection mutations require Home Assistant Global; Wake-on-LAN device management requires Wake-on-LAN Global. Local categories can still read shared connections/content and choose Local display selections. Normal dashboard Wake buttons keep their separate explicit behavior.
+- Update `public/dashboard-integration-settings.js` so `canMutate` and mutation ownership receive an explicit category/resource, rather than sharing one boolean between Home Assistant and Wake-on-LAN. Scope guards, status/session generations, and `beginIntegrationAction` deferrals must use the corresponding service category. Recheck guards inside submit/delete/connect handlers, not only disabled markup. Category scope is not a new server authorization role.
+
+### 6. Preserve explicit Global import and export
+
+- Keep Export read-only and available in any scope mix. It always exports raw Global preferences/location, never effective mixed settings or browser category choices.
+- Keep Global import under General as an explicit whole-Global-record operation, not a General-category patch. Require General Global and fresh raw Global preference/weather revisions; display that importing can change every Global-backed category and Local image followers while preserving all Local records and category choices.
+- Update `public/dashboard-settings-transfer.js` to consume explicit transfer state and an import token, not aggregate `mode`, effective snapshot revisions, or a dialog-active category token. Block import while any category/layout draft is dirty or any conflicting shared mutation is admitted. Keep its existing two-revision server transaction and uncertainty/conflict behavior.
+- Successful import updates raw Global data and recomposes only Global-backed categories. It must not publish Local fields, change the scope map, erase Local Images opt-out, or adopt the Global weather city into Local Weather. Transfer file format remains version 1 and excludes category scopes/follow choices.
+
+### 7. Add regression coverage and run verification
+
+- Add `test/dashboard-settings-categories.test.js` for complete/disjoint key ownership, strict scope-record schemas, projection of mixed raw records, and rejection of cross-category patches. Cover all eight categories, not only Time and Weather.
+- Expand `test/dashboard-settings-scope.test.js` for legacy all-Local/all-Global migration without writes, invalid records, explicit per-category persistence, same-profile map events, independent profiles, storage failure, mixed-source bootstrap/offline behavior, per-category epochs/tokens, concurrent Local/Global activity, stale reads, store-revision conflicts, and patch preservation of nonowned values.
+- Add unit cases for category draft sessions, layout patch adapters, service-specific mutation guards, and transfer-state isolation. Retain existing settings-sync tests for server conflicts and pending import behavior; update callers rather than weakening strict Global validation.
+- Extend `e2e/settings-scope.spec.js` with two or more browser contexts: Global Time/Local Weather and the reverse, all-Local/all-Global migration, reload and scope round trips, Global updates reaching only participating categories, Local saves preserving Global records, and category saves leaving other categories' unsaved controls/pickers untouched. Verify cross-tab source changes, dirty category conflicts, storage failures, and keyboard/mobile access to each scope selector.
+- Exercise independent General layout edits and Images playback while changing Time/Weather scope. Verify General layout saves cannot copy Local weather/image values into Global, Time timezone changes preserve Weather location ownership, and an unrelated category change neither clears photo DOM layers nor retires service work.
+- Update `e2e/photo-display-recovery.spec.js`, `e2e/global-settings-transfer.spec.js`, `e2e/global-settings.spec.js`, `e2e/dashboard-layout.spec.js`, `e2e/integration-settings.spec.js`, `e2e/dashboard-devices.spec.js`, `e2e/selected-bookmark-links.spec.js`, `e2e/background-display-options.spec.js`, and `e2e/dashboard-home.spec.js` where selectors, save labels, or form ownership change. Update `e2e/global-fixtures.js` and `e2e/settings-environment.js` with explicit all-Global or mixed maps; retain dedicated legacy migration cases rather than making every fixture depend on migration.
+- Run `npm run check`, `npm test -- --test-concurrency=1`, and `npm run test:browser`. Focus early runs on the new policy/coordinator tests and settings-scope, layout, transfer, integration, and photo recovery specs. Compare full-browser failures with the baseline: task 71 recorded 12 existing failures plus two Firefox prerequisites. Record new failures separately rather than calling the suite green or treating every failure as baseline. Do not install system/browser packages; report missing prerequisites to the user.
+
+### 8. Update documentation and release metadata
+
+- Update README briefly and revise `docs/settings-scope.md` as the primary category-scope contract, including migration/defaults, the ownership list, category Save/reload semantics, conservative conflicts, mixed-source offline behavior, and the distinction between display scope and shared resources.
+- Update `docs/dashboard.md`, `docs/dashboard-layout.md`, `docs/nfs-backgrounds.md`, `docs/settings-import-export.md`, and relevant integration documentation to remove whole-dashboard-mode assumptions. Explain that Time format/timezone still affects weather/calendar rendering, General owns layout, and Images Local can independently follow the shared slideshow.
+- Follow the existing patch-release convention during implementation: increment `VERSION`, `package.json`, root npm lock versions, README, `scripts/release.json` notes path, and the current release link in `docs/releases.md`; add the matching versioned release notes. Do not deploy, publish packages, or push as part of planning.
+
+## Acceptance Criteria
+
+- Each of the eight categories has its own remembered Local/Global choice. Changing Time does not change Weather or any other category's choice, saved values, or drafts.
+- A valid old whole-dashboard choice seeds every category with that same mode; a fresh profile defaults all categories to Local. Existing Local/Global values and the Local Images follow choice survive migration and scope round trips without copying one store into another.
+- Effective settings and runtime owners reflect the correct sources in mixed configurations. Global category saves affect participating browsers; Local category saves affect only that profile. Local categories remain usable when Global settings are unavailable.
+- Category Save/reload affects only that category. Shared preference PUTs and Local writes preserve all nonowned fields. Dirty/stale drafts cannot write into another category/store, and admitted asynchronous results cannot reactivate retired sources.
+- Layout editing follows General; weather city/units follow Weather; effective Time continues governing timestamp presentation; images follow Images and its existing Local follow option. Unrelated category changes do not restart photos, reset weather location, or discard layout work.
+- Installation credentials and managed devices stay server resources with service-specific Global mutation guards. Local selection/display remains independent and normal Wake actions retain existing behavior.
+- Global import/export uses raw Global data and unchanged file/API contracts, preserves Local values and scope choices, and clearly describes whole-Global replacement in a mixed dashboard.
+- Verification results, missing prerequisites, and any baseline failures are recorded accurately. Implementation changes stay within this feature and its required compatibility/test/documentation updates.
+
+## Risks And Decisions
+
+- Use category granularity, not per-field switches. Widget visibility/fullscreen controls move to their owning panels to avoid a Weather setting being unexpectedly governed by General scope.
+- Retain one server preference record and revision. This avoids database/API migration but conservatively makes same-store unrelated saves conflict with captured drafts; explicit reload is preferred over hidden rebasing or overwriting.
+- Save one category at a time rather than attempting atomic writes across browser storage and SQLite. Weather-location and integration forms remain explicit separate actions, as they already are.
+- Per-category mode, service ownership, active tab, confirmation, and raw backing data are different concepts. Keep their interfaces explicit; do not replace one global flag with scattered DOM-derived decisions or silently treat `mixed` as Local/Global.
+- A scope map changes presentation/configuration sources, not server access control. No Local credential/device stores are introduced. General Global is only the UI guard for the existing installation-wide import action.
+- Local Images following Global is independent of Images preference scope and must not be replaced by the category map. It remains a Local-only override over image selection, not adoption of Global presentation.
+- Once a new scope-map record exists, legacy scope-key writes from an old cached client do not redefine it. Older clients do not understand mixed scopes; document reloading all open tabs after upgrade and preserve the old keys rather than destructively deleting them during reads.
+- Native Node child crashes were observed during concurrent syntax/browser/Node verification in task 71; a serial Node rerun passed. Prefer sequential verification for clear evidence, without changing application behavior to mask runtime failures.
