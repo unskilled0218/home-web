@@ -99,3 +99,54 @@ test('settings transfer and Local record schemas reject unknown fields, invalid 
   assert.throws(() => parseSettingsJson('é'.repeat(65537))); assert.throws(() => validateLocalSettings({ schema: 1, revision: -1, preferences: settings.preferences, weatherLocation: null }));
   const raw = JSON.stringify(settings); assert.deepEqual(parseSettingsJson(raw + ' '.repeat(131072 - Buffer.byteLength(raw))), settings); assert.throws(() => parseSettingsJson(raw + ' '.repeat(131073 - Buffer.byteLength(raw))));
 });
+
+test('fresh, legacy and old Local records default to following without read-time migration', async t => {
+  const old = { schema: 1, revision: 3, preferences: normalizeDashboardPreferences(), weatherLocation: null };
+  for (const values of [new Map(), new Map([['dashboard.preferences.v1', '{"color":"#123456"}']]), new Map([[LOCAL_SETTINGS_KEY, JSON.stringify(old)]])]) {
+    const before = [...values]; const env = setup(t, { values }); await env.client.start();
+    assert.equal(env.client.getState().followGlobalPhotos, true); assert.deepEqual([...values], before);
+  }
+  assert.equal(validateLocalSettings({ ...old, followGlobalPhotos: false }).followGlobalPhotos, false);
+  for (const invalid of [null, 'false', 0, undefined]) assert.throws(() => validateLocalSettings({ ...old, followGlobalPhotos: invalid }), /Invalid local settings/);
+  assert.throws(() => validateLocalSettings({ ...old, followGlobalPhotos: true, extra: true }), /Invalid local settings/);
+});
+
+test('photo option and preferences save atomically and survive unrelated saves and scope round trips', async t => {
+  const env = setup(t); await env.client.start(); const token = env.client.getState().saveToken;
+  const preferences = normalizeDashboardPreferences({ order: 'date', interval: 17, timezone: 'Asia/Tokyo' });
+  await env.client.save(preferences, token, { followGlobalPhotos: false });
+  const record = JSON.parse(env.values.get(LOCAL_SETTINGS_KEY)); assert.equal(record.revision, 1); assert.equal(record.followGlobalPhotos, false); assert.deepEqual(record.preferences, preferences);
+  await assert.rejects(env.client.save(preferences, token, { followGlobalPhotos: true }), /source or revision/);
+  env.client.saveLocalLocation({ latitude: 35, longitude: 139, label: 'Tokyo' });
+  await env.client.save({ ...preferences, scale: 1.2 }, env.client.getState().saveToken);
+  assert.equal(env.client.getState().followGlobalPhotos, false);
+  await env.client.changeScope('global'); const count = env.calls.length;
+  await assert.rejects(env.client.save(preferences, env.client.getState().saveToken, { followGlobalPhotos: true }), /Local scope/);
+  assert.equal(env.calls.length, count);
+  await env.client.changeScope('local'); await env.client.refresh();
+  assert.equal(env.client.getState().followGlobalPhotos, false); assert.equal(env.client.getState().weatherLocation.label, 'Tokyo');
+  const fresh = setup(t, { values: env.values }); assert.equal(fresh.client.getState().followGlobalPhotos, false);
+  await env.client.save(preferences, env.client.getState().saveToken, { followGlobalPhotos: true });
+  await env.client.changeScope('global'); await env.client.changeScope('local'); assert.equal(env.client.getState().followGlobalPhotos, true);
+  assert.equal(env.calls.some(call => call.options.method === 'PUT'), false);
+});
+
+test('photo option storage events remain profile-local and reject competing stale saves', async t => {
+  const a = setup(t); const tab = setup(t, { values: a.values }); const other = setup(t);
+  await Promise.all([a.client.start(), tab.client.start(), other.client.start()]);
+  const preferences = normalizeDashboardPreferences(); const stale = tab.client.getState().saveToken;
+  await a.client.save(preferences, a.client.getState().saveToken, { followGlobalPhotos: false });
+  await assert.rejects(tab.client.save(preferences, stale, { followGlobalPhotos: true }), /another tab/);
+  tab.client.storageChanged({ key: LOCAL_SETTINGS_KEY }); assert.equal(tab.client.getState().followGlobalPhotos, false); assert.equal(other.client.getState().followGlobalPhotos, true);
+  await a.client.save(preferences, a.client.getState().saveToken, { followGlobalPhotos: true });
+  tab.client.storageChanged({ key: LOCAL_SETTINGS_KEY }); assert.equal(tab.client.getState().followGlobalPhotos, true);
+});
+
+test('invalid or failed photo option saves leave confirmed preferences and storage untouched', async t => {
+  const env = setup(t, { broken: true }); await env.client.start(); const before = env.client.getState();
+  await assert.rejects(env.client.save(normalizeDashboardPreferences({ color: '#123456' }), before.saveToken, { followGlobalPhotos: false }), /quota/);
+  assert.deepEqual(env.client.getState(), before); assert.equal(env.values.has(LOCAL_SETTINGS_KEY), false);
+  const valid = setup(t); await valid.client.start();
+  await assert.rejects(valid.client.save(normalizeDashboardPreferences(), valid.client.getState().saveToken, { followGlobalPhotos: 'false' }), /boolean/);
+  assert.equal(valid.values.has(LOCAL_SETTINGS_KEY), false);
+});

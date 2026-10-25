@@ -29,7 +29,7 @@ let storage;
 try { storage = window.localStorage; } catch { /* Defaults work when browser storage is blocked. */ }
 let settings = { ...normalizeDashboardPreferences(), location: null };
 let servicesStarted = false; let draftRevision = null; let draftDirty = false; let preferenceMessage = '';
-let activeMode = 'local'; let activeSource; let settingsTransfer;
+let activeMode = 'local'; let activeSource; let settingsTransfer; let followGlobalPhotos = true;
 const globalMode = () => activeMode === 'global';
 let clockTimer; let searchController; let searchGeneration = 0; let weatherState = {}; let calendarState = {}; let animations = [];
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
@@ -69,6 +69,16 @@ function fillForm() {
   deviceSelection.setDraft(settings.homeAssistantDeviceSelections);
   bookmarkSelection.setDraft(settings.bookmarkLinkSelections);
   draftBaseline = normalizeDashboardPreferences(settings);
+  $('follow-global-photos').checked = followGlobalPhotos;
+  updatePhotoControls();
+}
+
+function updatePhotoControls(saving = false) {
+  const following = !globalMode() && $('follow-global-photos').checked;
+  $('local-photo-controls').hidden = globalMode();
+  $('follow-global-photos').disabled = saving || globalMode();
+  for (const name of ['order', 'interval']) preferences.elements.namedItem(name).disabled = saving || following;
+  $('photo-following-help').hidden = !following;
 }
 
 function readPreferenceDraft() {
@@ -232,7 +242,8 @@ const settingsSync = createSettingsScope({ storage,
   onSnapshot(snapshot, observers) {
     const previous = settings;
     const scope = settingsSync.getState(); const sourceChanged = activeSource !== scope.source;
-    activeMode = scope.mode; activeSource = scope.source;
+    const photoSourceChanged = followGlobalPhotos !== scope.followGlobalPhotos;
+    activeMode = scope.mode; activeSource = scope.source; followGlobalPhotos = scope.followGlobalPhotos;
     if (sourceChanged) { preferenceMessage = ''; settingsSession++; cancelSearch(); layoutEditor.cancelGesture(); $('location-settings-status').textContent = ''; }
     settings = { ...snapshot.preferences, location: scope.mode === 'local' ? scope.weatherLocation : sourceChanged ? null : settings.location };
     const changed = (keys) => keys.some((key) => !preferencesEqual(settings[key], previous[key]));
@@ -244,7 +255,7 @@ const settingsSync = createSettingsScope({ storage,
     if (first || changed(['homeAssistantDeviceSelections'])) deviceIntegrations.configure(settings.homeAssistantDeviceSelections);
     if (first || changed(['bookmarkLinkSelections'])) bookmarks.configure(settings.bookmarkLinkSelections);
     document.body.style.backgroundColor = settings.color;
-    if (first || sourceChanged || changed(['order', 'interval', 'duration', 'animation', 'opacity', 'background', 'color', 'blur', 'imageInfo'])) photos.configure(settings, scope.mode, scope.source);
+    if (first || sourceChanged || photoSourceChanged || changed(['order', 'interval', 'duration', 'animation', 'opacity', 'background', 'color', 'blur', 'imageInfo'])) photos.configure(settings, scope.mode, scope.source, followGlobalPhotos);
     if (first || sourceChanged || changed(['timezone', 'temperature', 'wind', 'precipitation', 'location'])) weather.configure(settings, scope.mode, scope.source, scope.weatherLocation);
     if (first) {
       servicesStarted = true; void photos.load();
@@ -268,6 +279,7 @@ const settingsSync = createSettingsScope({ storage,
     $('scope-status').textContent = state.mode === 'local' ? 'Local settings apply to this browser profile only.' : 'Global settings are shared by browsers using Global mode.';
     if (saving) layoutActivation.cancel();
     for (const control of preferences.elements) if (PREFERENCE_KEYS.includes(control.name)) control.disabled = saving;
+    updatePhotoControls(saving);
     deviceSelection.setSaving(saving);
     bookmarkSelection.setSaving(saving);
     layoutEditor.observe();
@@ -294,7 +306,7 @@ $('settings-scope').addEventListener('change', async () => {
 });
 window.addEventListener('storage', event => settingsSync.storageChanged(event));
 
-dialog.addEventListener('input', (event) => { if (event.target.form === preferences) { draftDirty = true; settingsTransfer.update(); } });
+dialog.addEventListener('input', (event) => { if (event.target.form === preferences) { draftDirty = true; updatePhotoControls(settingsSync.getState().pending); settingsTransfer.update(); } });
 preferences.addEventListener('submit', async (event) => {
   event.preventDefault();
   const invalid = [...preferences.elements].find((control) => control.willValidate && !control.validity.valid);
@@ -303,7 +315,7 @@ preferences.addEventListener('submit', async (event) => {
   const source = settingsSync.getState().source;
   try {
     const next = readPreferenceDraft(); draftDirty = true;
-    const saved = await settingsSync.save(next, draftRevision);
+    const saved = await settingsSync.save(next, draftRevision, globalMode() ? {} : { followGlobalPhotos: $('follow-global-photos').checked });
     if (session !== settingsSession || source !== settingsSync.getState().source) return;
     draftRevision = settingsSync.getState().saveToken; draftDirty = false; fillForm(); preferenceMessage = globalMode() ? 'Preferences saved for all browsers.' : 'Preferences saved for this browser.';
     $('settings-status').textContent = preferenceMessage;

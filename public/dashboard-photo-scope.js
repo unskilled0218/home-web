@@ -4,8 +4,10 @@ import { createLocalPhotoController } from './dashboard-local-photos.js';
 export function createScopedPhotoController(options) {
   let owner; let source; let visible = true;
   return {
-    configure(settings, mode = 'global', epoch = mode) {
-      if (source !== epoch) { owner?.dispose(); source = epoch; owner = (mode === 'local' ? createLocalPhotoController : createPhotoController)(options); owner.setVisible(visible); owner.configure(settings); void owner.load(); }
+    configure(settings, mode = 'global', epoch = mode, followGlobalPhotos = true) {
+      const independent = mode === 'local' && !followGlobalPhotos;
+      const identity = JSON.stringify([epoch, independent]);
+      if (source !== identity) { owner?.dispose(); source = identity; owner = (independent ? createLocalPhotoController : createPhotoController)(options); owner.setVisible(visible); owner.configure(settings); void owner.load(); }
       else owner.configure(settings);
     },
     load: () => owner?.load(),

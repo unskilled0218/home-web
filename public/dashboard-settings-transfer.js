@@ -38,7 +38,7 @@ export function createSettingsTransferControls({ document, window, coordinator, 
     if (!selected || !canImport() || busy) return; const owner = generation; busy = true; update();
     try {
       await coordinator.importGlobal(selected.settings, { preferencesRevision: selected.preferencesRevision, weatherRevision: selected.weatherRevision }, selected.token);
-      if (owner === generation) { status('Global settings imported. Local browsers and mode choices were not changed.'); selected = undefined; get('global-settings-file').value = ''; }
+      if (owner === generation) { status('Global settings imported. Local preferences and mode choices were not changed. Local followers continue tracking the shared slideshow.'); selected = undefined; get('global-settings-file').value = ''; }
     } catch (error) { if (owner === generation) status(error.message); }
     finally { busy = false; update(); }
   }, options);

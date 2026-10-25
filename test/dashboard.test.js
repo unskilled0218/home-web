@@ -133,7 +133,8 @@ test('Settings associates all preferences with one form and keeps service forms 
   assert.match(html, /<form id="preferences" novalidate hidden><\/form>/);
   const controls = [...html.matchAll(/<(?:input|select)\b[^>]*form="preferences"[^>]*>/g)];
   const names = controls.map((control) => /name="([^"]+)"/.exec(control[0])?.[1]);
-  assert.deepEqual(names.sort(), Object.keys(normalizeSettings()).filter((name) => !['location', 'homeAssistantDeviceSelections', 'bookmarkLinkSelections', 'widgetLayout'].includes(name)).sort());
+  assert.deepEqual(names.sort(), [...Object.keys(normalizeSettings()).filter((name) => !['location', 'homeAssistantDeviceSelections', 'bookmarkLinkSelections', 'widgetLayout'].includes(name)), 'followGlobalPhotos'].sort());
+  assert.equal(Object.hasOwn(normalizeSettings(), 'followGlobalPhotos'), false, 'Local playback choice is not a shared preference');
   assert.doesNotMatch(html, /id="widget-layout-editor"|id="layout-preview"/);
   assert.match(html, /id="layout-toolbar"/);
   assert.match(html, /id="edit-layout"/);

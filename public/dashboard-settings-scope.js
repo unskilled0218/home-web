@@ -6,19 +6,19 @@ import { requestDashboardJson } from './dashboard-request.js';
 const unavailable = () => ({ weather: { available: false }, calendar: { available: false }, linkwarden: { available: false } });
 export function createSettingsScope({ storage, onSnapshot, onState = () => {}, captureObservers = () => ({}), fetchImpl = fetch, schedule = setTimeout, cancel = clearTimeout }) {
   let mode = 'local'; let epoch = 0; let error = ''; let visible = true; let disposed = false; let started = false; let pending = false; let actions = 0;
-  let global; let metadata; let timer; let local = { schema: 1, revision: 0, preferences: normalizeDashboardPreferences(), weatherLocation: null };
+  let global; let metadata; let timer; let local = { schema: 1, revision: 0, preferences: normalizeDashboardPreferences(), weatherLocation: null, followGlobalPhotos: true };
   const api = (url, options = {}) => requestDashboardJson(url, { fetchImpl, schedule, cancel, ...options });
   try { const raw = storage?.getItem(SCOPE_KEY); if (raw) mode = validateScope(parseSettingsJson(raw)); } catch { error = 'Settings scope could not be read. Using Local preview.'; }
   function readLocal() {
     const raw = storage?.getItem(LOCAL_SETTINGS_KEY);
     if (raw) return validateLocalSettings(parseSettingsJson(raw));
     const legacy = storage?.getItem(SETTINGS_KEY); const old = legacy ? parseSettingsJson(legacy) : null;
-    return { schema: 1, revision: 0, preferences: legacyDashboardPreferences(old) ?? normalizeDashboardPreferences(), weatherLocation: normalizeLocation(old?.location) };
+    return { schema: 1, revision: 0, preferences: legacyDashboardPreferences(old) ?? normalizeDashboardPreferences(), weatherLocation: normalizeLocation(old?.location), followGlobalPhotos: true };
   }
   try { local = readLocal(); } catch { error = 'Local settings could not be read. Save to replace this preview.'; }
   function state() {
     const base = mode === 'global' && global ? global.getState() : { snapshot: { initialized: true, revision: local.revision, preferences: local.preferences, integrations: unavailable() }, confirmed: true, cache: false, pending: false };
-    return { ...base, mode, source: `${mode}:${epoch}`, saveToken: `${mode}:${epoch}:${base.snapshot.revision}`, weatherLocation: mode === 'local' ? local.weatherLocation : null, pending: pending || base.pending, mutating: actions > 0, error: error || base.error || '' };
+    return { ...base, mode, source: `${mode}:${epoch}`, saveToken: `${mode}:${epoch}:${base.snapshot.revision}`, weatherLocation: mode === 'local' ? local.weatherLocation : null, followGlobalPhotos: local.followGlobalPhotos, pending: pending || base.pending, mutating: actions > 0, error: error || base.error || '' };
   }
   const emit = () => { if (!disposed) onState(state()); };
   function publish(observers = {}) { if (!disposed) onSnapshot(state().snapshot, observers); emit(); }
@@ -81,10 +81,12 @@ export function createSettingsScope({ storage, onSnapshot, onState = () => {}, c
     async start() { if (disposed) return; started = true; if (mode === 'global') { ensureGlobal(); global.setVisible(visible); } publish(); await refresh(); },
     refresh,
     changeScope,
-    async save(preferences, token) {
+    async save(preferences, token, options = {}) {
       if (pending) throw new Error('A settings import is already pending.');
       validateToken(token);
-      if (mode === 'local') return persistLocal({ ...local, preferences }, token);
+      const hasFollow = Object.hasOwn(options, 'followGlobalPhotos');
+      if (hasFollow && (mode !== 'local' || typeof options.followGlobalPhotos !== 'boolean')) throw new Error('A boolean photo-following option can only be saved in Local scope.');
+      if (mode === 'local') return persistLocal({ ...local, preferences, ...(hasFollow ? { followGlobalPhotos: options.followGlobalPhotos } : {}) }, token);
       ensureGlobal(); return global.save(preferences, state().snapshot.revision);
     },
     saveLocalLocation(location, token = state().saveToken) { if (mode !== 'local') throw new Error('Local scope is not active.'); return persistLocal({ ...local, weatherLocation: location }, token); },

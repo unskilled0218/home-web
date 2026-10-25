@@ -17,8 +17,10 @@ export function validateScope(value) {
   return value.mode;
 }
 export function validateLocalSettings(value) {
-  if (!exactFields(value, ['schema', 'revision', 'preferences', 'weatherLocation']) || value.schema !== 1 || !Number.isSafeInteger(value.revision) || value.revision < 0 || jsonBytes(value) > MAX_SETTINGS_TRANSFER_BYTES) throw new Error('Invalid local settings.');
-  return { schema: 1, revision: value.revision, preferences: validateDashboardPreferences(value.preferences), weatherLocation: nullableWeatherLocation(value.weatherLocation) };
+  const keys = ['schema', 'revision', 'preferences', 'weatherLocation'];
+  const hasFollow = value && Object.hasOwn(value, 'followGlobalPhotos');
+  if (!exactFields(value, hasFollow ? [...keys, 'followGlobalPhotos'] : keys) || value.schema !== 1 || !Number.isSafeInteger(value.revision) || value.revision < 0 || jsonBytes(value) > MAX_SETTINGS_TRANSFER_BYTES || (hasFollow && typeof value.followGlobalPhotos !== 'boolean')) throw new Error('Invalid local settings.');
+  return { schema: 1, revision: value.revision, preferences: validateDashboardPreferences(value.preferences), weatherLocation: nullableWeatherLocation(value.weatherLocation), followGlobalPhotos: hasFollow ? value.followGlobalPhotos : true };
 }
 export function validateSettingsTransfer(value) {
   if (!exactFields(value, ['format', 'version', 'preferences', 'weatherLocation']) || value.format !== 'home-web.global-settings' || value.version !== 1 || jsonBytes(value) > MAX_SETTINGS_TRANSFER_BYTES || jsonBytes(value.preferences) > 65536) throw new Error('Invalid global settings file.');

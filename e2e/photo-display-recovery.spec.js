@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { settingsEnvironment } from './settings-environment.js';
+import { normalizeDashboardPreferences } from '../public/dashboard-helpers.js';
 
 async function shown(page, url) {
   const image = page.locator('#photos .photo-layer > img').last();
@@ -15,7 +16,7 @@ async function scope(page, mode) {
   await page.locator('#close-settings').click();
 }
 
-test('default Local displays real image bytes, rotates independently, and switches to and from Global', async ({ page }) => {
+test('Local opt-out displays real image bytes, rotates independently, and switches to and from Global', async ({ page }) => {
   const env = await settingsEnvironment(); const errors = []; page.on('pageerror', error => errors.push(error.message));
   try {
     const legacy = await (await fetch(`${env.base}/api/dashboard/photos`)).json();
@@ -30,6 +31,7 @@ test('default Local displays real image bytes, rotates independently, and switch
     const initial = page.locator('#photos .photo-layer > img').last(); await expect(initial).toBeVisible();
     const initialUrl = await initial.getAttribute('src'); expect(manifest.photos.map(photo => photo.url)).toContain(initialUrl); await shown(page, initialUrl);
     await page.locator('#open-settings').click(); await page.locator('#settings-tab-images').click();
+    await page.locator('#follow-global-photos').uncheck();
     await page.locator('[name="order"]').selectOption('name'); await page.locator('[name="interval"]').fill('5'); await page.locator('[name="animation"]').selectOption('none');
     await page.locator('#save-preferences').click(); await expect(page.locator('#settings-status')).toHaveText('Preferences saved for this browser.'); await page.locator('#close-settings').click();
     await shown(page, manifest.photos[0].url); await page.clock.fastForward(5000); await shown(page, manifest.photos[1].url);
@@ -41,11 +43,16 @@ test('default Local displays real image bytes, rotates independently, and switch
   } finally { await page.goto('about:blank'); await env.close(); }
 });
 
-for (const mode of ['local', 'global']) test(`${mode} retries a failed first image at the same URL without rotation or reload`, async ({ page }) => {
+for (const playback of ['local-following', 'local-independent', 'global']) test(`${playback} retries a failed first image at the same URL without rotation or reload`, async ({ page }) => {
+  const mode = playback === 'global' ? 'global' : 'local';
   const env = await settingsEnvironment({ photoCount: 1 }); let failed = false; const requests = []; const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   try {
     if (mode === 'global') await page.addInitScript(() => localStorage.setItem('dashboard.settings-scope.v1', JSON.stringify({ schema: 1, mode: 'global' })));
+    if (playback === 'local-independent') await page.addInitScript(preferences => {
+      localStorage.setItem('dashboard.local-settings.v1', JSON.stringify({ schema: 1, revision: 1, preferences, weatherLocation: null, followGlobalPhotos: false }));
+    }, normalizeDashboardPreferences());
+    const metadata = []; page.on('request', request => { const path = new URL(request.url()).pathname; if (['/api/dashboard/slideshow', '/api/dashboard/photos/local'].includes(path)) metadata.push(path); });
     const snapshot = env.slideshow.snapshot(); const before = env.store.exportDashboardSettings();
     await page.route(`**${snapshot.current.url}`, route => {
       requests.push(route.request().url());
@@ -60,6 +67,7 @@ for (const mode of ['local', 'global']) test(`${mode} retries a failed first ima
     expect(requests.length).toBeGreaterThan(1); expect(new Set(requests).size).toBe(1);
     expect(env.slideshow.snapshot()).toEqual(snapshot); expect(env.store.exportDashboardSettings()).toEqual(before);
     expect(await page.locator('#settings-scope').inputValue()).toBe(mode); expect(errors).toEqual([]);
+    expect(metadata.length).toBeGreaterThan(0); expect(new Set(metadata)).toEqual(new Set([playback === 'local-independent' ? '/api/dashboard/photos/local' : '/api/dashboard/slideshow']));
     await page.clock.runFor(5000); await expect(page.locator('#photos .photo-layer')).toHaveCount(1);
   } finally { await page.goto('about:blank'); await env.close(); }
 });

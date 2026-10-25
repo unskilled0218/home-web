@@ -7,12 +7,19 @@ const file = value => ({ name: 'global.json', mimeType: 'application/json', buff
 test('Global download/upload round trip updates Global peers without changing Local records or mode choices', async ({ browser }) => {
   const env = await settingsEnvironment(); const a = await scopeClient(browser, env); const b = await scopeClient(browser, env); const local = await scopeClient(browser, env);
   try {
+    await local.page.locator('#open-settings').click(); await local.page.locator('#settings-tab-images').click(); await local.page.locator('[name="opacity"]').fill('0.5'); await local.page.locator('[name="animation"]').selectOption('none'); await local.page.locator('#save-preferences').click(); await expect(local.page.locator('#settings-status')).toHaveText('Preferences saved for this browser.'); await local.page.locator('#close-settings').click();
+    const localRecord = await local.page.evaluate(() => localStorage.getItem('dashboard.local-settings.v1'));
     await openGlobal(a.page); await openGlobal(b.page); const downloadEvent = a.page.waitForEvent('download'); await a.page.locator('#export-global-settings').click(); const download = await downloadEvent; const stream = await download.createReadStream(); const chunks = []; for await (const chunk of stream) chunks.push(chunk); const exported = JSON.parse(Buffer.concat(chunks).toString());
     expect(exported).toEqual(env.store.exportDashboardSettings().settings); expect(exported).not.toHaveProperty('mode'); expect(exported).not.toHaveProperty('integrations');
-    const imported = { ...exported, preferences: { ...exported.preferences, color: '#123456', timezone: 'Asia/Tokyo' }, weatherLocation: { latitude: 35, longitude: 139, label: 'Tokyo' } };
+    const imported = { ...exported, preferences: { ...exported.preferences, color: '#123456', timezone: 'Asia/Tokyo', order: 'date', interval: 5 }, weatherLocation: { latitude: 35, longitude: 139, label: 'Tokyo' } };
     await a.page.locator('#global-settings-file').setInputFiles(file(imported)); await expect(a.page.locator('#import-global-settings')).toBeEnabled(); await a.page.locator('#import-global-settings').click(); await expect(a.page.locator('#settings-transfer-status')).toContainText('Global settings imported');
     await b.page.clock.fastForward(5000); await expect(b.page.locator('body')).toHaveCSS('background-color', 'rgb(18, 52, 86)'); await expect(local.page.locator('body')).toHaveCSS('background-color', 'rgb(0, 0, 0)');
     expect(await local.page.evaluate(() => localStorage.getItem('dashboard.settings-scope.v1'))).toBeNull(); expect(env.store.getWeatherLocation().location.label).toBe('Tokyo');
+    await expect(a.page.locator('#settings-transfer-status')).toHaveText('Global settings imported. Local preferences and mode choices were not changed. Local followers continue tracking the shared slideshow.');
+    await env.clock.advance(5000); await local.page.clock.fastForward(5000); await b.page.clock.fastForward(5000);
+    const selected = env.slideshow.snapshot().current.url;
+    await expect(local.page.locator('#photos .photo-layer > img').last()).toHaveAttribute('src', selected); await expect(b.page.locator('#photos .photo-layer > img').last()).toHaveAttribute('src', selected);
+    expect(await local.page.evaluate(() => localStorage.getItem('dashboard.local-settings.v1'))).toBe(localRecord); expect(JSON.parse(localRecord).followGlobalPhotos).toBe(true); await expect(local.page.locator('.photo-layer').last()).toHaveCSS('opacity', '0.5');
   } finally { await a.close(); await b.close(); await local.close(); await env.close(); }
 });
 

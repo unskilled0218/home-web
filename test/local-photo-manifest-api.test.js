@@ -82,9 +82,9 @@ test('scope replacement retires Local retry work and late Global decode before s
     decode: async (url, { signal }) => { urls.push(url); if (urls.length === 1) throw new Error('Temporary Local failure.'); if (url === global.url) { globalSignal = signal; return pending.promise; } }
   });
   try {
-    const settings = normalizeDashboardPreferences(); client.configure(settings, 'local', 'local:0'); await tick(); assert.deepEqual(shown, []);
+    const settings = normalizeDashboardPreferences(); client.configure(settings, 'local', 'local:0', false); await tick(); assert.deepEqual(shown, []);
     client.configure(settings, 'global', 'global:1'); await tick();
-    client.configure(settings, 'local', 'local:2'); await tick(); assert.equal(globalSignal.aborted, true);
+    client.configure(settings, 'local', 'local:2', false); await tick(); assert.equal(globalSignal.aborted, true);
     pending.resolve(); await tick(); await clock.advance(5000);
     assert.deepEqual(shown, [local.url]); assert.deepEqual(urls, [local.url, global.url, local.url]);
   } finally { client.dispose(); await tick(); }
