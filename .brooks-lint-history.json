@@ -790,5 +790,16 @@
       "suggestion": 0
     },
     "scope": "Branch review: 71-shared-local-global-image vs main at e09b7a4 (25 changed files)"
+  },
+  {
+    "date": "2026-10-25",
+    "mode": "Health Dashboard",
+    "score": 98,
+    "findings": {
+      "critical": 0,
+      "warning": 1,
+      "suggestion": 1
+    },
+    "scope": "Plan review: tasks/72-per-category-settings-scope/2-plan.md at bdb9eb6"
   }
 ]
