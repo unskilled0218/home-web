@@ -3,8 +3,8 @@
 
 ## command
 
-Show same image to local as global
+Make it optional for Local dashboards to show the same image as Global dashboards.
 
 ## goal
 
-Make Local dashboards display the same current background image as Global dashboards, following the shared slideshow rather than independently selecting and rotating images, while keeping other Local settings independent.
+Add an option for Local dashboards to follow Global's shared slideshow and display the same current background image. When the option is off, retain independent Local image selection and rotation. Keep other Local settings independent.
