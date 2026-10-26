@@ -63,7 +63,7 @@ test('selection is read-only, global, revision-aware and durable across reload a
     await expect(a.page.locator('#dashboard-ha-devices')).toContainText('Temperature: 20.00 °C'); await expect(a.page.locator('#dashboard-ha-devices')).toContainText('Battery: Unknown'); await expect(a.page.locator('#dashboard-ha-devices')).toContainText('Humidity: Unavailable');
     await expect(a.page.locator('#dashboard-ha-devices')).toContainText('No supported sensor readings.'); await expect(a.page.locator('#dashboard-ha-devices')).toContainText('Device disabled.'); await expect(a.page.locator('#dashboard-ha-devices button')).toHaveCount(0);
     await expect(a.page.locator('#dashboard-ha-devices')).not.toContainText('Device 1'); await poll(b.page); await expect(b.page.locator('#dashboard-ha-devices')).toContainText('Device 0');
-    await a.page.getByRole('tab', { name: 'General', exact: true }).click(); await a.page.getByLabel('Overall scale', { exact: true }).fill('1.2'); await save(a.page);
+    await a.page.getByRole('tab', { name: 'Time', exact: true }).click(); await a.page.getByLabel('Clock scale', { exact: true }).fill('1.2'); await save(a.page);
     expect(env.store.getDashboardPreferences().preferences.homeAssistantDeviceSelections).toEqual([env.ids[0], env.ids[2], env.ids[3]].sort());
     expect(await a.page.evaluate(() => Object.values(localStorage).join(''))).not.toMatch(/private-token|replacement-token|controlToken|private-0/);
     await a.page.reload(); await expect(a.page.locator('#dashboard-ha-devices')).toContainText('Device 0'); await env.restart(); await b.page.reload(); await expect(b.page.locator('#dashboard-ha-devices')).toContainText('Device 0'); expect(env.sent).toBe(0);

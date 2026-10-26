@@ -2,9 +2,36 @@ import { test, expect } from '@playwright/test';
 import { settingsEnvironment, scopeClient } from './settings-environment.js';
 import { CATEGORY_IDS, categoryScopes } from '../public/dashboard-settings-categories.js';
 import { categoryTab, saveCategory, setCategoryScope } from './category-settings.js';
+import { normalizeDashboardPreferences } from '../public/dashboard-helpers.js';
+import { defaultWidgetLayout, initialWidgetProfile } from '../public/dashboard-layout.js';
 
 const image = page => page.locator('#photos .photo-layer > img').last();
 async function open(page, id = 'general') { await page.locator('#open-settings').click(); await categoryTab(page, id); }
+
+for (const mode of ['local', 'global']) test(`General removes Information layout controls and preserves ${mode} values through saves and direct editing`, async ({ browser }) => {
+  const env = await settingsEnvironment(); const context = await browser.newContext();
+  const widgetLayout = { ...defaultWidgetLayout(), desktop: initialWidgetProfile('desktop', 'right'), mobile: initialWidgetProfile('mobile') };
+  const local = { schema: 1, revision: 2, preferences: normalizeDashboardPreferences({ position: 'right', scale: 1.7, color: '#123456', widgetLayout }), weatherLocation: null, followGlobalPhotos: false };
+  const initial = env.store.getDashboardPreferences(); env.store.saveDashboardPreferences({ ...initial.preferences, position: 'left', scale: 1.3, widgetLayout }, initial.revision);
+  const globalBefore = env.store.exportDashboardSettings();
+  await context.addInitScript(({ local, scopes }) => {
+    localStorage.setItem('dashboard.category-scopes.v1', JSON.stringify({ schema: 1, revision: 1, scopes })); localStorage.setItem('dashboard.local-settings.v1', JSON.stringify(local));
+  }, { local, scopes: { ...categoryScopes(), general: mode, time: 'global' } });
+  const page = await context.newPage();
+  try {
+    await page.goto(env.base); await open(page);
+    await expect(page.getByText('Information layout', { exact: true })).toHaveCount(0); await expect(page.locator('[name="position"], [name="scale"]')).toHaveCount(0);
+    await expect(page.locator('#settings-scope-general')).toHaveValue(mode); await expect(page.locator('#export-global-settings')).toBeEnabled(); await expect(page.locator('#global-settings-file')).toBeVisible();
+    const raw = async () => mode === 'local' ? page.evaluate(() => JSON.parse(localStorage.getItem('dashboard.local-settings.v1')).preferences) : env.store.getDashboardPreferences().preferences;
+    const before = await raw(); await page.locator('#reload-shared-preferences').click(); await expect(page.locator('#settings-status')).toContainText('General settings reloaded.'); await saveCategory(page); expect(await raw()).toEqual(before);
+    await setCategoryScope(page, 'general', mode === 'local' ? 'global' : 'local'); await setCategoryScope(page, 'general', mode); expect(await raw()).toEqual(before);
+    await page.locator('#close-settings').click(); await page.locator('#edit-layout').click(); await page.locator('#layout-toggle').click(); await page.locator('#layout-widget').selectOption('time'); await page.locator('#layout-x').fill('20'); await page.locator('#layout-x').press('Tab'); await page.locator('#layout-save').click(); await expect(page.locator('#layout-toolbar')).toBeHidden();
+    const after = await raw(); expect(after.widgetLayout.desktop).not.toEqual(before.widgetLayout.desktop); expect(after.widgetLayout.mobile).toEqual(before.widgetLayout.mobile); expect({ ...after, widgetLayout: before.widgetLayout }).toEqual(before);
+    if (mode === 'local') expect(env.store.exportDashboardSettings()).toEqual(globalBefore);
+    else expect(await page.evaluate(() => JSON.parse(localStorage.getItem('dashboard.local-settings.v1')))).toEqual(local);
+    await open(page); await expect(page.locator('[name="position"], [name="scale"]')).toHaveCount(0);
+  } finally { await context.close(); await env.close(); }
+});
 
 test('mixed Time and Weather sources persist independently and category saves preserve other drafts and raw stores', async ({ browser }) => {
   const env = await settingsEnvironment(); const a = await scopeClient(browser, env); const b = await scopeClient(browser, env);
@@ -20,7 +47,7 @@ test('mixed Time and Weather sources persist independently and category saves pr
     await a.page.locator('#reload-shared-preferences').click(); await a.page.locator('[name="temperature"]').selectOption('fahrenheit'); await saveCategory(a.page);
     expect(env.store.getDashboardPreferences().preferences.temperature).toBe(before.preferences.temperature); expect(env.store.getDashboardPreferences().preferences.color).toBe(before.preferences.color);
     await categoryTab(a.page, 'time'); await a.page.locator('[name="timezone"]').fill('bad zone');
-    await categoryTab(a.page, 'general'); await a.page.locator('[name="scale"]').fill('1.3'); await saveCategory(a.page);
+    await categoryTab(a.page, 'calendar'); await a.page.locator('[name="calendarScale"]').fill('1.3'); await saveCategory(a.page);
     await categoryTab(a.page, 'time'); await expect(a.page.locator('[name="timezone"]')).toHaveValue('bad zone'); await a.page.locator('#close-settings').click();
     await a.page.reload(); await open(a.page, 'images'); await expect(a.page.locator('[name="color"]')).toHaveValue('#123456'); await expect(a.page.locator('#settings-scope-images')).toHaveValue('local');
     await categoryTab(a.page, 'time'); await expect(a.page.locator('#settings-scope-time')).toHaveValue('global'); await expect(a.page.locator('[name="timezone"]')).toHaveValue('Asia/Tokyo');

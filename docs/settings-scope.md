@@ -16,7 +16,7 @@ Fresh profiles default every category to Local. Without a new category map, a va
 
 ## Category ownership
 
-- General: position, overall scale, and both Desktop/Mobile widget layouts, including geometry and layer order. Direct layout editing follows General scope.
+- General: retained position/overall scale values and both Desktop/Mobile widget layouts, including geometry and layer order. Direct layout editing follows General scope. Position and Overall scale no longer have controls in Settings; saved values and transfer compatibility remain unchanged.
 - Time: clock visibility/scales, timezone, date style, 12-hour format, seconds, and fullscreen hiding. Effective Time timezone/format also governs weather/calendar timestamps, regardless of their scopes.
 - Weather: visibility/scales, hourly/daily forecast display, temperature/wind/precipitation units, fullscreen hiding, and saved city.
 - Calendar: visibility/scales and fullscreen hiding. Calendar connection data remains a shared server resource.

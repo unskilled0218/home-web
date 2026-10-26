@@ -17,6 +17,8 @@ Editing happens directly on the dashboard at its normal fitted size. **Save**, *
 
 Real widgets remain inert whether the panel is open or closed: bookmarks cannot navigate and device actions cannot run by pointer or keyboard. An already pending Wake may finish normally. Editing frames contain only labels, move/resize handles, and layer buttons, never copied actions or private content. Settings and direct editing cannot overlap; Save or Cancel before opening Settings. No layout editor remains in Settings.
 
+Settings → General no longer contains Information layout's Position and Overall scale controls. Existing saved values still affect Automatic presentation and remain in settings transfers; direct editing retains its existing geometry and layer controls. General's scope selector still chooses the Local or Global layout store.
+
 An **Automatic** profile shows a temporary deterministic editing template. Entry, selection, a no-op gesture, or no-op Save does not turn it into Custom. Moving/resizing or changing layers creates a local Custom draft only if geometry/order actually changes. Explicitly selecting **Custom** also creates a draft. The live dashboard previews unsaved changes locally; other browsers do not see them until a successful Save.
 
 ## Position and size

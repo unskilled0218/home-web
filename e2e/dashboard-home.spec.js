@@ -154,27 +154,27 @@ test('home initializes the photo dashboard without widget requests and handles u
 });
 
 test('existing preferences load at home and edits survive reload and legacy redirects', async ({ page }) => {
-  await seedPreferences(page, { position: 'right', timezone: 'UTC', timeVisible: false, color: '#123456' });
+  await seedPreferences(page, { position: 'right', scale: 1.3, timezone: 'UTC', timeVisible: false, color: '#123456' });
   await page.goto('/');
   await expect(page.locator('#information')).toHaveClass('right');
   await expect(page.locator('#clock')).toBeHidden();
   await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(18, 52, 86)');
   await page.locator('#open-settings').click();
-  await page.locator('[name="position"]').selectOption('left');
+  await expect(page.locator('[name="position"], [name="scale"]')).toHaveCount(0);
   await savePreferences(page);
   await displayToggle(page, 'timeVisible', true);
   await savePreferences(page);
   const saved = await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).preferences, settingsKey);
-  expect(saved.position).toBe('left');
+  expect(saved.position).toBe('right'); expect(saved.scale).toBe(1.3);
   expect(saved.timeVisible).toBe(true);
   expect(saved.color).toBe('#123456');
   await page.reload();
   await expect(page.locator('#clock')).toBeVisible();
-  await expect(page.locator('#information')).not.toHaveClass('right');
+  await expect(page.locator('#information')).toHaveClass('right');
   for (const route of ['/', '/dashboard', '/dashboard/', '/dashboard.html']) {
     await page.goto(route);
     await expect(page).toHaveURL(/\/$/);
-    await expect(page.locator('#information')).not.toHaveClass('right');
+    await expect(page.locator('#information')).toHaveClass('right');
     await expect(page.locator('#clock')).toBeVisible();
     expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).preferences, settingsKey)).toEqual(saved);
   }
@@ -336,8 +336,8 @@ test('fractional stored mobile scales remain valid when saving an unrelated pref
   await page.goto('/'); await page.locator('#open-settings').click();
   const valid = await page.locator('[name^="mobile"][type="number"]').evaluateAll((inputs) => inputs.map((input) => ({ value: input.valueAsNumber, valid: input.validity.valid, form: input.form.id })));
   expect(valid).toEqual([{ value: 1.3, valid: true, form: 'preferences' }, { value: 0.6, valid: true, form: 'preferences' }, { value: 1.1, valid: true, form: 'preferences' }]);
-  await page.getByRole('combobox', { name: 'Position', exact: true }).selectOption('right'); await savePreferences(page);
-  expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).preferences, settingsKey)).toMatchObject({ position: 'right', mobileTimeScale: 1.3, mobileWeatherScale: 0.6, mobileCalendarScale: 1.1 });
+  await categoryTab(page, 'images'); await page.getByLabel('Opacity', { exact: true }).fill('0.5'); await savePreferences(page);
+  expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).preferences, settingsKey)).toMatchObject({ opacity: 0.5, mobileTimeScale: 1.3, mobileWeatherScale: 0.6, mobileCalendarScale: 1.1 });
 });
 
 test('invalid mobile scales block only their category while another category can save', async ({ page }) => {
@@ -518,7 +518,7 @@ test('a failed bookmark folder preserves its siblings and retry does not reload 
 
 test('Linkwarden connection controls stay independent from display drafts and never save the access token', async ({ page }) => {
   const mock = await mockBookmarks(page); await page.goto('/'); await expect(page.getByRole('link', { name: 'Root bookmark', exact: true })).toBeVisible();
-  await page.locator('#open-settings').click(); await page.getByLabel('Overall scale', { exact: true }).fill('0.1'); await page.getByRole('tab', { name: 'Bookmarks', exact: true }).click();
+  await page.locator('#open-settings').click(); await categoryTab(page, 'time'); await page.getByLabel('Clock scale', { exact: true }).fill('0.1'); await page.getByRole('tab', { name: 'Bookmarks', exact: true }).click();
   await expect(page.getByLabel('Linkwarden access token', { exact: true })).toHaveValue(''); await expect(page.getByLabel('Linkwarden URL', { exact: true })).toHaveValue('https://linkwarden.test');
   await page.getByLabel('Linkwarden access token', { exact: true }).fill('private-test-token'); await page.getByRole('button', { name: 'Connect Linkwarden', exact: true }).click();
   await expect(page.locator('#linkwarden-settings-status')).toHaveText('Linkwarden connected.'); await expect(page.getByLabel('Linkwarden access token', { exact: true })).toHaveValue('');
@@ -526,7 +526,7 @@ test('Linkwarden connection controls stay independent from display drafts and ne
   await page.getByRole('button', { name: 'Connect Linkwarden', exact: true }).click(); await expect.poll(() => mock.requests.mutations.length).toBe(2); expect(mock.requests.mutations[1].accessToken).toBe('');
   page.once('dialog', (dialog) => dialog.accept()); await page.getByRole('button', { name: 'Disconnect Linkwarden', exact: true }).click(); await expect(page.locator('#linkwarden-settings-status')).toHaveText('Linkwarden disconnected.');
   await expect(page.locator('#bookmark-tree a')).toHaveCount(0); await expect(page.getByRole('button', { name: 'Disconnect Linkwarden', exact: true })).toBeDisabled();
-  await page.getByRole('tab', { name: 'General', exact: true }).click(); await expect(page.getByLabel('Overall scale', { exact: true })).toHaveValue('0.1');
+  await page.getByRole('tab', { name: 'Time', exact: true }).click(); await expect(page.getByLabel('Clock scale', { exact: true })).toHaveValue('0.1');
 });
 
 for (const width of [390, 1200]) test(`fullscreen bookmark hiding releases space and restores disclosure state at ${width}px`, async ({ page }) => {
@@ -661,24 +661,24 @@ test('tab switches retain drafts and category saves exclude hidden panels and se
   await page.goto('/');
   await page.locator('#open-settings').click();
   const original = await page.evaluate((key) => localStorage.getItem(key), settingsKey);
-  await page.getByRole('combobox', { name: 'Position', exact: true }).selectOption('right');
-  await page.getByLabel('Overall scale', { exact: true }).fill('1.2');
+  await categoryTab(page, 'weather');
+  await page.getByLabel('Weather scale', { exact: true }).fill('1.2');
   await page.getByRole('tab', { name: 'Time', exact: true }).click();
   await page.getByLabel('Show seconds', { exact: true }).uncheck();
   await page.getByRole('tab', { name: 'Images', exact: true }).click();
   await page.getByLabel('Interval (seconds)', { exact: true }).fill('90');
   await page.getByRole('tab', { name: 'Time', exact: true }).click();
   await expect(page.getByLabel('Show seconds', { exact: true })).not.toBeChecked();
-  await page.getByRole('tab', { name: 'General', exact: true }).click();
-  await expect(page.getByLabel('Overall scale', { exact: true })).toHaveValue('1.2');
+  await page.getByRole('tab', { name: 'Weather', exact: true }).click();
+  await expect(page.getByLabel('Weather scale', { exact: true })).toHaveValue('1.2');
   expect(await page.evaluate((key) => localStorage.getItem(key), settingsKey)).toBe(original);
   await savePreferences(page);
   const saved = await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).preferences, settingsKey);
-  expect(saved).toMatchObject({ position: 'right', scale: 1.2, seconds: true, interval: 60 });
+  expect(saved).toMatchObject({ position: 'left', scale: 1, weatherScale: 1.2, seconds: true, interval: 60 });
   expect(serviceMutations).toEqual([]);
   await page.reload();
   await page.locator('#open-settings').click();
-  await expect(page.getByLabel('Overall scale', { exact: true })).toHaveValue('1.2');
+  await categoryTab(page, 'weather'); await expect(page.getByLabel('Weather scale', { exact: true })).toHaveValue('1.2');
   await page.getByRole('tab', { name: 'Time', exact: true }).click();
   await expect(page.getByLabel('Show seconds', { exact: true })).toBeChecked();
   await page.getByRole('tab', { name: 'Images', exact: true }).click();
@@ -689,23 +689,23 @@ test('saving validates only the active category without losing invalid drafts el
   await page.goto('/');
   await page.locator('#open-settings').click();
   const original = await page.evaluate((key) => localStorage.getItem(key), settingsKey);
-  await page.getByLabel('Overall scale', { exact: true }).fill('0.1');
+  await categoryTab(page, 'weather'); await page.getByLabel('Weather scale', { exact: true }).fill('0.1');
   await page.getByRole('tab', { name: 'Time', exact: true }).click();
   await page.getByLabel('Timezone', { exact: true }).fill('');
   await page.getByRole('tab', { name: 'Images', exact: true }).click();
   await page.getByLabel('Interval (seconds)', { exact: true }).fill('120');
-  await savePreferences(page); const save = page.locator('#save-preferences'); await categoryTab(page, 'general'); await save.click();
-  await expect(page.getByRole('tab', { name: 'General', exact: true })).toHaveAttribute('aria-selected', 'true');
-  await expect(page.getByLabel('Overall scale', { exact: true })).toBeFocused();
+  await savePreferences(page); const save = page.locator('#save-preferences'); await categoryTab(page, 'weather'); await save.click();
+  await expect(page.getByRole('tab', { name: 'Weather', exact: true })).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByLabel('Weather scale', { exact: true })).toBeFocused();
   expect(await page.evaluate((key) => localStorage.getItem(key), settingsKey)).not.toBe(original);
-  await page.getByLabel('Overall scale', { exact: true }).fill('1.3');
-  await page.locator('#reload-shared-preferences').click(); await expect(page.locator('#settings-status')).toContainText('General settings reloaded.'); await page.getByLabel('Overall scale', { exact: true }).fill('1.3'); await savePreferences(page); await categoryTab(page, 'time'); await save.click();
+  await page.getByLabel('Weather scale', { exact: true }).fill('1.3');
+  await page.locator('#reload-shared-preferences').click(); await expect(page.locator('#settings-status')).toContainText('Weather settings reloaded.'); await page.getByLabel('Weather scale', { exact: true }).fill('1.3'); await savePreferences(page); await categoryTab(page, 'time'); await save.click();
   await expect(page.getByRole('tab', { name: 'Time', exact: true })).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByLabel('Timezone', { exact: true })).toBeFocused();
   expect(await page.evaluate((key) => localStorage.getItem(key), settingsKey)).not.toBe(original);
   await page.locator('#reload-shared-preferences').click(); await expect(page.locator('#settings-status')).toContainText('Time settings reloaded.'); await page.getByLabel('Timezone', { exact: true }).fill('UTC');
   await savePreferences(page);
-  expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).preferences, settingsKey)).toMatchObject({ scale: 1.3, timezone: 'UTC', interval: 120 });
+  expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).preferences, settingsKey)).toMatchObject({ scale: 1, weatherScale: 1.3, timezone: 'UTC', interval: 120 });
 });
 
 test('native form ownership isolates display preferences from search and calendar fields', async ({ page }) => {
@@ -721,7 +721,8 @@ test('native form ownership isolates display preferences from search and calenda
       nested: document.querySelectorAll('form form').length
     };
   });
-  for (const name of ['position', 'scale', 'timezone', 'temperature', 'calendarVisible', 'interval']) expect(ownership.names).toContain(name);
+  for (const name of ['timezone', 'temperature', 'calendarVisible', 'interval']) expect(ownership.names).toContain(name);
+  for (const name of ['position', 'scale']) expect(ownership.names).not.toContain(name);
   expect(ownership.names).not.toContain('serverUrl');
   expect(ownership.names).not.toContain('password');
   expect(ownership).toMatchObject({ search: 'location-search', calendar: 'calendar-connection', password: 'calendar-connection', save: 'preferences', nested: 0 });
@@ -748,7 +749,7 @@ test('Clear results preserves the selected weather location, displayed weather, 
   });
   await page.goto('/');
   await page.locator('#open-settings').click();
-  await page.getByLabel('Overall scale', { exact: true }).fill('1.4');
+  await categoryTab(page, 'time'); await page.getByLabel('Clock scale', { exact: true }).fill('1.4');
   await page.getByRole('tab', { name: 'Weather', exact: true }).click();
   await page.getByLabel('City or place', { exact: true }).fill('London');
   await page.getByRole('button', { name: 'Search', exact: true }).click();
@@ -773,8 +774,8 @@ test('Clear results preserves the selected weather location, displayed weather, 
   expect(await page.evaluate(() => window.preferenceWrites)).toBe(writes);
   expect(weatherRequests).toEqual(requests);
   await expect(page.locator('#settings-status')).toHaveText(preferenceStatus);
-  await page.getByRole('tab', { name: 'General', exact: true }).click();
-  await expect(page.getByLabel('Overall scale', { exact: true })).toHaveValue('1.4');
+  await page.getByRole('tab', { name: 'Time', exact: true }).click();
+  await expect(page.getByLabel('Clock scale', { exact: true })).toHaveValue('1.4');
   await page.reload();
   expect(await page.evaluate((key) => localStorage.getItem(key), settingsKey)).toBe(stored);
   await expect(page.locator('#current-weather-values .temperature')).toHaveText('12 °C');
@@ -991,11 +992,11 @@ test('Settings reloads another browser location and polling preserves open prefe
   const mock = await mockWeather(page);
   await page.goto('/');
   await page.locator('#open-settings').click();
-  await page.getByLabel('Overall scale', { exact: true }).fill('1.4');
+  await categoryTab(page, 'time'); await page.getByLabel('Clock scale', { exact: true }).fill('1.4');
   await expect.poll(() => mock.requests.snapshot).toBe(1);
   mock.setState({ revision: 2, location: { label: 'Paris', latitude: 48.85, longitude: 2.35 }, forecast: normalizeForecast(rawForecast(21)) });
   await page.clock.runFor(60000);
-  await expect(page.getByLabel('Overall scale', { exact: true })).toHaveValue('1.4');
+  await expect(page.getByLabel('Clock scale', { exact: true })).toHaveValue('1.4');
   await page.getByRole('tab', { name: 'Weather', exact: true }).click();
   await expect(page.locator('#current-location')).toHaveText('Current location: Paris');
   await page.locator('#close-settings').click();
@@ -1070,8 +1071,8 @@ test('Calendar connects and disconnects using only credentials from its independ
   await page.getByLabel('Baikal server URL', { exact: true }).fill('https://baikal.example.test');
   await page.getByLabel('Username', { exact: true }).fill('calendar');
   await page.getByLabel('Password', { exact: true }).fill('test-password');
-  await page.getByRole('tab', { name: 'General', exact: true }).click();
-  await page.getByLabel('Overall scale', { exact: true }).fill('0.1');
+  await page.getByRole('tab', { name: 'Time', exact: true }).click();
+  await page.getByLabel('Clock scale', { exact: true }).fill('0.1');
   await page.getByRole('tab', { name: 'Calendar', exact: true }).click();
   await expect(page.getByLabel('Password', { exact: true })).toHaveValue('test-password');
   await page.getByRole('button', { name: 'Connect calendar', exact: true }).click();

@@ -69,17 +69,13 @@
         </div>
         <div class="settings-panels">
           <section id="settings-panel-general" role="tabpanel" aria-labelledby="settings-tab-general" tabindex="0">
-            <h3>General</h3><p class="settings-description">Position and overall scale apply to desktop. Choose which sections appear over the background without changing connections or selections.</p>
+            <h3>General</h3><p class="settings-description">Choose the scope for dashboard layout editing, transfer Global settings, or recover category choices. Use Edit layout on the dashboard to arrange widgets.</p>
             <fieldset id="settings-scope-controls"><legend>Global settings transfer</legend>
               <p>Export always reads Global values. Import requires General Global and replaces all Global categories, not just General. Local values and category choices stay unchanged; Local image followers track the shared slideshow.</p>
               <div class="integration-actions"><button id="export-global-settings" type="button">Export global settings</button><label>Global settings file<input id="global-settings-file" type="file" accept="application/json,.json"></label><button id="import-global-settings" type="button" disabled>Import global settings</button></div>
               <p id="settings-transfer-status" role="status"></p>
             </fieldset>
             <section id="category-scope-recovery" hidden><p id="category-scope-error" role="alert"></p><button id="reset-category-scopes" type="button">Reset category scopes to Local</button><p id="category-scope-recovery-status" role="status"></p></section>
-            <fieldset><legend>Information layout</legend>
-              <label>Position<select name="position" form="preferences"><option value="left">Lower left</option><option value="right">Lower right</option></select></label>
-              <label>Overall scale<input name="scale" form="preferences" type="number" min="0.5" max="2" step="0.1"></label>
-            </fieldset>
           </section>
           <section id="settings-panel-time" role="tabpanel" aria-labelledby="settings-tab-time" tabindex="0" hidden>
             <h3>Time</h3><p class="settings-description">Choose how your clock looks. Timezone also applies to weather and calendar times.</p>

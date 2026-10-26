@@ -122,9 +122,8 @@ test('Settings links eight accessible tabs to panels with General initially sele
     assert.equal(/\shidden/.test(panel), !selected, `${name} initial visibility`);
   }
   const general = html.slice(html.indexOf('<section id="settings-panel-general"'), html.indexOf('<section id="settings-panel-time"'));
-  assert.match(general, /Information layout/);
-  assert.match(general, /name="position"/);
-  assert.match(general, /name="scale"/);
+  assert.doesNotMatch(html, /Information layout|name="position"|name="scale"/);
+  for (const id of ['export-global-settings', 'import-global-settings', 'reset-category-scopes']) assert.match(general, new RegExp(`id="${id}"`));
 });
 
 test('Settings associates all preferences with one form and keeps service forms separate', async (context) => {
@@ -133,7 +132,7 @@ test('Settings associates all preferences with one form and keeps service forms 
   assert.match(html, /<form id="preferences" novalidate hidden><\/form>/);
   const controls = [...html.matchAll(/<(?:input|select)\b[^>]*form="preferences"[^>]*>/g)];
   const names = controls.map((control) => /name="([^"]+)"/.exec(control[0])?.[1]);
-  assert.deepEqual(names.sort(), [...Object.keys(normalizeSettings()).filter((name) => !['location', 'homeAssistantDeviceSelections', 'bookmarkLinkSelections', 'widgetLayout'].includes(name)), 'followGlobalPhotos'].sort());
+  assert.deepEqual(names.sort(), [...Object.keys(normalizeSettings()).filter((name) => !['location', 'position', 'scale', 'homeAssistantDeviceSelections', 'bookmarkLinkSelections', 'widgetLayout'].includes(name)), 'followGlobalPhotos'].sort());
   assert.equal(Object.hasOwn(normalizeSettings(), 'followGlobalPhotos'), false, 'Local playback choice is not a shared preference');
   assert.doesNotMatch(html, /id="widget-layout-editor"|id="layout-preview"/);
   assert.match(html, /id="layout-toolbar"/);

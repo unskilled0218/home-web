@@ -383,11 +383,11 @@ test('unrelated Settings clean refresh and dirty conflicts preserve complete rem
     env.store.saveDashboardPreferences({ ...remote.preferences, widgetLayout: changed }, remote.revision); await page.clock.fastForward(5000);
     // Opening Settings may still own an earlier GET; wait for the actual new confirmation before dirtying the form.
     await expect.poll(async () => { await page.clock.runFor(500); return page.evaluate(() => JSON.parse(localStorage.getItem('dashboard.shared-settings.v1')).revision); }).toBe(2);
-    await page.getByLabel('Overall scale', { exact: true }).fill('1.1'); await saveCategory(page);
+    await page.locator('#settings-tab-time').click(); await page.getByLabel('Clock scale', { exact: true }).fill('1.1'); await saveCategory(page);
     expect(writes[0].preferences.widgetLayout).toEqual(changed); expect(writes[0].revision).toBe(2);
-    await page.getByLabel('Overall scale', { exact: true }).fill('1.2'); await page.locator('#settings-tab-home-assistant').click(); await page.locator('#home-assistant-url').fill('https://unsaved.test');
+    await page.getByLabel('Clock scale', { exact: true }).fill('1.2'); await page.locator('#settings-tab-home-assistant').click(); await page.locator('#home-assistant-url').fill('https://unsaved.test');
     const before = env.store.getDashboardPreferences(); const latest = layout(); latest.mobile = null; env.store.saveDashboardPreferences({ ...before.preferences, widgetLayout: latest }, before.revision); await page.clock.fastForward(5000);
-    await page.locator('#settings-tab-general').click(); await page.locator('#save-preferences').click(); await expect(page.locator('#settings-status')).toContainText('revision changed');
+    await page.locator('#settings-tab-time').click(); await page.locator('#save-preferences').click(); await expect(page.locator('#settings-status')).toContainText('revision changed');
     expect(writes).toHaveLength(1); expect(storedLayout(env)).toEqual(latest);
     await page.locator('#settings-tab-home-assistant').click(); await expect(page.locator('#home-assistant-url')).toHaveValue('https://unsaved.test'); await page.locator('#close-settings').click();
   } finally { await page.goto('about:blank'); await env.close(); }
@@ -504,10 +504,10 @@ test('custom arrangement saves geometry/layers and reset/cancel preserve indepen
     await expect(page.locator('#widget-surface')).toBeVisible(); await expect(page.locator('#clock')).toHaveCSS('z-index', '6');
     const first = structuredClone(storedLayout(env)); expect(first.mobile).toBeNull();
     const clock = await page.locator('#clock').evaluate(node => ({ width: node.style.width, height: node.style.height })); expect(clock).toEqual({ width: '210px', height: '130px' });
-    await page.locator('#open-settings').click(); await page.getByLabel('Overall scale', { exact: true }).fill('1.2');
+    await page.locator('#open-settings').click(); await page.locator('#settings-tab-time').click(); await page.getByLabel('Clock scale', { exact: true }).fill('1.2');
     await expect(page.locator('#edit-layout')).toBeDisabled(); await saveCategory(page); await page.locator('#close-settings').click(); await open(page);
     await page.locator('#layout-reset').click(); await page.locator('#layout-cancel').click();
-    await page.locator('#open-settings').click(); await expect(page.getByLabel('Overall scale', { exact: true })).toHaveValue('1.2'); await page.locator('#close-settings').click();
+    await page.locator('#open-settings').click(); await page.locator('#settings-tab-time').click(); await expect(page.getByLabel('Clock scale', { exact: true })).toHaveValue('1.2'); await page.locator('#close-settings').click();
     expect(storedLayout(env)).toEqual(first);
     await expect(page.locator('#clock')).toHaveCSS('font-size', '19.2px'); await expect(page.locator('#bookmarks')).toHaveCSS('font-size', '16px');
     await open(page); await page.locator('#layout-profile').selectOption('mobile'); await page.locator('#layout-arrangement').selectOption('custom'); await save(page);

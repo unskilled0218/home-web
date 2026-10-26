@@ -33,7 +33,9 @@ test('invalid, oversized and stale files preserve settings and drafts; Local imp
     await a.page.locator('#global-settings-file').setInputFiles(file(before.settings)); await expect(a.page.locator('#import-global-settings')).toBeEnabled();
     env.store.saveDashboardPreferences({ ...before.settings.preferences, color: '#abcdef' }, before.preferencesRevision);
     await a.page.locator('#import-global-settings').click(); await expect(a.page.locator('#settings-transfer-status')).toContainText('changed'); expect(await a.page.locator('#global-settings-file').inputValue()).toContain('global.json'); expect(env.store.getDashboardPreferences().preferences.color).toBe('#abcdef');
-    await a.page.locator('[name="scale"]').fill('1.7'); await expect(a.page.locator('#import-global-settings')).toBeDisabled(); await a.page.locator('#settings-scope-general').selectOption('local'); await expect(a.page.locator('#settings-status')).toContainText('discard'); await expect(a.page.locator('[name="scale"]')).toHaveValue('1.7');
+    await a.page.locator('#settings-tab-time').click(); await a.page.locator('[name="timeScale"]').fill('1.7'); await a.page.locator('#settings-tab-general').click(); await expect(a.page.locator('#import-global-settings')).toBeDisabled();
+    await a.page.locator('#settings-tab-time').click(); await a.page.locator('#settings-scope-time').selectOption('global'); await expect(a.page.locator('#settings-status')).toContainText('discard'); await expect(a.page.locator('[name="timeScale"]')).toHaveValue('1.7');
+    await a.page.locator('#settings-tab-general').click(); await expect(a.page.locator('#settings-scope-general')).toHaveValue('global');
     await a.page.setViewportSize({ width: 390, height: 700 }); await expect(a.page.locator('#close-settings')).toBeInViewport();
   } finally { await a.close(); await env.close(); }
 });

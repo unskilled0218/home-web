@@ -6,11 +6,13 @@ import { CATEGORY_SCOPES_KEY, SCOPE_KEY, LOCAL_SETTINGS_KEY, validateLocalSettin
 import { CATEGORY_IDS, categoryScopes, categoryPreferences } from '../public/dashboard-settings-categories.js';
 import { slideshowClock } from './fixtures/photo-slideshow.js';
 import { deferred, tick } from './fixtures/lifecycle.js';
+import { defaultWidgetLayout, initialWidgetProfile } from '../public/dashboard-layout.js';
+import { createLayoutSession } from '../public/dashboard-layout-session.js';
 
 const shared = (revision = 1, extra = {}) => ({ initialized: revision > 0, revision, preferences: normalizeDashboardPreferences({ color: '#abcdef', timezone: 'Europe/London' }), integrations: { weather: { available: true, revision: 0, location: null }, calendar: { available: false }, linkwarden: { available: false } }, ...extra });
 const mapRecord = (scopes = categoryScopes(), revision = 1) => JSON.stringify({ schema: 1, revision, scopes });
-function setup(t, { values = new Map(), fetchImpl, broken = false } = {}) {
-  const calls = []; const applied = []; const clock = slideshowClock(); let snapshot = shared();
+function setup(t, { values = new Map(), fetchImpl, broken = false, initialSnapshot = shared() } = {}) {
+  const calls = []; const applied = []; const clock = slideshowClock(); let snapshot = initialSnapshot;
   const storage = { getItem: key => values.get(key) ?? null, setItem(key, value) { if (broken) throw new Error('quota'); values.set(key, value); }, removeItem: key => values.delete(key) };
   const client = createSettingsScope({ storage, ...clock, onSnapshot: value => applied.push(value), fetchImpl: async (url, options = {}) => {
     calls.push({ url, options }); if (fetchImpl) return fetchImpl(url, options);
@@ -21,6 +23,24 @@ function setup(t, { values = new Map(), fetchImpl, broken = false } = {}) {
   t.after(() => client.dispose()); return { client, values, applied, calls, storage, clock, writes: () => calls.filter(call => call.options.method && call.options.method !== 'GET') };
 }
 const save = (env, id, patch, options) => env.client.saveCategory(id, patch, env.client.getCategoryState(id).saveToken, options);
+
+for (const mode of ['local', 'global']) test(`${mode} saves preserve absent General controls and layout saves patch only geometry`, async t => {
+  const widgetLayout = { ...defaultWidgetLayout(), desktop: initialWidgetProfile('desktop', 'right'), mobile: initialWidgetProfile('mobile') };
+  const preferences = normalizeDashboardPreferences({ position: 'right', scale: 1.7, widgetLayout, color: '#123456' });
+  const values = new Map([[CATEGORY_SCOPES_KEY, mapRecord({ ...categoryScopes(mode), weather: mode === 'local' ? 'global' : 'local' })], [LOCAL_SETTINGS_KEY, JSON.stringify({ schema: 1, revision: 3, preferences, weatherLocation: null, followGlobalPhotos: false })]]);
+  const env = setup(t, { values, initialSnapshot: shared(4, { preferences: { ...preferences, color: '#abcdef' } }) }); await env.client.start();
+  const raw = () => mode === 'local' ? JSON.parse(values.get(LOCAL_SETTINGS_KEY)).preferences : env.client.getTransferState().snapshot.preferences;
+  const before = structuredClone(raw());
+  await env.client.refresh(); await save(env, 'general', categoryPreferences('general', env.client.getCategoryState('general').snapshot.preferences));
+  assert.deepEqual(raw(), before, 'General without editable inputs preserves its captured baseline');
+  await save(env, 'time', { seconds: false });
+  assert.deepEqual(raw(), { ...before, seconds: false }, 'another category cannot reset retained General values');
+  const category = env.client.getCategoryState('general'); const session = createLayoutSession(); session.load(category, 'desktop'); session.layer('front', session.draft.desktop.items[0].id);
+  const payload = session.payload(); assert.deepEqual(Object.keys(payload.preferences), ['widgetLayout']);
+  await env.client.saveCategory('general', payload.preferences, payload.revision);
+  assert.deepEqual(raw(), { ...before, seconds: false, widgetLayout: payload.preferences.widgetLayout });
+  assert.deepEqual(raw().widgetLayout.mobile, before.widgetLayout.mobile);
+});
 
 test('fresh, legacy Local and legacy Global scope records seed all categories without migration writes', async t => {
   for (const mode of [null, 'local', 'global']) {

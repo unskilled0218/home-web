@@ -2,7 +2,7 @@
 
 A self-hosted photo dashboard with a clock, weather forecasts, an optional Baikal calendar, and Linkwarden bookmarks. Designed for a trusted local network.
 
-Version 0.17.41: [release notes](docs/releases/0.17.41.md). Choose Local or Global independently for each settings category, such as Global Time with Local Weather. Each Save targets only that category.
+Version 0.17.42: [release notes](docs/releases/0.17.42.md). General no longer shows Information layout controls. Saved settings and direct dashboard layout editing remain supported.
 
 - [dashboard](#dashboard)
   - [Quick start](#quick-start)
@@ -25,7 +25,7 @@ Enable photo backgrounds with `NFS_MOUNT_MODE=on`; the default is `off`. A confi
 
 ## Settings
 
-Use the **General**, **Time**, **Weather**, **Calendar**, **Bookmarks**, **Home Assistant**, **Wake-on-LAN**, and **Images** tabs to customize the dashboard. Each category defaults to Local for new browsers; its Global choice shares only that category. See [settings scope](docs/settings-scope.md), [global import/export](docs/settings-import-export.md), and [dashboard preferences](docs/dashboard.md). **Clear results** keeps the selected weather location.
+Use the **General**, **Time**, **Weather**, **Calendar**, **Bookmarks**, **Home Assistant**, **Wake-on-LAN**, and **Images** tabs to customize the dashboard. Each category defaults to Local for new browsers; its Global choice shares only that category. Arrange widgets with **Edit layout** on the dashboard. See [settings scope](docs/settings-scope.md), [global import/export](docs/settings-import-export.md), and [dashboard preferences](docs/dashboard.md). **Clear results** keeps the selected weather location.
 
 Weather shows current US AQI in both scopes. Server requests retain bounded dual-stack deadlines and honor Node's explicitly enabled environment proxy settings, including live `NO_PROXY` changes and `*.domain` bypass rules; see [weather behavior](docs/dashboard.md).
 
