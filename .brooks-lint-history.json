@@ -878,5 +878,16 @@
       "suggestion": 0
     },
     "scope": "Branch review: 75-bookmarks-ha-wol-scale vs main (26ec4d4...a256fad; 27 changed files)"
+  },
+  {
+    "date": "2026-10-26",
+    "mode": "Health Dashboard",
+    "score": 100,
+    "findings": {
+      "critical": 0,
+      "warning": 0,
+      "suggestion": 0
+    },
+    "scope": "Plan review: tasks/76-remove-general-scope-selector/2-plan.md at 5b0a1e3"
   }
 ]
