@@ -69,9 +69,9 @@
         </div>
         <div class="settings-panels">
           <section id="settings-panel-general" role="tabpanel" aria-labelledby="settings-tab-general" tabindex="0">
-            <h3>General</h3><p class="settings-description">Choose the scope for dashboard layout editing, transfer Global settings, or recover category choices. Use Edit layout on the dashboard to arrange widgets.</p>
+            <h3>General</h3><p class="settings-description">Transfer Global settings or recover category choices. Use Edit layout on the dashboard to arrange widgets; saved layout ownership stays unchanged.</p>
             <fieldset id="settings-scope-controls"><legend>Global settings transfer</legend>
-              <p>Export always reads Global values. Import requires General Global and replaces all Global categories, not just General. Local values and category choices stay unchanged; Local image followers track the shared slideshow.</p>
+              <p>Export always reads Global values. Choose a file to prepare Import, which replaces all Global categories, not just General. Local values and category choices stay unchanged; Local image followers track the shared slideshow. Use Reload to retry preparation or review a conflict before importing again.</p>
               <div class="integration-actions"><button id="export-global-settings" type="button">Export global settings</button><label>Global settings file<input id="global-settings-file" type="file" accept="application/json,.json"></label><button id="import-global-settings" type="button" disabled>Import global settings</button></div>
               <p id="settings-transfer-status" role="status"></p>
             </fieldset>

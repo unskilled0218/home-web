@@ -12,15 +12,15 @@ import { createLayoutSession } from '../public/dashboard-layout-session.js';
 const shared = (revision = 1, extra = {}) => ({ initialized: revision > 0, revision, preferences: normalizeDashboardPreferences({ color: '#abcdef', timezone: 'Europe/London' }), integrations: { weather: { available: true, revision: 0, location: null }, calendar: { available: false }, linkwarden: { available: false } }, ...extra });
 const mapRecord = (scopes = categoryScopes(), revision = 1) => JSON.stringify({ schema: 1, revision, scopes });
 function setup(t, { values = new Map(), fetchImpl, broken = false, initialSnapshot = shared() } = {}) {
-  const calls = []; const applied = []; const clock = slideshowClock(); let snapshot = initialSnapshot;
+  const calls = []; const applied = []; const states = []; const clock = slideshowClock(); let snapshot = initialSnapshot;
   const storage = { getItem: key => values.get(key) ?? null, setItem(key, value) { if (broken) throw new Error('quota'); values.set(key, value); }, removeItem: key => values.delete(key) };
-  const client = createSettingsScope({ storage, ...clock, onSnapshot: value => applied.push(value), fetchImpl: async (url, options = {}) => {
+  const client = createSettingsScope({ storage, ...clock, onSnapshot: value => applied.push(value), onState: value => states.push(value), fetchImpl: async (url, options = {}) => {
     calls.push({ url, options }); if (fetchImpl) return fetchImpl(url, options);
     if (url === '/api/dashboard/configuration') return Response.json({ calendar: { available: false }, linkwarden: { available: false } });
     if (options.method === 'PUT') { const body = JSON.parse(options.body); snapshot = shared(snapshot.revision + 1, { preferences: body.preferences }); }
     return Response.json(snapshot);
   } });
-  t.after(() => client.dispose()); return { client, values, applied, calls, storage, clock, writes: () => calls.filter(call => call.options.method && call.options.method !== 'GET') };
+  t.after(() => client.dispose()); return { client, values, applied, states, calls, storage, clock, writes: () => calls.filter(call => call.options.method && call.options.method !== 'GET') };
 }
 const save = (env, id, patch, options) => env.client.saveCategory(id, patch, env.client.getCategoryState(id).saveToken, options);
 
@@ -133,7 +133,7 @@ test('same-store saves stale dirty tokens but unrelated scope-only changes prese
 
 for (const [name, category, globalOnly] of [['local save', 'time', false], ['global save', 'time', true], ['layout', 'general', false], ['weather location', 'weather', false], ['calendar', 'calendar', true], ['linkwarden', 'bookmarks', true], ['home-assistant', 'home-assistant', true], ['wol', 'wol', true], ['import', 'general', true]]) test(`${name} rejects persisted scope changes before delayed storage events`, async t => {
   const initial = categoryScopes(globalOnly ? 'global' : 'local'); const values = new Map([[CATEGORY_SCOPES_KEY, mapRecord(initial)]]); const env = setup(t, { values }); await env.client.start();
-  const token = env.client.getCategoryState(category).saveToken; const before = env.writes().length;
+  const token = name === 'import' ? (await env.client.prepareTransfer()).saveToken : env.client.getCategoryState(category).saveToken; const before = env.writes().length;
   values.set(CATEGORY_SCOPES_KEY, mapRecord({ ...initial, [category]: globalOnly ? 'local' : 'global' }, 2));
   if (name.includes('save') || name === 'layout') await assert.rejects(env.client.saveCategory(category, {}, token), /source or revision changed/);
   else if (name === 'weather location') assert.throws(() => env.client.saveLocalLocation(null, token), /source or revision changed/);
@@ -212,12 +212,125 @@ test('recovery does not overwrite concurrent repair or claim successful persiste
 test('whole Global imports use raw revisions, preserve Local values, and reject concurrent writes', async t => {
   const result = deferred(); const values = new Map([[CATEGORY_SCOPES_KEY, mapRecord({ ...categoryScopes(), general: 'global' })]]);
   const env = setup(t, { values, fetchImpl: url => url.endsWith('/import') ? result.promise : Response.json(url === '/api/dashboard/configuration' ? { calendar: { available: false }, linkwarden: { available: false } } : shared()) }); await env.client.start();
-  await save(env, 'images', { color: '#123456' }, { followGlobalPhotos: false }); const raw = values.get(LOCAL_SETTINGS_KEY); const token = env.client.getTransferState().saveToken;
+  await save(env, 'images', { color: '#123456' }, { followGlobalPhotos: false }); const raw = values.get(LOCAL_SETTINGS_KEY); const token = (await env.client.prepareTransfer()).saveToken;
   const importing = env.client.importGlobal({ format: 'home-web.global-settings', version: 1, preferences: shared().preferences, weatherLocation: null }, { preferencesRevision: 1, weatherRevision: 0 }, token);
   await assert.rejects(save(env, 'general', { scale: 1.5 }), /pending/); await save(env, 'time', { seconds: false });
   result.resolve(Response.json({ snapshot: shared(2), weatherRevision: 1 })); await importing;
   assert.equal(env.client.getState().snapshot.preferences.color, '#123456'); assert.equal(env.client.getState().followGlobalPhotos, false);
   assert.equal(JSON.parse(raw).preferences.color, JSON.parse(values.get(LOCAL_SETTINGS_KEY)).preferences.color); assert.equal(env.client.getTransferState().snapshot.revision, 2);
+});
+
+for (const mode of ['local', 'global']) test(`transfer preparation with General ${mode} captures raw revisions without changing layout ownership`, async t => {
+  const local = { schema: 1, revision: 3, preferences: normalizeDashboardPreferences({ color: '#123456', timezone: 'Asia/Tokyo', widgetLayout: { ...defaultWidgetLayout(), desktop: initialWidgetProfile('desktop') } }), weatherLocation: { latitude: 35, longitude: 139, label: 'Tokyo' }, followGlobalPhotos: false };
+  const values = new Map([[CATEGORY_SCOPES_KEY, mapRecord({ ...categoryScopes(), general: mode })], [LOCAL_SETTINGS_KEY, JSON.stringify(local)]]);
+  const env = setup(t, { values }); await env.client.start(); const before = [...values]; const effective = env.client.getState().snapshot.preferences;
+  const baseline = await env.client.prepareTransfer(); assert.equal(baseline.snapshot.revision, 1); assert.equal(baseline.snapshot.integrations.weather.revision, 0);
+  assert.equal(baseline.snapshot.preferences.color, '#abcdef'); assert.deepEqual([...values], before); assert.deepEqual(env.client.getState().snapshot.preferences, effective);
+  assert.deepEqual(env.client.getState().weatherLocation, local.weatherLocation); assert.equal(env.client.getState().scopes.general, mode);
+  assert.equal(env.client.getTransferState().confirmed, true); assert.equal(env.writes().length, 0);
+});
+
+test('fresh all-Local preparation is one-shot and explicit import preserves Local layout/data and scope map', async t => {
+  const env = setup(t, { fetchImpl: (url, options) => Response.json(url.endsWith('/import') ? { snapshot: shared(2), weatherRevision: 1 } : url === '/api/dashboard/configuration' ? { calendar: { available: false }, linkwarden: { available: false } } : shared()) });
+  await env.client.start(); assert.equal(env.calls.filter(call => call.url === '/api/dashboard/settings').length, 0);
+  const baseline = await env.client.prepareTransfer(); const token = baseline.saveToken;
+  await save(env, 'general', { widgetLayout: { ...defaultWidgetLayout(), desktop: initialWidgetProfile('desktop') } });
+  const raw = [...env.values]; assert.equal(env.client.getTransferState().saveToken, token);
+  await env.client.importGlobal({ format: 'home-web.global-settings', version: 1, preferences: shared().preferences, weatherLocation: null }, { preferencesRevision: 1, weatherRevision: 0 }, token);
+  assert.equal(env.writes().length, 1); assert.deepEqual([...env.values].filter(([key]) => key !== 'dashboard.shared-settings.v1'), raw);
+  assert.deepEqual(env.client.getState().snapshot.preferences.widgetLayout.desktop, initialWidgetProfile('desktop'));
+  assert.equal(env.client.getState().scopes.general, 'local'); assert.equal(env.values.has(CATEGORY_SCOPES_KEY), false);
+  await env.clock.advance(15000); assert.equal(env.calls.filter(call => call.url === '/api/dashboard/settings').length, 1);
+  assert.equal(env.client.getTransferState().confirmed, false, 'successful imports consume the preparation token');
+});
+
+test('mixed transfer preparation shares the active reader and keeps captured revisions through later polls', async t => {
+  const waiting = deferred(); let reads = 0;
+  const env = setup(t, { values: new Map([[CATEGORY_SCOPES_KEY, mapRecord({ ...categoryScopes(), time: 'global' })]]), fetchImpl: url => url === '/api/dashboard/settings' ? (++reads === 1 ? waiting.promise : Response.json(shared(2))) : Response.json({ calendar: { available: false }, linkwarden: { available: false } }) });
+  const starting = env.client.start(); const preparing = env.client.prepareTransfer(); waiting.resolve(Response.json(shared())); await starting; const captured = await preparing;
+  assert.equal(reads, 1); await env.clock.advance(5000); assert.equal(reads, 2);
+  assert.equal(env.client.getTransferState().snapshot.revision, captured.snapshot.revision); assert.equal(env.client.getTransferState().saveToken, captured.saveToken);
+  assert.equal(env.client.getCategoryState('time').revision, 2, 'ordinary Global categories keep their current revision');
+});
+
+test('superseded or disposed one-shot preparation cannot publish authority and cancels transport', async t => {
+  const first = deferred(); let reads = 0; let firstSignal;
+  const env = setup(t, { fetchImpl: (url, options) => {
+    if (url !== '/api/dashboard/settings') return Response.json({ calendar: { available: false }, linkwarden: { available: false } });
+    if (++reads === 1) { firstSignal = options.signal; return first.promise; } return Response.json(shared(2));
+  } }); await env.client.start();
+  const old = env.client.prepareTransfer(); const rejected = assert.rejects(old, /canceled/); const current = await env.client.prepareTransfer(); await rejected;
+  assert.equal(firstSignal.aborted, true); first.resolve(Response.json(shared())); await tick(); assert.equal(env.client.getTransferState().saveToken, current.saveToken);
+  env.client.dispose(); assert.equal(env.client.getTransferState().confirmed, false); await assert.rejects(env.client.prepareTransfer(), /disposed/);
+});
+
+for (const problem of ['offline', 'invalid', 'weather unavailable', 'corrupt map', 'unreadable map', 'map changed']) test(`transfer preparation rejects ${problem} without writes`, async t => {
+  const values = new Map(); let env;
+  env = setup(t, { values, fetchImpl: url => {
+    if (url !== '/api/dashboard/settings') return Response.json({ calendar: { available: false }, linkwarden: { available: false } });
+    if (problem === 'offline') throw Error('offline');
+    if (problem === 'map changed') values.set(CATEGORY_SCOPES_KEY, mapRecord({ ...categoryScopes(), weather: 'global' }));
+    return Response.json(problem === 'invalid' ? {} : problem === 'weather unavailable' ? shared(1, { integrations: { weather: { available: false }, calendar: { available: false }, linkwarden: { available: false } } }) : shared());
+  } }); await env.client.start();
+  if (problem === 'corrupt map') values.set(CATEGORY_SCOPES_KEY, '{bad');
+  if (problem === 'unreadable map') env.storage.getItem = () => { throw Error('blocked'); };
+  await assert.rejects(env.client.prepareTransfer()); assert.equal(env.client.getTransferState().confirmed, false); assert.equal(env.writes().length, 0); assert.equal(values.has(LOCAL_SETTINGS_KEY), false);
+});
+
+test('imports reject invalid revisions, pending Global work/actions and duplicate admission but permit Local saves', async t => {
+  const importing = deferred(); const writing = deferred(); let holdWrite = false;
+  const env = setup(t, { values: new Map([[CATEGORY_SCOPES_KEY, mapRecord({ ...categoryScopes(), time: 'global', calendar: 'global' })]]), fetchImpl: (url, options) => {
+    if (url.endsWith('/import')) return importing.promise;
+    if (holdWrite && options.method === 'PUT') return writing.promise;
+    return Response.json(url === '/api/dashboard/configuration' ? { calendar: { available: false }, linkwarden: { available: false } } : shared());
+  } }); await env.client.start();
+  const bundle = { format: 'home-web.global-settings', version: 1, preferences: shared().preferences, weatherLocation: null }; const revisions = { preferencesRevision: 1, weatherRevision: 0 };
+  let baseline = await env.client.prepareTransfer();
+  for (const patch of [{ preferencesRevision: 0 }, { weatherRevision: 1 }, { weatherRevision: -1 }]) await assert.rejects(env.client.importGlobal(bundle, { ...revisions, ...patch }, baseline.saveToken), /revisions/);
+  const release = env.client.beginIntegrationAction('calendar', env.client.getCategoryState('calendar').saveToken);
+  await assert.rejects(env.client.importGlobal(bundle, revisions, baseline.saveToken), /actions/); release(); await tick();
+  holdWrite = true; const saving = save(env, 'time', { seconds: false });
+  await assert.rejects(env.client.importGlobal(bundle, revisions, baseline.saveToken), /actions/); await assert.rejects(env.client.prepareTransfer(), /actions/);
+  writing.resolve(Response.json(shared(2))); await saving; holdWrite = false;
+  baseline = await env.client.prepareTransfer(); const pending = env.client.importGlobal(bundle, revisions, baseline.saveToken);
+  await assert.rejects(env.client.importGlobal(bundle, revisions, baseline.saveToken), /actions/);
+  await assert.rejects(save(env, 'time', { seconds: false }), /pending/);
+  assert.throws(() => env.client.beginIntegrationAction('calendar', env.client.getCategoryState('calendar').saveToken), /import/);
+  await save(env, 'general', { scale: 1.5 });
+  importing.resolve(Response.json({ snapshot: shared(3), weatherRevision: 1 })); await pending;
+  assert.equal(env.client.getState().snapshot.preferences.scale, 1.5);
+});
+
+test('failed imports retain the baseline for explicit re-preparation and reject corrupt committed responses', async t => {
+  let outcome = 'conflict'; const env = setup(t, { fetchImpl: url => {
+    if (url.endsWith('/import')) return outcome === 'conflict' ? Response.json({ error: 'Global settings changed. Reload before importing.' }, { status: 409 }) : Response.json({ snapshot: shared(2), weatherRevision: -1 });
+    return Response.json(url === '/api/dashboard/configuration' ? { calendar: { available: false }, linkwarden: { available: false } } : shared());
+  } }); await env.client.start(); const baseline = await env.client.prepareTransfer();
+  const bundle = { format: 'home-web.global-settings', version: 1, preferences: shared().preferences, weatherLocation: null };
+  await assert.rejects(env.client.importGlobal(bundle, { preferencesRevision: 1, weatherRevision: 0 }, baseline.saveToken), /changed/);
+  assert.equal(env.client.getTransferState().saveToken, baseline.saveToken); outcome = 'invalid';
+  const retry = await env.client.prepareTransfer(); assert.notEqual(retry.saveToken, baseline.saveToken);
+  await assert.rejects(env.client.importGlobal(bundle, { preferencesRevision: 1, weatherRevision: 0 }, retry.saveToken), /weather revision/);
+  assert.equal(env.values.has('dashboard.shared-settings.v1'), false); assert.equal(env.client.getState().pending, false);
+});
+
+test('one-shot preparation deadlines and pending disposal release authority without late publication', async t => {
+  let signal; const never = deferred();
+  const env = setup(t, { fetchImpl: (url, options) => {
+    if (url === '/api/dashboard/settings') { signal = options.signal; return never.promise; }
+    return Response.json({ calendar: { available: false }, linkwarden: { available: false } });
+  } }); await env.client.start();
+  const timed = env.client.prepareTransfer(); const timeout = assert.rejects(timed, /timed out/); await env.clock.advance(10000); await timeout;
+  assert.equal(signal.aborted, true); assert.equal(env.client.getTransferState().preparing, false); assert.equal(env.client.getTransferState().confirmed, false);
+  const pending = env.client.prepareTransfer(); const canceled = assert.rejects(pending, /canceled/); const published = env.applied.length; env.client.dispose(); await canceled;
+  assert.equal(signal.aborted, true); never.resolve(Response.json(shared())); await tick(); assert.equal(env.applied.length, published); assert.equal(env.clock.timers.size, 0);
+});
+
+for (const corrupt of [true, false]) test(`transfer admission rejects ${corrupt ? 'corrupt' : 'unreadable'} persisted maps and publishes recovery state`, async t => {
+  const env = setup(t); await env.client.start(); const baseline = await env.client.prepareTransfer();
+  if (corrupt) env.values.set(CATEGORY_SCOPES_KEY, '{bad'); else env.storage.getItem = () => { throw Error('blocked'); };
+  await assert.rejects(env.client.importGlobal({ format: 'home-web.global-settings', version: 1, preferences: shared().preferences, weatherLocation: null }, { preferencesRevision: 1, weatherRevision: 0 }, baseline.saveToken), /could not be read/);
+  assert.match(env.states.at(-1).scopeError, /could not be read/); assert.equal(env.client.getTransferState().confirmed, false); assert.equal(env.writes().length, 0);
 });
 
 test('Local and transfer schemas remain strict and bounded', () => {

@@ -636,7 +636,8 @@ test('tabs support pointer and vertical keyboard navigation with one selected pa
   await page.keyboard.press('Tab');
   await expect(page.getByRole('tabpanel', { name: 'General', exact: true })).toBeFocused();
   await page.keyboard.press('Tab');
-  await expect(page.locator('#settings-scope-general')).toBeFocused();
+  await expect(page.locator('#settings-scope-general')).toHaveCount(0);
+  await expect(page.locator('#export-global-settings')).toBeFocused();
   await page.keyboard.press('Shift+Tab');
   await page.keyboard.press('Shift+Tab');
   await expect(general).toBeFocused();

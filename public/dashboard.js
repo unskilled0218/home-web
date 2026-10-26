@@ -366,7 +366,7 @@ $('reload-shared-preferences').addEventListener('click', async () => {
   const id = activeCategory; const session = settingsSession;
   await settingsSync.refresh();
   if (session !== settingsSession) return;
-  const draft = fillCategory(id); draft.message = `${settingsCategory(id).label} settings reloaded. Reapply your changes before saving.`; settingsTransfer.rebase(); renderSettingsState();
+  const draft = fillCategory(id); draft.message = `${settingsCategory(id).label} settings reloaded. Reapply your changes before saving.`; await settingsTransfer.rebase(); if (session === settingsSession) renderSettingsState();
 });
 function fillCalendarForm() {
   const state = calendar.getState();

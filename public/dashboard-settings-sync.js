@@ -70,6 +70,7 @@ export function createSettingsSync({ onSnapshot, onState = () => {}, captureObse
         if (request !== generation || disposed) return;
         let appliedObservers = captured;
         accept(value, appliedObservers);
+        return value;
       } catch (failure) { if (request === generation && !disposed) { error = failure.message; emit(); } }
       finally { if (read === operation) { read = undefined; emit(); if (queuedRefresh) { queuedRefresh = false; void refresh(); } else arm(); } }
     })();

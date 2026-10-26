@@ -1,5 +1,5 @@
 import { createSettingsSync } from './dashboard-settings-sync.js';
-import { normalizeDashboardPreferences, legacyDashboardPreferences, normalizeLocation, SETTINGS_KEY } from './dashboard-helpers.js';
+import { normalizeDashboardPreferences, legacyDashboardPreferences, normalizeLocation, validateDashboardSnapshot, SETTINGS_KEY } from './dashboard-helpers.js';
 import { SCOPE_KEY, CATEGORY_SCOPES_KEY, LOCAL_SETTINGS_KEY, parseSettingsJson, validateScope, validateCategoryScopes, validateLocalSettings, decodeStoredLocalSettings, validateSettingsTransfer, validateConfigurationMetadata, MAX_SETTINGS_TRANSFER_BYTES } from './dashboard-settings-data.js';
 import { CATEGORY_IDS, settingsCategory, categoryScopes, composeCategoryPreferences, patchCategory } from './dashboard-settings-categories.js';
 import { requestDashboardJson } from './dashboard-request.js';
@@ -10,6 +10,7 @@ export function createSettingsScope({ storage, onSnapshot, onState = () => {}, c
   let scopes = { schema: 1, revision: 0, scopes: categoryScopes() }; const epochs = Object.fromEntries(CATEGORY_IDS.map(id => [id, 0]));
   let scopeError = ''; let localError = ''; let corruptRaw; let global; let metadata; let timer; let visible = true; let started = false; let disposed = false; let importing = false;
   const actions = new Map();
+  let transferBaseline; let transferPreparation; let transferGeneration = 0; let transferError = '';
   let local = { schema: 1, revision: 0, preferences: normalizeDashboardPreferences(), weatherLocation: null, followGlobalPhotos: true };
   const api = (url, options = {}) => requestDashboardJson(url, { fetchImpl, schedule, cancel, ...options });
   const anyGlobal = () => CATEGORY_IDS.some(id => scopes.scopes[id] === 'global');
@@ -121,6 +122,7 @@ export function createSettingsScope({ storage, onSnapshot, onState = () => {}, c
     storage.setItem(CATEGORY_SCOPES_KEY, JSON.stringify(next)); adoptScopes(next, true); updatePolling(); publish(); return true;
   }
   function beginIntegrationAction(name, token) {
+    if (importing) throw new Error('Wait for the Global settings import before changing server resources.');
     const id = serviceCategory(name); admitMutation(id, token, { globalOnly: name !== 'weather' });
     actions.set(id, (actions.get(id) ?? 0) + 1); const releaseGlobal = scopes.scopes[id] === 'global' && ['weather', 'calendar', 'linkwarden'].includes(name) ? global?.beginIntegrationAction(name) : null;
     emit(); let done = false;
@@ -128,9 +130,45 @@ export function createSettingsScope({ storage, onSnapshot, onState = () => {}, c
     release.check = () => admitMutation(id, token, { globalOnly: name !== 'weather' });
     return release;
   }
+  const transferMap = () => JSON.stringify(scopes);
+  function cancelTransferPreparation() {
+    transferGeneration++; transferPreparation?.abort(); transferPreparation = undefined; transferBaseline = undefined; transferError = ''; emit();
+  }
+  function reconcileTransferMap() {
+    try { const changed = syncScopes(); if (changed) { updatePolling(); publish(); } return transferMap(); }
+    catch (error) { emit(); throw new Error(scopeError || error.message); }
+  }
+  function admitTransfer(token) {
+    if (disposed) throw new Error('Settings have been disposed.');
+    const map = reconcileTransferMap();
+    if (!transferBaseline || token !== transferBaseline.token || map !== transferBaseline.map) throw new Error('Global transfer source or revision changed. Reload before importing.');
+    return transferBaseline;
+  }
+  async function prepareTransfer() {
+    cancelTransferPreparation();
+    if (disposed) throw new Error('Settings have been disposed.');
+    const owner = new AbortController(); const generation = transferGeneration; transferPreparation = owner; emit();
+    try {
+      const map = reconcileTransferMap();
+      if (importing || globalState().pending || actions.size) throw new Error('Wait for shared settings actions before preparing an import.');
+      let snapshot;
+      if (anyGlobal()) { ensureGlobal(); snapshot = await global.refresh(); }
+      else snapshot = await api('/api/dashboard/settings', { signal: owner.signal });
+      if (disposed || owner.signal.aborted || generation !== transferGeneration) throw new Error('Global transfer preparation was canceled.');
+      if (map !== reconcileTransferMap()) throw new Error('Global transfer source or revision changed. Reload before importing.');
+      if (importing || globalState().pending || actions.size) throw new Error('Wait for shared settings actions before preparing an import.');
+      if (!snapshot) throw new Error(globalState().error || 'Global settings could not be confirmed. Reload before importing.');
+      snapshot = validateDashboardSnapshot(snapshot);
+      if (!snapshot.integrations.weather.available || !Number.isSafeInteger(snapshot.integrations.weather.revision)) throw new Error('Global weather revision is unavailable. Reload before importing.');
+      transferBaseline = { snapshot, map, token: `global-transfer-${generation}` };
+      return { snapshot, saveToken: transferBaseline.token };
+    } catch (error) { if (generation === transferGeneration && !disposed) transferError = error.message; throw error; }
+    finally { if (transferPreparation === owner) { transferPreparation = undefined; emit(); } }
+  }
   return {
     getState: state, getCategoryState: categoryState,
-    getTransferState() { const base = globalState(); const general = categoryState('general'); return { ...base, mode: general.mode, source: general.source, saveToken: general.saveToken, pending: importing || base.pending, mutating: actions.size > 0, scopeError }; },
+    getTransferState() { const base = globalState(); return { ...base, snapshot: transferBaseline?.snapshot ?? base.snapshot, source: 'global-transfer', saveToken: transferBaseline?.token, confirmed: Boolean(transferBaseline && transferBaseline.map === transferMap()) && !scopeError, preparing: Boolean(transferPreparation), error: transferError, pending: importing || base.pending, mutating: actions.size > 0, scopeError }; },
+    prepareTransfer, cancelTransferPreparation,
     async start() { if (disposed) return; started = true; updatePolling(); publish(); await refresh(); },
     refresh, changeScope, resetScopes, admitMutation, beginIntegrationAction,
     async saveCategory(id, patch, token, options = {}) {
@@ -144,18 +182,21 @@ export function createSettingsScope({ storage, onSnapshot, onState = () => {}, c
     saveLocalLocation(location, token) { const current = admitMutation('weather', token); if (current.mode !== 'local') throw new Error('Local Weather is not active.'); return persistLocal('weather', token, { ...local, weatherLocation: location }); },
     async exportGlobal() { return validateSettingsTransfer(await api('/api/dashboard/settings/export', { maxBytes: MAX_SETTINGS_TRANSFER_BYTES })); },
     async importGlobal(settings, expected, token) {
-      const current = admitMutation('general', token, { globalOnly: true });
-      if (current.pending || actions.size) throw new Error('Wait for shared settings actions before importing.');
-      if (!['preferencesRevision', 'weatherRevision'].every(key => Number.isSafeInteger(expected[key]) && expected[key] >= 0) || expected.preferencesRevision !== globalState().snapshot.revision) throw new Error('Reload Global preference and weather revisions before importing.');
-      const validated = validateSettingsTransfer(settings); ensureGlobal(); importing = true; emit();
+      const baseline = admitTransfer(token);
+      if (importing || globalState().pending || actions.size || transferPreparation) throw new Error('Wait for shared settings actions before importing.');
+      if (!['preferencesRevision', 'weatherRevision'].every(key => Number.isSafeInteger(expected?.[key]) && expected[key] >= 0) || expected.preferencesRevision !== baseline.snapshot.revision || expected.weatherRevision !== baseline.snapshot.integrations.weather.revision) throw new Error('Reload Global preference and weather revisions before importing.');
+      const validated = validateSettingsTransfer(settings); importing = true; emit();
       try {
-        admitMutation('general', token, { globalOnly: true });
+        admitTransfer(token);
         const value = await api('/api/dashboard/settings/import', { method: 'POST', maxBytes: MAX_SETTINGS_TRANSFER_BYTES, body: { settings: validated, ...expected } });
-        global.adoptCommittedSnapshot(value.snapshot); return value;
+        validateDashboardSnapshot(value.snapshot);
+        if (!Number.isSafeInteger(value.weatherRevision) || value.weatherRevision < 0) throw new Error('Invalid committed Global weather revision. Reload before importing again.');
+        if (!disposed) { ensureGlobal(); global.adoptCommittedSnapshot(value.snapshot); transferBaseline = undefined; }
+        return value;
       } finally { importing = false; emit(); }
     },
     storageChanged(event) { if (!disposed && [null, CATEGORY_SCOPES_KEY, SCOPE_KEY, LOCAL_SETTINGS_KEY].includes(event.key)) void refresh(); },
     setVisible(next) { visible = next; updatePolling(); if (next && started) void refresh(); },
-    dispose() { disposed = true; stopMetadata(); global?.dispose(); }
+    dispose() { disposed = true; cancelTransferPreparation(); stopMetadata(); global?.dispose(); }
   };
 }

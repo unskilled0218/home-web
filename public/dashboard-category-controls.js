@@ -1,9 +1,9 @@
 import { CATEGORY_IDS, settingsCategory } from './dashboard-settings-categories.js';
 
-// One control per policy category; neither labels nor DOM position decide ownership.
+// General retains saved layout ownership without offering a scope selector.
 export function createCategoryControls({ document, onChange }) {
   const controls = new Map();
-  for (const id of CATEGORY_IDS) {
+  for (const id of CATEGORY_IDS.filter(id => id !== 'general')) {
     const panel = document.getElementById(`settings-panel-${id}`); const fieldset = document.createElement('fieldset');
     const legend = document.createElement('legend'); legend.textContent = `${settingsCategory(id).label} scope`;
     const label = document.createElement('label'); label.textContent = 'Use settings for';
@@ -14,6 +14,6 @@ export function createCategoryControls({ document, onChange }) {
     select.addEventListener('change', () => onChange(id, select.value)); controls.set(id, { select, status });
   }
   return {
-    update(id, state) { const { select, status } = controls.get(id); select.value = state.mode; select.disabled = state.pending || state.mutating; status.textContent = state.mode === 'local' ? 'Local settings apply to this browser profile only.' : 'Global settings are shared with browsers using Global for this category.'; }
+    update(id, state) { if (id === 'general') return; const { select, status } = controls.get(id); select.value = state.mode; select.disabled = state.pending || state.mutating; status.textContent = state.mode === 'local' ? 'Local settings apply to this browser profile only.' : 'Global settings are shared with browsers using Global for this category.'; }
   };
 }

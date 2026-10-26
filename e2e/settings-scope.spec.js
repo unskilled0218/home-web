@@ -38,10 +38,10 @@ for (const mode of ['local', 'global']) test(`General removes Information layout
   try {
     await page.goto(env.base); await open(page);
     await expect(page.getByText('Information layout', { exact: true })).toHaveCount(0); await expect(page.locator('[name="position"], [name="scale"]')).toHaveCount(0);
-    await expect(page.locator('#settings-scope-general')).toHaveValue(mode); await expect(page.locator('#export-global-settings')).toBeEnabled(); await expect(page.locator('#global-settings-file')).toBeVisible();
+    await expect(page.locator('#settings-scope-general, #scope-status-general')).toHaveCount(0); await expect(page.locator('#export-global-settings')).toBeEnabled(); await expect(page.locator('#global-settings-file')).toBeVisible();
     const raw = async () => mode === 'local' ? page.evaluate(() => JSON.parse(localStorage.getItem('dashboard.local-settings.v1')).preferences) : env.store.getDashboardPreferences().preferences;
     const before = await raw(); await page.locator('#reload-shared-preferences').click(); await expect(page.locator('#settings-status')).toContainText('General settings reloaded.'); await saveCategory(page); expect(await raw()).toEqual(before);
-    await setCategoryScope(page, 'general', mode === 'local' ? 'global' : 'local'); await setCategoryScope(page, 'general', mode); expect(await raw()).toEqual(before);
+    expect(await page.evaluate(() => JSON.parse(localStorage.getItem('dashboard.category-scopes.v1')).scopes.general)).toBe(mode); expect(await raw()).toEqual(before);
     await page.locator('#close-settings').click(); await page.locator('#edit-layout').click(); await page.locator('#layout-toggle').click(); await page.locator('#layout-widget').selectOption('time'); await page.locator('#layout-x').fill('20'); await page.locator('#layout-x').press('Tab'); await page.locator('#layout-save').click(); await expect(page.locator('#layout-toolbar')).toBeHidden();
     const after = await raw(); expect(after.widgetLayout.desktop).not.toEqual(before.widgetLayout.desktop); expect(after.widgetLayout.mobile).toEqual(before.widgetLayout.mobile); expect({ ...after, widgetLayout: before.widgetLayout }).toEqual(before);
     if (mode === 'local') expect(env.store.exportDashboardSettings()).toEqual(globalBefore);
@@ -75,7 +75,8 @@ for (const legacy of ['local', 'global']) test(`legacy ${legacy} mode seeds all 
   const env = await settingsEnvironment(); const context = await browser.newContext(); await context.addInitScript(mode => localStorage.setItem('dashboard.settings-scope.v1', JSON.stringify({ schema: 1, mode })), legacy); const page = await context.newPage();
   try {
     const before = env.store.exportDashboardSettings(); await page.goto(env.base); await open(page);
-    for (const id of CATEGORY_IDS) { await categoryTab(page, id); await expect(page.locator(`#settings-scope-${id}`)).toHaveValue(legacy); }
+    await expect(page.locator('#settings-scope-general')).toHaveCount(0);
+    for (const id of CATEGORY_IDS.filter(id => id !== 'general')) { await categoryTab(page, id); await expect(page.locator(`#settings-scope-${id}`)).toHaveValue(legacy); }
     expect(await page.evaluate(() => localStorage.getItem('dashboard.category-scopes.v1'))).toBeNull(); expect(env.store.exportDashboardSettings()).toEqual(before);
   } finally { await context.close(); await env.close(); }
 });
@@ -116,7 +117,8 @@ test('Local categories save offline while Global categories remain unconfirmed a
     await open(a.page, 'time'); await a.page.locator('#settings-scope-time').selectOption('global'); await expect(a.page.locator('#save-preferences')).toBeDisabled();
     await categoryTab(a.page, 'weather'); await a.page.locator('[name="temperature"]').selectOption('fahrenheit'); await saveCategory(a.page);
     await a.page.setViewportSize({ width: 390, height: 700 });
-    for (const id of CATEGORY_IDS) { await categoryTab(a.page, id); await a.page.locator(`#settings-scope-${id}`).scrollIntoViewIfNeeded(); await expect(a.page.locator(`#settings-scope-${id}`)).toBeInViewport(); }
+    await expect(a.page.locator('#settings-scope-general')).toHaveCount(0);
+    for (const id of CATEGORY_IDS.filter(id => id !== 'general')) { await categoryTab(a.page, id); await a.page.locator(`#settings-scope-${id}`).scrollIntoViewIfNeeded(); await expect(a.page.locator(`#settings-scope-${id}`)).toBeInViewport(); }
     await expect(a.page.locator('#close-settings')).toBeInViewport();
   } finally { await a.close(); await env.close(); }
 });
@@ -134,13 +136,13 @@ test('corrupt scope-map recovery is confirmed, map-only, and keeps dirty drafts 
 });
 
 test('Global Weather with Local Time keeps its city and layout saves preserve raw Global categories', async ({ browser }) => {
-  const env = await settingsEnvironment(); const a = await scopeClient(browser, env);
+  const env = await settingsEnvironment(); const a = await scopeClient(browser, env, { ...categoryScopes(), general: 'global' });
   try {
     await open(a.page, 'time'); await a.page.locator('[name="timezone"]').fill('Asia/Tokyo'); await saveCategory(a.page);
     await setCategoryScope(a.page, 'weather', 'global'); await expect(a.page.locator('#current-location')).toContainText('London');
     await a.page.locator('[name="temperature"]').selectOption('fahrenheit'); await saveCategory(a.page);
     await categoryTab(a.page, 'images'); await a.page.locator('[name="color"]').fill('#123456'); await saveCategory(a.page);
-    await setCategoryScope(a.page, 'general', 'global'); await a.page.locator('#close-settings').click();
+    await categoryTab(a.page, 'general'); await expect(a.page.locator('#settings-scope-general')).toHaveCount(0); await a.page.locator('#close-settings').click();
     await a.page.locator('#edit-layout').click(); await a.page.locator('#layout-toggle').click();
     await a.page.locator('#layout-arrangement').selectOption('custom'); await a.page.locator('#layout-x').fill('20'); await a.page.locator('#layout-x').press('Tab');
     await a.page.locator('#layout-save').click(); await expect(a.page.locator('#layout-toolbar')).toBeHidden();

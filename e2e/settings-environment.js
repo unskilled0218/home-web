@@ -32,7 +32,9 @@ export async function settingsEnvironment({ photoCount = 2 } = {}) {
   return { get base() { return base; }, get store() { return store; }, get slideshow() { return slideshow; }, clock, async restart() { await stop(); await start(); }, async close() { await stop(); await rm(directory, { recursive: true, force: true }); } };
 }
 
-export async function scopeClient(browser, env) {
-  const context = await browser.newContext(); const page = await context.newPage(); await page.clock.install(); await page.goto(env.base);
+export async function scopeClient(browser, env, scopes) {
+  const context = await browser.newContext();
+  if (scopes) await context.addInitScript(scopes => { if (!localStorage.getItem('dashboard.category-scopes.v1')) localStorage.setItem('dashboard.category-scopes.v1', JSON.stringify({ schema: 1, revision: 1, scopes })); }, scopes);
+  const page = await context.newPage(); await page.clock.install(); await page.goto(env.base);
   return { context, page, close: () => context.close() };
 }
