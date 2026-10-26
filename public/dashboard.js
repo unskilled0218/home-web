@@ -241,6 +241,11 @@ const photos = createScopedPhotoController({
   }
 });
 
+function applyWidgetScales() {
+  const display = resolveDisplayPreferences(settings, mobileViewport.matches);
+  for (const [id, property, value] of [['bookmarks', '--bookmarks-scale', display.bookmarksScale], ['dashboard-ha', '--home-assistant-scale', display.homeAssistantScale], ['dashboard-wol', '--wol-scale', display.wolScale]]) $(id).style.setProperty(property, value);
+}
+
 function applyPresentation() {
   const mobile = mobileViewport.matches;
   const display = resolveDisplayPreferences(settings, mobile);
@@ -249,6 +254,7 @@ function applyPresentation() {
   $('clock').style.setProperty('--time-scale', display.timeScale);
   $('weather').style.setProperty('--weather-scale', display.weatherScale);
   $('calendar').style.setProperty('--calendar-scale', display.calendarScale);
+  applyWidgetScales();
   startClock();
   applyBookmarkPresentation();
 }
@@ -272,8 +278,10 @@ const settingsSync = createSettingsScope({ storage,
     settings = { ...snapshot.preferences, location: scope.categories.weather.mode === 'local' ? scope.weatherLocation : weatherSourceChanged ? null : settings.location };
     const changed = (keys) => keys.some((key) => !preferencesEqual(settings[key], previous[key]));
     const first = !servicesStarted;
-    if (first || changed(['position', 'scale', 'timeVisible', 'timeScale', 'weatherVisible', 'weatherScale', 'calendarVisible', 'calendarScale', 'mobileTimeVisible', 'mobileTimeScale', 'mobileWeatherVisible', 'mobileWeatherScale', 'mobileCalendarVisible', 'mobileCalendarScale'])) applyPresentation();
+    const presentationChanged = first || changed(['position', 'scale', 'timeVisible', 'timeScale', 'weatherVisible', 'weatherScale', 'calendarVisible', 'calendarScale', 'mobileTimeVisible', 'mobileTimeScale', 'mobileWeatherVisible', 'mobileWeatherScale', 'mobileCalendarVisible', 'mobileCalendarScale']);
+    if (presentationChanged) applyPresentation();
     else if (changed(['timezone', 'dateStyle', 'hour12', 'seconds'])) startClock();
+    if (!presentationChanged && changed(['bookmarksScale', 'mobileBookmarksScale', 'homeAssistantScale', 'mobileHomeAssistantScale', 'wolScale', 'mobileWolScale'])) { applyWidgetScales(); applyVisibilityLayout(); }
     if (first || changed(['mobileBookmarksMode', 'hideBookmarksFullscreen', 'hideTimeFullscreen', 'hideWeatherFullscreen', 'hideCalendarFullscreen', 'hideHomeAssistantFullscreen', 'hideWolFullscreen', 'bookmarksVisible', 'mobileBookmarksVisible', 'homeAssistantVisible', 'mobileHomeAssistantVisible', 'wolVisible', 'mobileWolVisible'])) applyBookmarkPresentation();
     if (changed(['widgetLayout'])) applyVisibilityLayout();
     if (first || changed(['homeAssistantDeviceSelections'])) deviceIntegrations.configure(settings.homeAssistantDeviceSelections);

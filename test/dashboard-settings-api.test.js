@@ -50,6 +50,21 @@ test('new overlay fields upgrade missing values only, preserving independent pro
   const reopened = createStore(env.filename); assert.deepEqual(reopened.getDashboardPreferences().preferences, next); reopened.close();
 });
 
+test('six widget scales upgrade database reads without writes and persist explicit values on revision-checked save', async t => {
+  const env = await setup(t); const db = new DatabaseSync(env.filename); t.after(() => db.close());
+  const keys = ['bookmarksScale', 'mobileBookmarksScale', 'homeAssistantScale', 'mobileHomeAssistantScale', 'wolScale', 'mobileWolScale'];
+  const expected = normalizeDashboardPreferences({ color: '#123456', widgetLayout: { version: 2, desktop: initialWidgetProfile('desktop'), mobile: null } });
+  const old = { ...expected }; for (const key of keys) delete old[key];
+  db.prepare('INSERT INTO dashboard_preferences (id, configuration, revision) VALUES (1, ?, 7)').run(JSON.stringify(old));
+  const result = await (await env.api()).json(); assert.deepEqual(result.preferences, expected); assert.equal(result.revision, 7);
+  assert.deepEqual(db.prepare('SELECT configuration, revision FROM dashboard_preferences').get(), { __proto__: null, configuration: JSON.stringify(old), revision: 7 });
+  assert.equal((await env.api('/api/dashboard/settings', 'PUT', { revision: 7, preferences: old })).status, 400);
+  const next = { ...expected, ...Object.fromEntries(keys.map((key, i) => [key, .5 + i / 10])) };
+  const saved = await (await env.api('/api/dashboard/settings', 'PUT', { revision: 7, preferences: next })).json(); assert.deepEqual(saved.preferences, next); assert.equal(saved.revision, 8);
+  assert.equal((await env.api('/api/dashboard/settings', 'PUT', { revision: 7, preferences: next })).status, 409);
+  const reopened = createStore(env.filename); try { assert.deepEqual(reopened.getDashboardPreferences().preferences, next); } finally { reopened.close(); }
+});
+
 test('fullscreen and forecast fields upgrade stored reads only and persist explicit choices', async (t) => {
   const env = await setup(t);
   const keys = ['hideTimeFullscreen', 'hideWeatherFullscreen', 'hideCalendarFullscreen', 'hideHomeAssistantFullscreen', 'hideWolFullscreen', 'weatherHourlyVisible', 'weatherDailyVisible'];

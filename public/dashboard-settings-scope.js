@@ -1,6 +1,6 @@
 import { createSettingsSync } from './dashboard-settings-sync.js';
 import { normalizeDashboardPreferences, legacyDashboardPreferences, normalizeLocation, SETTINGS_KEY } from './dashboard-helpers.js';
-import { SCOPE_KEY, CATEGORY_SCOPES_KEY, LOCAL_SETTINGS_KEY, parseSettingsJson, validateScope, validateCategoryScopes, validateLocalSettings, validateSettingsTransfer, validateConfigurationMetadata, MAX_SETTINGS_TRANSFER_BYTES } from './dashboard-settings-data.js';
+import { SCOPE_KEY, CATEGORY_SCOPES_KEY, LOCAL_SETTINGS_KEY, parseSettingsJson, validateScope, validateCategoryScopes, validateLocalSettings, decodeStoredLocalSettings, validateSettingsTransfer, validateConfigurationMetadata, MAX_SETTINGS_TRANSFER_BYTES } from './dashboard-settings-data.js';
 import { CATEGORY_IDS, settingsCategory, categoryScopes, composeCategoryPreferences, patchCategory } from './dashboard-settings-categories.js';
 import { requestDashboardJson } from './dashboard-request.js';
 
@@ -21,7 +21,7 @@ export function createSettingsScope({ storage, onSnapshot, onState = () => {}, c
   }
   function readLocal() {
     const raw = storage?.getItem(LOCAL_SETTINGS_KEY);
-    if (raw) return validateLocalSettings(parseSettingsJson(raw));
+    if (raw) return decodeStoredLocalSettings(parseSettingsJson(raw));
     const legacy = storage?.getItem(SETTINGS_KEY); const old = legacy ? parseSettingsJson(legacy) : null;
     return { schema: 1, revision: 0, preferences: legacyDashboardPreferences(old) ?? normalizeDashboardPreferences(), weatherLocation: normalizeLocation(old?.location), followGlobalPhotos: true };
   }

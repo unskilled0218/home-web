@@ -37,6 +37,8 @@ The entire canvas, including text and padding, still shrinks uniformly without u
 
 Decorative Custom padding contracts independently per axis so it cannot enlarge tiny widgets. Frame outlines add no size to the canonical rectangle. Saved proportions, not fitted pixels, remain authoritative; a minimum-clamped move does not rewrite a widget's saved width or height. Existing font preferences still apply. Retained saved Position values control Automatic flow, not Custom coordinates.
 
+Bookmarks, Home Assistant, and Wake-on-LAN each have their own Desktop/Mobile scale in their Settings category, from 0.5 to 2 in 0.1 steps. These scale widget content, including sensor readings and action labels, without changing stored Custom geometry or layer order. They compose with the canvas fit, not the retained Information overall scale. Settings and editing controls stay unscaled; pristine Automatic entry retains the already-scaled live typography and measured bounds.
+
 ## Fullscreen reference sizing
 
 Before fullscreen entry, `screen.width` and `screen.height` estimate the display in CSS pixels; available workspace and device pixel ratio are not used. Invalid screen data falls back to the first valid layout viewport. The first settled fullscreen entry confirms the reference once; exiting retains it. Reload begins another local estimate. No reference confirmation writes preferences or cache.

@@ -11,6 +11,18 @@ import { normalizeDashboardPreferences } from '../public/dashboard-helpers.js';
 
 const bundle = (extra = {}) => ({ format: 'home-web.global-settings', version: 1, preferences: normalizeDashboardPreferences({ color: '#123456' }), weatherLocation: { latitude: 51, longitude: 0, label: 'London' }, ...extra });
 
+test('previous complete transfers default absent widget scales and export all explicit scale values', () => {
+  const store = createStore(':memory:');
+  try {
+    const old = bundle(); const keys = ['bookmarksScale', 'mobileBookmarksScale', 'homeAssistantScale', 'mobileHomeAssistantScale', 'wolScale', 'mobileWolScale']; for (const key of keys) delete old.preferences[key];
+    store.importDashboardSettings(old, 0, 0); assert.deepEqual(store.exportDashboardSettings().settings, bundle());
+    const next = bundle({ preferences: normalizeDashboardPreferences(Object.fromEntries(keys.map((key, i) => [key, .5 + i / 10]))) });
+    const current = store.exportDashboardSettings(); store.importDashboardSettings(next, current.preferencesRevision, current.weatherRevision); assert.deepEqual(store.exportDashboardSettings().settings, next);
+    for (const key of keys) assert.throws(() => store.importDashboardSettings({ ...old, preferences: { ...old.preferences, [key]: '1' } }, 2, 1));
+    assert.deepEqual(store.exportDashboardSettings().settings, next);
+  } finally { store.close(); }
+});
+
 test('global settings import is one revision-checked transaction; export is read-only and no-op/clear round trips work', () => {
   const store = createStore(':memory:');
   try {

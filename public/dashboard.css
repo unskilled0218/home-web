@@ -58,12 +58,14 @@ summary { cursor: pointer; padding: .5rem 0; }
 #dashboard-content #information { width: 100%; margin: 0; min-width: 0; }
 #dashboard-devices { position: relative; z-index: 1; align-self: start; height: max(20rem, calc(100dvh - 8rem)); display: grid; grid-template-rows: var(--device-rows, minmax(0, 1fr)); gap: 1rem; min-width: 0; text-shadow: 0 2px 5px #000; }
 #dashboard-devices > section { display: grid; grid-template-rows: auto auto auto minmax(0, 1fr); min-height: 0; min-width: 0; overflow: hidden; padding: .5rem; }
-#dashboard-devices h2 { font-size: 1.1rem; }
-#dashboard-devices [role=status], #dashboard-ha-updated { font-size: .8rem; overflow-wrap: anywhere; }
+#dashboard-ha { font-size: calc(1rem * var(--home-assistant-scale, 1)); }
+#dashboard-wol { font-size: calc(1rem * var(--wol-scale, 1)); }
+#dashboard-devices h2 { font-size: 1.1em; }
+#dashboard-devices [role=status], #dashboard-ha-updated { font-size: .8em; overflow-wrap: anywhere; }
 #dashboard-ha-updated { margin: .3rem 0; }
 #dashboard-devices > section > ul { grid-row: 4; overflow-y: auto; min-height: 0; min-width: 0; list-style: none; padding: 0; margin: .35rem 0; overflow-wrap: anywhere; }
 #dashboard-ha-devices > li { margin-bottom: .9rem; }
-#dashboard-ha-devices ul { list-style: none; padding: 0; font-size: .85rem; }
+#dashboard-ha-devices ul { list-style: none; padding: 0; font-size: .85em; }
 #dashboard-wol-devices > li { display: flex; justify-content: space-between; align-items: center; gap: .6rem; padding: .35rem 0; }
 #dashboard-wol-devices span { min-width: 0; overflow-wrap: anywhere; }
 #dashboard-wol-devices button { flex: 0 0 auto; }
@@ -74,12 +76,12 @@ summary { cursor: pointer; padding: .5rem 0; }
 .bookmarks-shown .forecast-temperature { white-space: normal; overflow-wrap: anywhere; }
 .bookmarks-shown .calendar-event { grid-template-columns: minmax(min(6.5em, 45%), auto) minmax(0, 1fr); }
 .bookmarks-shown .right .calendar-event { grid-template-columns: minmax(0, 1fr) minmax(min(6.5em, 45%), auto); }
-#bookmarks { position: relative; z-index: 1; align-self: start; min-width: 0; max-height: calc(100dvh - 8rem); overflow-y: auto; overflow-wrap: anywhere; padding: .5rem; text-shadow: 0 2px 5px #000; }
-#bookmarks h2 { font-size: 1.1rem; }
+#bookmarks { position: relative; z-index: 1; align-self: start; min-width: 0; max-height: calc(100dvh - 8rem); overflow-y: auto; overflow-wrap: anywhere; padding: .5rem; font-size: calc(1rem * var(--bookmarks-scale, 1)); text-shadow: 0 2px 5px #000; }
+#bookmarks h2 { font-size: 1.1em; }
 #bookmark-tree { list-style: none; padding: 0; margin: .35rem 0; }
 .bookmark-link { display: block; padding: .25rem 0; overflow-wrap: anywhere; }
-.bookmark-folder-status { font-size: .8rem; }
-.bookmark-retry { font-size: .8rem; padding: .3rem .5rem; max-width: 100%; }
+.bookmark-folder-status { font-size: .8em; }
+.bookmark-retry { font-size: .8em; padding: .3rem .5rem; max-width: 100%; }
 #linkwarden-connection { display: grid; gap: .7rem; }
 fieldset { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); gap: .8rem; border: 1px solid #62758a; margin: 1rem 0; border-radius: .5rem; }
 label { display: flex; flex-direction: column; gap: .3rem; }

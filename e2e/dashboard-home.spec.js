@@ -335,7 +335,7 @@ test('fractional stored mobile scales remain valid when saving an unrelated pref
   await seedPreferences(page, { mobileTimeScale: 1.25, mobileWeatherScale: 0.55, mobileCalendarScale: 1.11 });
   await page.goto('/'); await page.locator('#open-settings').click();
   const valid = await page.locator('[name^="mobile"][type="number"]').evaluateAll((inputs) => inputs.map((input) => ({ value: input.valueAsNumber, valid: input.validity.valid, form: input.form.id })));
-  expect(valid).toEqual([{ value: 1.3, valid: true, form: 'preferences' }, { value: 0.6, valid: true, form: 'preferences' }, { value: 1.1, valid: true, form: 'preferences' }]);
+  expect(valid).toEqual([{ value: 1.3, valid: true, form: 'preferences' }, { value: 0.6, valid: true, form: 'preferences' }, { value: 1.1, valid: true, form: 'preferences' }, ...Array.from({ length: 3 }, () => ({ value: 1, valid: true, form: 'preferences' }))]);
   await categoryTab(page, 'images'); await page.getByLabel('Opacity', { exact: true }).fill('0.5'); await savePreferences(page);
   expect(await page.evaluate((key) => JSON.parse(localStorage.getItem(key)).preferences, settingsKey)).toMatchObject({ opacity: 0.5, mobileTimeScale: 1.3, mobileWeatherScale: 0.6, mobileCalendarScale: 1.1 });
 });

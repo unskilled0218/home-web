@@ -24,6 +24,36 @@ function setup(t, { values = new Map(), fetchImpl, broken = false, initialSnapsh
 }
 const save = (env, id, patch, options) => env.client.saveCategory(id, patch, env.client.getCategoryState(id).saveToken, options);
 
+test('old Local scale records preserve preferences/location/follow choices through offline save and storage-event rereads', async t => {
+  const preferences = normalizeDashboardPreferences({ color: '#123456', seconds: false, bookmarkLinkSelections: [] }); const old = { ...preferences };
+  const keys = ['bookmarksScale', 'mobileBookmarksScale', 'homeAssistantScale', 'mobileHomeAssistantScale', 'wolScale', 'mobileWolScale']; for (const key of keys) delete old[key];
+  const record = { schema: 1, revision: 7, preferences: old, weatherLocation: { latitude: 51, longitude: 0, label: 'London' }, followGlobalPhotos: false };
+  const values = new Map([[LOCAL_SETTINGS_KEY, JSON.stringify(record)]]); const before = [...values];
+  const env = setup(t, { values, fetchImpl: async () => { throw new Error('offline'); } }); await env.client.start();
+  assert.deepEqual(env.client.getState().snapshot.preferences, preferences); assert.deepEqual([...values], before);
+  const token = env.client.getCategoryState('bookmarks').saveToken; await save(env, 'bookmarks', { bookmarksScale: 1.7, mobileBookmarksScale: .8 });
+  const expected = { ...preferences, bookmarksScale: 1.7, mobileBookmarksScale: .8 };
+  assert.deepEqual(JSON.parse(values.get(LOCAL_SETTINGS_KEY)), { ...record, revision: 8, preferences: expected }); assert.equal(env.writes().length, 0);
+  await assert.rejects(env.client.saveCategory('bookmarks', { bookmarksScale: 2 }, token), /revision changed/);
+  const changed = { ...record, revision: 9, preferences: { ...old, wolScale: 1.9 } }; values.set(LOCAL_SETTINGS_KEY, JSON.stringify(changed));
+  env.client.storageChanged({ key: LOCAL_SETTINGS_KEY }); await tick();
+  assert.equal(env.client.getState().snapshot.preferences.wolScale, 1.9); assert.equal(env.client.getState().snapshot.preferences.mobileWolScale, 1);
+  assert.deepEqual(env.client.getState().weatherLocation, record.weatherLocation); assert.equal(env.client.getState().followGlobalPhotos, false);
+  assert.equal(values.get(LOCAL_SETTINGS_KEY), JSON.stringify(changed));
+});
+
+for (const [id, key, mobileKey] of [['bookmarks', 'bookmarksScale', 'mobileBookmarksScale'], ['home-assistant', 'homeAssistantScale', 'mobileHomeAssistantScale'], ['wol', 'wolScale', 'mobileWolScale']]) test(`${id} scale saves isolate raw stores and preserve geometry through scope switches`, async t => {
+  const local = { schema: 1, revision: 3, preferences: normalizeDashboardPreferences({ [key]: .7, [mobileKey]: .8, color: '#123456', widgetLayout: { version: 2, desktop: initialWidgetProfile('desktop'), mobile: initialWidgetProfile('mobile') } }), weatherLocation: null, followGlobalPhotos: false };
+  const global = normalizeDashboardPreferences({ [key]: 1.7, [mobileKey]: 1.8, color: '#abcdef' });
+  const values = new Map([[LOCAL_SETTINGS_KEY, JSON.stringify(local)]]); const env = setup(t, { values, initialSnapshot: shared(4, { preferences: global }) }); await env.client.start();
+  await env.client.changeScope(id, 'global'); assert.equal(env.client.getState().snapshot.preferences[key], 1.7);
+  await save(env, id, { [key]: 2, [mobileKey]: 1.9 }); const sent = JSON.parse(env.writes()[0].options.body).preferences;
+  assert.deepEqual(sent, { ...global, [key]: 2, [mobileKey]: 1.9 }); assert.equal(values.get(LOCAL_SETTINGS_KEY), JSON.stringify(local));
+  await env.client.changeScope(id, 'local'); assert.equal(env.client.getState().snapshot.preferences[key], .7);
+  await save(env, id, { [key]: 1.2, [mobileKey]: .5 }); assert.deepEqual(JSON.parse(values.get(LOCAL_SETTINGS_KEY)).preferences, { ...local.preferences, [key]: 1.2, [mobileKey]: .5 });
+  assert.equal(env.writes().length, 1); assert.deepEqual(env.client.getTransferState().snapshot.preferences, sent);
+});
+
 for (const mode of ['local', 'global']) test(`${mode} saves preserve absent General controls and layout saves patch only geometry`, async t => {
   const widgetLayout = { ...defaultWidgetLayout(), desktop: initialWidgetProfile('desktop', 'right'), mobile: initialWidgetProfile('mobile') };
   const preferences = normalizeDashboardPreferences({ position: 'right', scale: 1.7, widgetLayout, color: '#123456' });

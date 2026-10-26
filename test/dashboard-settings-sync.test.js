@@ -49,6 +49,17 @@ test('old confirmed caches gain visibility defaults and remote profiles remain a
   await env.client.start(); assert.deepEqual(env.client.getState().snapshot.preferences, remote); assert.equal(env.calls.length, 1); assert.equal(env.tasks.size, 1);
 });
 
+test('old confirmed caches gain scale defaults without read writes and reject incomplete live snapshots', async t => {
+  const expected = normalizeDashboardPreferences({ color: '#123456', seconds: false }); const old = { ...expected };
+  for (const key of ['bookmarksScale', 'mobileBookmarksScale', 'homeAssistantScale', 'mobileHomeAssistantScale', 'wolScale', 'mobileWolScale']) delete old[key];
+  const values = new Map([[SHARED_SETTINGS_KEY, JSON.stringify({ schema: 1, initialized: true, revision: 7, preferences: old })]]); const before = [...values];
+  const env = setup(t, { values, handler: () => Response.json(snapshot({ revision: 8, preferences: old })) });
+  assert.deepEqual(env.client.getState().snapshot.preferences, expected); assert.equal(env.client.getState().cache, true); assert.deepEqual([...values], before);
+  await env.client.start(); assert.equal(env.client.getState().confirmed, false); assert.deepEqual([...values], before);
+  const remote = normalizeDashboardPreferences({ bookmarksScale: 1.8, homeAssistantScale: .7, wolScale: 1.5 });
+  const fresh = setup(t, { values, handler: () => Response.json(snapshot({ revision: 8, preferences: remote })) }); await fresh.client.start(); assert.deepEqual(fresh.client.getState().snapshot.preferences, remote);
+});
+
 test('old caches gain fullscreen and forecast defaults without writes and confirmed values replace them', async (t) => {
   const keys = ['hideTimeFullscreen', 'hideWeatherFullscreen', 'hideCalendarFullscreen', 'hideHomeAssistantFullscreen', 'hideWolFullscreen', 'weatherHourlyVisible', 'weatherDailyVisible'];
   const preferences = normalizeDashboardPreferences({ hideBookmarksFullscreen: true, mobileWeatherVisible: false });

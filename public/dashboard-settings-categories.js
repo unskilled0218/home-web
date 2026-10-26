@@ -5,9 +5,9 @@ export const SETTINGS_CATEGORIES = Object.freeze({
   time: { label: 'Time', keys: ['timezone', 'dateStyle', 'hour12', 'seconds', 'timeVisible', 'timeScale', 'mobileTimeVisible', 'mobileTimeScale', 'hideTimeFullscreen'] },
   weather: { label: 'Weather', keys: ['temperature', 'wind', 'precipitation', 'weatherHourlyVisible', 'weatherDailyVisible', 'weatherVisible', 'weatherScale', 'mobileWeatherVisible', 'mobileWeatherScale', 'hideWeatherFullscreen'] },
   calendar: { label: 'Calendar', keys: ['calendarVisible', 'calendarScale', 'mobileCalendarVisible', 'mobileCalendarScale', 'hideCalendarFullscreen'] },
-  bookmarks: { label: 'Bookmarks', keys: ['bookmarksVisible', 'mobileBookmarksVisible', 'hideBookmarksFullscreen', 'mobileBookmarksMode', 'bookmarkLinkSelections'] },
-  'home-assistant': { label: 'Home Assistant', keys: ['homeAssistantVisible', 'mobileHomeAssistantVisible', 'hideHomeAssistantFullscreen', 'homeAssistantDeviceSelections'] },
-  wol: { label: 'Wake-on-LAN', keys: ['wolVisible', 'mobileWolVisible', 'hideWolFullscreen'] },
+  bookmarks: { label: 'Bookmarks', keys: ['bookmarksVisible', 'bookmarksScale', 'mobileBookmarksVisible', 'mobileBookmarksScale', 'hideBookmarksFullscreen', 'mobileBookmarksMode', 'bookmarkLinkSelections'] },
+  'home-assistant': { label: 'Home Assistant', keys: ['homeAssistantVisible', 'homeAssistantScale', 'mobileHomeAssistantVisible', 'mobileHomeAssistantScale', 'hideHomeAssistantFullscreen', 'homeAssistantDeviceSelections'] },
+  wol: { label: 'Wake-on-LAN', keys: ['wolVisible', 'wolScale', 'mobileWolVisible', 'mobileWolScale', 'hideWolFullscreen'] },
   images: { label: 'Images', keys: ['order', 'interval', 'duration', 'animation', 'opacity', 'background', 'color', 'blur', 'imageInfo'] }
 });
 export const CATEGORY_IDS = Object.freeze(Object.keys(SETTINGS_CATEGORIES));

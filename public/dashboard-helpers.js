@@ -43,6 +43,8 @@ export function normalizeSettings(input = {}, fallbackZone = Intl.DateTimeFormat
     hideTimeFullscreen: boolean(value.hideTimeFullscreen, false), hideWeatherFullscreen: boolean(value.hideWeatherFullscreen, false), hideCalendarFullscreen: boolean(value.hideCalendarFullscreen, false), hideHomeAssistantFullscreen: boolean(value.hideHomeAssistantFullscreen, false), hideWolFullscreen: boolean(value.hideWolFullscreen, false),
     weatherHourlyVisible: boolean(value.weatherHourlyVisible, true), weatherDailyVisible: boolean(value.weatherDailyVisible, true),
     bookmarksVisible: boolean(value.bookmarksVisible, true), homeAssistantVisible: boolean(value.homeAssistantVisible, true), wolVisible: boolean(value.wolVisible, true),
+    bookmarksScale: number(value.bookmarksScale, 0.5, 2, 1), homeAssistantScale: number(value.homeAssistantScale, 0.5, 2, 1), wolScale: number(value.wolScale, 0.5, 2, 1),
+    mobileBookmarksScale: mobileScale(value.mobileBookmarksScale), mobileHomeAssistantScale: mobileScale(value.mobileHomeAssistantScale), mobileWolScale: mobileScale(value.mobileWolScale),
     mobileBookmarksVisible: boolean(value.mobileBookmarksVisible, true), mobileHomeAssistantVisible: boolean(value.mobileHomeAssistantVisible, true), mobileWolVisible: boolean(value.mobileWolVisible, true),
     homeAssistantDeviceSelections: normalizeDeviceSelections(value.homeAssistantDeviceSelections),
     bookmarkLinkSelections: normalizeBookmarkSelections(value.bookmarkLinkSelections),
@@ -71,8 +73,14 @@ export function validateDashboardPreferences(value) {
   return canonical;
 }
 export function decodeStoredDashboardPreferences(value) {
-  if (value && typeof value === 'object' && !Array.isArray(value)) return validateDashboardPreferences({ homeAssistantDeviceSelections: [], bookmarkLinkSelections: null, bookmarksVisible: true, homeAssistantVisible: true, wolVisible: true, mobileBookmarksVisible: true, mobileHomeAssistantVisible: true, mobileWolVisible: true, hideTimeFullscreen: false, hideWeatherFullscreen: false, hideCalendarFullscreen: false, hideHomeAssistantFullscreen: false, hideWolFullscreen: false, weatherHourlyVisible: true, weatherDailyVisible: true, ...value, widgetLayout: Object.hasOwn(value, 'widgetLayout') ? decodeStoredWidgetLayout(value.widgetLayout) : defaultWidgetLayout() });
+  if (value && typeof value === 'object' && !Array.isArray(value)) return validateDashboardPreferences({ ...widgetScaleDefaults, homeAssistantDeviceSelections: [], bookmarkLinkSelections: null, bookmarksVisible: true, homeAssistantVisible: true, wolVisible: true, mobileBookmarksVisible: true, mobileHomeAssistantVisible: true, mobileWolVisible: true, hideTimeFullscreen: false, hideWeatherFullscreen: false, hideCalendarFullscreen: false, hideHomeAssistantFullscreen: false, hideWolFullscreen: false, weatherHourlyVisible: true, weatherDailyVisible: true, ...value, widgetLayout: Object.hasOwn(value, 'widgetLayout') ? decodeStoredWidgetLayout(value.widgetLayout) : defaultWidgetLayout() });
   return validateDashboardPreferences(value);
+}
+
+const widgetScaleDefaults = Object.freeze({ bookmarksScale: 1, mobileBookmarksScale: 1, homeAssistantScale: 1, mobileHomeAssistantScale: 1, wolScale: 1, mobileWolScale: 1 });
+// Local records and transfers upgrade only these additive fields, not unrelated required data.
+export function decodeWidgetScalePreferences(value) {
+  return validateDashboardPreferences(value && typeof value === 'object' && !Array.isArray(value) ? { ...widgetScaleDefaults, ...value } : value);
 }
 export function legacyDashboardPreferences(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -105,8 +113,11 @@ export function resolveDisplayPreferences(settings, mobile) {
     calendarVisible: mobile ? settings.mobileCalendarVisible : settings.calendarVisible,
     calendarScale: mobile ? settings.mobileCalendarScale : settings.calendarScale,
     bookmarksVisible: mobile ? settings.mobileBookmarksVisible : settings.bookmarksVisible,
+    bookmarksScale: mobile ? settings.mobileBookmarksScale : settings.bookmarksScale,
     homeAssistantVisible: mobile ? settings.mobileHomeAssistantVisible : settings.homeAssistantVisible,
-    wolVisible: mobile ? settings.mobileWolVisible : settings.wolVisible
+    homeAssistantScale: mobile ? settings.mobileHomeAssistantScale : settings.homeAssistantScale,
+    wolVisible: mobile ? settings.mobileWolVisible : settings.wolVisible,
+    wolScale: mobile ? settings.mobileWolScale : settings.wolScale
   };
 }
 

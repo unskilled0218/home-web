@@ -2,7 +2,7 @@
 
 A self-hosted photo dashboard with a clock, weather forecasts, an optional Baikal calendar, and Linkwarden bookmarks. Designed for a trusted local network.
 
-Version 0.17.43: [release notes](docs/releases/0.17.43.md). First Edit layout keeps the live default arrangement instead of a grid. Saved Custom layouts remain unchanged.
+Version 0.17.44: [release notes](docs/releases/0.17.44.md). Bookmarks, Home Assistant, and Wake-on-LAN now have independent desktop/mobile scales. Saved layouts remain unchanged.
 
 - [dashboard](#dashboard)
   - [Quick start](#quick-start)
