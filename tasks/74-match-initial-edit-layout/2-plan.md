@@ -1,0 +1,87 @@
+# plan
+
+- [plan](#plan)
+  - [scope](#scope)
+  - [Implementation Plan](#implementation-plan)
+    - [Summary](#summary)
+    - [1. Define live Automatic editing and geometry capture](#1-define-live-automatic-editing-and-geometry-capture)
+    - [2. Separate Automatic preview geometry from saved drafts](#2-separate-automatic-preview-geometry-from-saved-drafts)
+    - [3. Integrate entry, controls, and layout lifecycle](#3-integrate-entry-controls-and-layout-lifecycle)
+    - [4. Add regression coverage and verify](#4-add-regression-coverage-and-verify)
+    - [5. Update documentation and release metadata](#5-update-documentation-and-release-metadata)
+  - [Acceptance Criteria](#acceptance-criteria)
+  - [Risks And Decisions](#risks-and-decisions)
+
+## scope
+
+When the active dashboard profile has no saved Custom layout, entering Edit layout must preserve its live Automatic arrangement instead of replacing it with the editor's fixed 3×2 desktop template. Match visible widgets and their editing frames to the actual dashboard before entry. Preserve existing saved Custom layouts, General Local/Global ownership, both profile records, reference-canvas behavior, and explicit Save/Cancel semantics. Do not redesign the normal Automatic layout, migrate stored geometry, or make editing entry persist a layout. This stage changes no implementation code.
+
+## Implementation Plan
+
+### Summary
+
+The current session falls back to `initialWidgetProfile` for a null profile, and `dashboard-layout-editor.js:92-96` immediately passes that template to `view.setOverride`. The view consequently reparents widgets into the Custom stage and applies different CSS before the user makes an edit. Keep active Automatic widgets in their original DOM/CSS flow while pristine, measure their live rectangles for editing overlays, and convert those measurements into a complete Custom profile only after a real mutation or explicit Custom selection.
+
+### 1. Define live Automatic editing and geometry capture
+
+- Extend `public/dashboard-layout-view.js` with an explicit active-Automatic preview/capture contract. The view owns DOM measurement, original anchors, viewport/safe-area offsets, and reference fitting; the session must not read DOM or duplicate responsive CSS rules.
+- Distinguish an explicit Automatic override (`profile: null`) from no override. The current `override?.profile || state.layout[mode]` cannot force Automatic when a saved Custom profile exists. An explicit null override must render the ordinary Automatic DOM while leaving confirmed preferences unchanged; clearing the override must restore the latest confirmed state. Preserve the existing Custom override behavior.
+- Before applying any Custom projection, capture visible widgets using `getBoundingClientRect`, the existing widget identity map, and the view's locked reference/frame. Retain exact screen-space rectangles separately from canonical profile candidates. Do not measure after reparenting to the Custom stage or infer positions from the old grid.
+- Add a pure conversion helper alongside the existing layout geometry helpers, or a dedicated small layout-geometry module if clearer. Map measured rectangles through the inverse frame fit, including bottom-left Y coordinates, uniform scale, safe insets, and visual viewport offsets. Validate finite/nonzero geometry and return unavailable results for a zero-sized surface rather than dividing by zero.
+- Pristine frames must follow measured visible rectangles even when a widget is shorter than the Custom minimum or extends below the viewport. Do not feed these frames through `projectWidget`'s 100-pixel minimum and canvas clamping before a real edit. Offscreen content does not enlarge the reference canvas; only the actual viewport/safe-area contract determines the editable canvas.
+- Keep a complete six-widget canonical candidate for eventual Custom materialization. Use measured geometry for measurable active widgets; use stable, bounded fallback records only for hidden/unmeasurable widgets. Existing `initialWidgetProfile` may supply those missing records and retain the existing inactive-profile template, but must no longer reposition visible active Automatic widgets on entry. Do not temporarily reveal hidden widgets, clone live actionable content, or persist fallback records on read.
+- Keep this task focused on initial active-profile fidelity. Editing an inactive Automatic profile may retain the existing deterministic preview because that profile has no live rendered rectangles; preserve its current explicit inactive-profile guidance and editing support. Returning to the active Automatic profile must restore live-flow preview rather than reuse the inactive template.
+
+### 2. Separate Automatic preview geometry from saved drafts
+
+- Update `public/dashboard-layout-session.js` to accept measured Automatic candidates through an explicit load/update input while keeping the canonical baseline and `draft[mode] === null` unchanged. Keep per-profile preview data separate from preferences, source identity, and save tokens.
+- For a pristine active Automatic profile, distinguish the live screen rectangles used by overlays from the canonical candidate used by edits. Selection, Toolbar open/close, unchanged numeric values, zero-distance gestures, and boundary layer actions must not mark the session dirty or create Custom.
+- On a real move/resize/layer change, or explicit Custom selection, materialize that profile from the latest valid Automatic candidate, apply the operation, and use the existing Custom stage and projection rules. Preserve the untouched profile and all non-layout preference fields. Bounds/minimum normalization applies at this transition, not merely on entry; do not promise that an arbitrarily tall default document fits unchanged into the bounded Custom canvas.
+- Compare no-op numeric/gesture intent against the measured starting values before canonical rounding or clamping, so a click/release or re-entered number cannot accidentally materialize Custom. Capture an immutable original candidate and frame at gesture start to prevent cumulative drift.
+- Canceling the first gesture must restore the null Automatic draft and live preview. Canceling a later gesture restores its previous Custom draft. Reset/Automatic selection returns to ordinary Automatic preview without saving; no-op Save on a pristine Automatic session exits without a request.
+- Keep `payload()` limited to `{ widgetLayout }` plus the captured opaque token. Do not store measured screen rectangles, preview provenance, or DOM-derived settings in browser/server records or transfer files.
+
+### 3. Integrate entry, controls, and layout lifecycle
+
+- Update `public/dashboard-layout-editor.js` so initial active Automatic entry locks the reference, captures live layout, and shows overlays without calling `setOverride` with a synthetic profile. Preserve both Edit layout button and 600ms long-press entry, selected-widget identity, inert action guards, focus restoration, and pointer-release suppression.
+- Keep the current Automatic page flow, caption position, font sizes, widget visibility, and content order intact while pristine. The `.dashboard-layout-editing` class may hide page tools using visibility, but must not remove their layout space or activate Custom styling merely because editing started. Adjust `public/dashboard.css` only where necessary to preserve that distinction.
+- Populate numeric controls and frame handles from live measurements for active Automatic. Preserve existing layer controls and hidden-widget rows; hidden/unmeasurable widgets remain reachable through the toolbar without revealing them on the dashboard. If the viewport is unavailable, disable geometry mutations and report guidance while keeping Cancel available.
+- Refresh pristine Automatic measurements when actual DOM layout changes, including delayed forecast/calendar/device/bookmark content, captions, scrolling, resize, orientation, fullscreen, or visual viewport changes. Use bounded/coalesced observer work in the view, active only where needed; do not add a polling loop or fetch integration data. Stop observation/listeners on exit/dispose and prevent measurement/render feedback loops.
+- During a gesture, retain the captured frame/candidate; a real surface change cancels that gesture through existing ownership rules before remeasurement. Once Custom is materialized, later content/viewport observations must not rewrite saved/draft geometry or recapture it as Automatic.
+- Reload explicitly discards both profile drafts and replaces their captured revision/source; recapture active Automatic only after restoring its default DOM. Unrelated preference polling must not silently rebase a dirty Custom draft. General source changes, Local/Global conflicts, offline preview, pending saves, and late callbacks keep their existing guards.
+- Existing saved Custom entry must continue projecting its stored profile directly. Do not measure it and replace it with live bounds, rescale canonical coordinates, change layers, or alter the full-screen reference estimator/confirmation mechanism.
+
+### 4. Add regression coverage and verify
+
+- Extend `test/dashboard-layout.test.js` or add focused pure geometry tests for inverse fit, bottom-left coordinates, scaled destinations, safe/visual offsets, rounding, hidden/missing rectangles, short widgets, overflow, and invalid/zero surfaces. Separate exact pristine screen geometry from bounded canonical materialization expectations.
+- Extend `test/dashboard-layout-session.test.js` for injected Automatic candidates, null baseline preservation, independent profile previews, no-op selection/fields/gestures/layer boundaries, first real materialization, canceled first edits, Reset, explicit Custom, and layout-only payloads. Retain immutable token/baseline and other-profile preservation checks.
+- Extend `test/dashboard-layout-view.test.js` for explicit null overrides, correct capture before Custom reparenting, original DOM identity/anchors, stale callback rejection, coalesced content/scroll observations, cleanup, and no measurement writes or Custom recapture. Keep existing reference-lock and confirmation tests in `test/dashboard-layout-reference.test.js` passing.
+- Add browser scenarios in `e2e/dashboard-layout.spec.js` that compare visible widget bounding boxes, order, computed font sizes, and caption placement immediately before and after initial Automatic entry. Allow a small documented CSS-pixel tolerance for measurement; assertions must fail against the old 3×2 entry template, not merely check that the editor opened.
+- Cover both button and long-press entry, desktop widths above 1000px, intermediate stacked layout, mobile at/below 600px, stored right alignment/nondefault scales, partial/all-hidden widgets, short widgets, document scrolling, and fullscreen. Assert no preference PUT/Local record mutation or stored Custom profile on entry, panel toggles, selection, canceled gestures, no-op Save, and Cancel.
+- Verify a real edit starts from measured active geometry, saves only the intended General Local/Global profile, and retains the other profile. Existing Custom entry, mixed-scope isolation, inactive-profile editing, Reset/Reload, stale-save conflicts, gesture cancellation, content updates, focus/inert behavior, and no duplicated integration work must remain covered. Update the old temporary-template status assertions rather than weakening geometry checks; keep `initialWidgetProfile` fixtures where they deliberately represent existing saved Custom layouts.
+- Run focused layout geometry/session/view/reference/activation Node tests, `npm run check`, then `npm test -- --test-concurrency=1` sequentially. Run focused layout and scope browser specs, then `npm run test:browser`; report prerequisite failures distinctly and avoid claiming runtime browser success from collection or syntax checks. The previous task recorded missing Chromium and Firefox binaries. Do not install browser/system packages; provide `npx playwright install chromium firefox` if still required. Record results in `4-implemented.md` and run `git diff --check`.
+
+### 5. Update documentation and release metadata
+
+- Update `docs/dashboard-layout.md` to replace the claim that active Automatic entry shows a temporary template with the new live-default preview contract. Explain when Custom is created, how hidden/inactive profiles are handled, and that first real Custom materialization retains existing canvas/minimum constraints. Keep Save/Cancel, General scope, and reference sizing descriptions accurate.
+- Update relevant layout wording in `docs/dashboard.md` and README briefly. Do not describe a new default dashboard arrangement or imply that existing saved Custom layouts are migrated.
+- Follow the patch-release convention during implementation: advance current `0.17.42` to `0.17.43` if still current; synchronize `VERSION`, package/root lock versions, README, release notes, `scripts/release.json`, and the current release link in `docs/releases.md`. Do not publish, deploy, or push without a separate request.
+
+## Acceptance Criteria
+
+- Initial Edit layout on an active Automatic dashboard preserves visible default widget positions, sizes, order, typography, and caption placement instead of switching to a 3×2 desktop or 2×3 mobile grid. Frames align with the live widgets.
+- Pristine entry, selection, Toolbar changes, canceled/zero-distance gestures, unchanged numeric values, and no-op Save do not create or persist Custom; Cancel restores ordinary interaction with no preference mutation.
+- A genuine edit or explicit Custom choice materializes from measured active geometry, not the generic template, using existing bounded layout rules. Only the edited profile changes when saved, through General's selected Local/Global store and captured token.
+- Saved Custom profiles, inactive-profile editing support, hidden widget access, fullscreen/reference behavior, dirty conflicts, and existing action-safety/focus contracts remain intact.
+- Content/scroll/viewport changes keep pristine Automatic overlays aligned without changing preferences, rewriting Custom geometry, leaking observers, or starting duplicate data work.
+- Documentation and version metadata agree, tests distinguish live preview from Custom conversion, and verification honestly records any missing browser prerequisites.
+
+## Risks And Decisions
+
+- DOM measurement must happen before Custom projection. Reparenting first changes CSS, typography, padding, and wrapping, so measuring afterward would reproduce the wrong layout despite removing the grid helper.
+- Live default flow and bounded Custom geometry are different representations. Keep an exact pristine overlay path rather than forcing short/offscreen content through Custom minimum/clamping rules on entry. Any constraints at an explicit edit must not be mistaken for permission to rearrange the dashboard before that edit.
+- Measurements belong to view/session memory, not the domain schema. No new stored layout version, server endpoint, preference field, or Local/Global migration is required.
+- Only the active profile can be measured faithfully from the live DOM. Retain the existing inactive Automatic template as a clearly identified geometry preview rather than silently adopting desktop measurements as mobile geometry or vice versa.
+- Missing/hidden rectangles require stable complete candidates for the six-widget schema, but those fallback records must not control visible active Automatic entry. A completely hidden dashboard must still offer Toolbar/Cancel safely.
+- Reference locking, observer callbacks, and raw numeric edits can otherwise create remeasurement loops or drift. Keep one owner for measurement, freeze gesture-start inputs, and release all view-owned work when editing ends.
+- Existing unrelated integration-draft and Calendar auto-close warnings remain outside this task. Do not fix them while changing layout initialization.
