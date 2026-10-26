@@ -6,6 +6,19 @@ import { normalizeDashboardPreferences } from '../public/dashboard-helpers.js';
 const state = (confirmed = true) => ({ confirmed, snapshot: { revision: 7, preferences: normalizeDashboardPreferences() } });
 const reference = { width: 1600, height: 900 };
 
+test('measured Automatic candidates stay session-local until a real change and preserve other profiles/tokens', () => {
+  const session = createLayoutSession(); const initial = state(); initial.saveToken = 'general-local-token'; initial.source = 'general-local-source'; session.load(initial, 'desktop');
+  const measured = session.effective(); measured.items[0].x = 12345; measured.items[0].w = 200000;
+  session.preview('desktop', measured); measured.items[0].x = 999;
+  assert.equal(session.effective().items[0].x, 12345); assert.equal(session.changed(), false); assert.equal(session.draft.desktop, null);
+  session.edit({}, reference); assert.equal(session.changed(), false);
+  session.arrange('custom'); assert.equal(session.changed(), true); assert.equal(session.draft.desktop.items[0].x, 12345); assert.equal(session.draft.mobile, null);
+  session.restore(null); assert.equal(session.changed(), false); assert.equal(session.effective().items[0].x, 12345);
+  session.mode = 'mobile'; assert.notEqual(session.effective().items[0].x, 12345); session.mode = 'desktop'; session.layer('front', session.effective().items[0].id);
+  assert.equal(session.payload().revision, 'general-local-token'); assert.deepEqual(Object.keys(session.payload().preferences), ['widgetLayout']); assert.equal(session.source, 'general-local-source');
+  session.arrange('automatic'); session.preview('desktop', null); assert.equal(session.changed(), false); assert.notEqual(session.effective().items[0].x, 12345);
+});
+
 test('Automatic templates, selection and boundary/no-op operations do not materialize Custom', () => {
   const session = createLayoutSession(); session.load(state(), 'desktop'); const template = session.effective();
   session.selected = template.items.at(-1).id; session.layer('front'); session.edit({}, reference);

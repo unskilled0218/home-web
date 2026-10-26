@@ -53,6 +53,23 @@ test('layout measurement ignores content, tools, status and captions and uses th
   f.window.innerHeight = 0; assert.equal(measureLayoutSurface(f.document, f.window).height, 0);
 });
 
+test('explicit Automatic overrides retain live nodes and exact measurements, then restore latest Custom state', () => {
+  const f = fixture(); const view = createDashboardLayoutView(f); const layout = { ...defaultWidgetLayout(), desktop: initialWidgetProfile('desktop') };
+  const state = { layout, mobile: false, position: 'right', scale: 1, display: { content: true } };
+  view.update(state); assert.equal(view.captureAutomatic('desktop'), null);
+  view.lockReference(); view.setOverride({ mode: 'desktop', profile: null });
+  const clock = f.nodes.get('clock'); clock.rect = { left: 50.5, top: 740, width: 300, height: 40 };
+  assert.equal(clock.parent, f.nodes.get('information')); assert.equal(f.nodes.get('widget-surface').hidden, true);
+  const capture = view.captureAutomatic('desktop'); assert.deepEqual(capture.screen.time, clock.rect); assert.ok(capture.pixels.time.h < 100);
+  assert.equal(view.captureAutomatic('mobile'), null); assert.deepEqual(layout.desktop, initialWidgetProfile('desktop'));
+  const observation = f.observers.at(-1); assert.ok(observation.nodes.includes(clock));
+  observation.fn(); observation.fn(); f.listeners.get('scroll')(); assert.equal(f.frames.size, 1);
+  const next = { ...layout, desktop: initialWidgetProfile('desktop', 'right') }; view.update({ ...state, layout: next }); assert.equal(clock.parent, f.nodes.get('information'));
+  view.setOverride(null); assert.equal(clock.parent, f.nodes.get('widget-surface')); assert.equal(observation.nodes.length, 0); assert.equal(f.listeners.has('scroll'), false);
+  f.frames.clear(); observation.fn(); assert.equal(f.frames.size, 0, 'late disconnected observations cannot schedule work');
+  view.dispose(); assert.equal(view.captureAutomatic('desktop'), null);
+});
+
 test('only safe insets and visual viewport offsets constrain the canvas edges', () => {
   const f = fixture(); const safe = { top: 10, bottom: 20, left: 30, right: 40 };
   f.window.getComputedStyle = () => ({ getPropertyValue: key => String(safe[key.replace('--layout-safe-', '')]) });

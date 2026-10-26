@@ -200,7 +200,7 @@ function releasePhotoLayer(layer) { if (!layer) return; layer.photoResource?.rel
 function applyVisibilityLayout() {
   const display = dashboardDisplay(settings, { mobile: mobileViewport.matches, fullscreen: Boolean(document.fullscreenElement), caption: Boolean($('photo-caption').textContent) });
   applyDashboardDisplay(document, display);
-  layoutView.update({ layout: settings.widgetLayout, mobile: mobileViewport.matches, scale: settings.scale, display });
+  layoutView.update({ layout: settings.widgetLayout, mobile: mobileViewport.matches, position: settings.position, scale: settings.scale, display });
   return display;
 }
 function clearPhotos() { stopAnimations(); releasePhotoLayer($('photos').lastElementChild); $('photo-caption').textContent = ''; applyVisibilityLayout(); }

@@ -8,6 +8,23 @@ import { defaultWidgetLayout, initialWidgetProfile } from '../public/dashboard-l
 const image = page => page.locator('#photos .photo-layer > img').last();
 async function open(page, id = 'general') { await page.locator('#open-settings').click(); await categoryTab(page, id); }
 
+for (const mode of ['local', 'global']) test(`first Automatic edit saves measured geometry only to General ${mode}`, async ({ browser }) => {
+  const env = await settingsEnvironment(); const context = await browser.newContext({ viewport: { width: 1200, height: 800 }, screen: { width: 1200, height: 800 } });
+  const local = { schema: 1, revision: 1, preferences: normalizeDashboardPreferences({ position: 'right', scale: 1.6, color: '#123456', temperature: 'fahrenheit' }), weatherLocation: null, followGlobalPhotos: false };
+  await context.addInitScript(({ local, scopes }) => { localStorage.setItem('dashboard.local-settings.v1', JSON.stringify(local)); localStorage.setItem('dashboard.category-scopes.v1', JSON.stringify({ schema: 1, revision: 1, scopes })); }, { local, scopes: { ...categoryScopes(), general: mode, time: 'global' } });
+  const page = await context.newPage();
+  try {
+    await page.goto(env.base); await expect(page.locator('#settings-status')).toContainText(`General settings use ${mode === 'local' ? 'Local' : 'Global'}`);
+    const globalBefore = env.store.getDashboardPreferences(); const before = mode === 'local' ? local.preferences : globalBefore.preferences;
+    const original = await page.locator('#clock').boundingBox(); await page.locator('#edit-layout').click(); await page.locator('#layout-toggle').click();
+    await page.locator('#layout-h').fill('177'); await page.locator('#layout-h').press('Tab'); await expect(page.locator('#layout-arrangement')).toHaveValue('custom'); await page.locator('#layout-save').click(); await expect(page.locator('#layout-toolbar')).toBeHidden();
+    const after = mode === 'local' ? await page.evaluate(() => JSON.parse(localStorage.getItem('dashboard.local-settings.v1')).preferences) : env.store.getDashboardPreferences().preferences;
+    const time = after.widgetLayout.desktop.items.find(item => item.id === 'time'); expect(time.x).toBe(Math.round(original.x / 1200 * 1000000)); expect(time.h).toBe(Math.round(177 / 800 * 1000000));
+    expect(after.widgetLayout.mobile).toBeNull(); expect({ ...after, widgetLayout: before.widgetLayout }).toEqual(before);
+    if (mode === 'local') expect(env.store.getDashboardPreferences()).toEqual(globalBefore); else expect(await page.evaluate(() => JSON.parse(localStorage.getItem('dashboard.local-settings.v1')))).toEqual(local);
+  } finally { await context.close(); await env.close(); }
+});
+
 for (const mode of ['local', 'global']) test(`General removes Information layout controls and preserves ${mode} values through saves and direct editing`, async ({ browser }) => {
   const env = await settingsEnvironment(); const context = await browser.newContext();
   const widgetLayout = { ...defaultWidgetLayout(), desktop: initialWidgetProfile('desktop', 'right'), mobile: initialWidgetProfile('mobile') };

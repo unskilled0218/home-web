@@ -1,5 +1,6 @@
 import { projectWidget, fitLayoutCanvas, WIDGET_ELEMENTS } from './dashboard-layout.js';
 import { createLayoutReference } from './dashboard-layout-reference.js';
+import { captureAutomaticLayout } from './dashboard-layout-automatic.js';
 
 function readSafeInsets(document, window) {
   const style = window.getComputedStyle(document.documentElement);
@@ -20,9 +21,20 @@ export function createDashboardLayoutView({ document, window, onMeasure = () => 
   const nodes = Object.fromEntries(Object.entries(WIDGET_ELEMENTS).map(([id, element]) => [id, document.getElementById(element)]));
   const anchors = new Map();
   for (const node of [...Object.values(nodes), caption]) { const anchor = document.createComment('Automatic layout position'); node.before(anchor); anchors.set(node, anchor); }
-  let state; let override; let custom = false; let automaticMode; let frame; let disposed = false; let confirmation; let observedContext;
+  let state; let override; let custom = false; let automaticMode; let frame; let disposed = false; let confirmation; let observedContext; let automaticObserver;
   const references = createLayoutReference();
   const destination = () => measureLayoutSurface(document, window);
+  const liveAutomatic = () => override?.profile === null && override.mode === (state?.mobile ? 'mobile' : 'desktop');
+  function observeAutomatic() {
+    if (liveAutomatic() && !automaticObserver) {
+      const owner = new window.ResizeObserver(() => { if (!disposed && automaticObserver === owner) schedule(); }); automaticObserver = owner;
+      for (const node of [content, ...Object.values(nodes)]) owner.observe(node);
+      window.addEventListener('scroll', automaticScroll, true);
+    } else if (!liveAutomatic() && automaticObserver) {
+      automaticObserver.disconnect(); automaticObserver = undefined; window.removeEventListener('scroll', automaticScroll, true);
+    }
+  }
+  function automaticScroll() { if (liveAutomatic()) schedule(); }
   function snapshot() {
     const screen = window.screen;
     const orientation = screen?.orientation;
@@ -55,7 +67,7 @@ export function createDashboardLayoutView({ document, window, onMeasure = () => 
     if (!state || disposed) return;
     const focused = document.activeElement;
     const mode = override?.mode || (state.mobile ? 'mobile' : 'desktop');
-    const profile = override?.profile || state.layout[mode];
+    const profile = override ? override.profile : state.layout[mode];
     if (profile && !custom) { stage.append(...Object.values(nodes)); stage.after(caption); }
     if (!profile && custom) for (const [node, anchor] of anchors) { anchor.after(node); for (const property of ['left', 'top', 'bottom', 'width', 'height', 'z-index', '--widget-width', '--widget-height']) node.style.removeProperty(property); }
     const changedMode = custom !== Boolean(profile);
@@ -82,6 +94,7 @@ export function createDashboardLayoutView({ document, window, onMeasure = () => 
         node.style.zIndex = String(index + 1);
       }
     }
+    observeAutomatic();
     if (focused && focused !== document.activeElement && focused.isConnected) focused.focus({ preventScroll: true });
     onMeasure();
   }
@@ -103,10 +116,16 @@ export function createDashboardLayoutView({ document, window, onMeasure = () => 
     destination,
     reference: mode => references.get(mode),
     frame(mode) { const reference = references.get(mode); return { reference, fit: fitLayoutCanvas(reference, destination()) }; },
+    captureAutomatic(mode) {
+      if (disposed || custom || mode !== (state?.mobile ? 'mobile' : 'desktop')) return null;
+      const reference = references.get(mode); const frame = { reference, fit: fitLayoutCanvas(reference, destination()) };
+      const rectangles = Object.fromEntries(Object.entries(nodes).filter(([_id, node]) => !node.hidden).map(([id, node]) => [id, node.getBoundingClientRect()]));
+      return captureAutomaticLayout(rectangles, frame, mode, state.position);
+    },
     setOverride(value) { override = value; render(); },
     lockReference() { refreshContext(); references.lock(); },
     releaseReference() { references.release(); render(); },
     update(next) { state = next; refreshContext(); render(); },
-    dispose() { disposed = true; confirmation = undefined; observer.disconnect(); window.cancelAnimationFrame(frame); window.removeEventListener('resize', schedule); window.visualViewport?.removeEventListener('resize', schedule); window.visualViewport?.removeEventListener('scroll', schedule); document.removeEventListener('fullscreenchange', fullscreenChanged); window.screen?.orientation?.removeEventListener?.('change', orientationChanged); window.removeEventListener('orientationchange', orientationChanged); window.removeEventListener('pageshow', resumed); }
+    dispose() { disposed = true; confirmation = undefined; observer.disconnect(); automaticObserver?.disconnect(); automaticObserver = undefined; window.removeEventListener('scroll', automaticScroll, true); window.cancelAnimationFrame(frame); window.removeEventListener('resize', schedule); window.visualViewport?.removeEventListener('resize', schedule); window.visualViewport?.removeEventListener('scroll', schedule); document.removeEventListener('fullscreenchange', fullscreenChanged); window.screen?.orientation?.removeEventListener?.('change', orientationChanged); window.removeEventListener('orientationchange', orientationChanged); window.removeEventListener('pageshow', resumed); }
   };
 }

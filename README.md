@@ -2,7 +2,7 @@
 
 A self-hosted photo dashboard with a clock, weather forecasts, an optional Baikal calendar, and Linkwarden bookmarks. Designed for a trusted local network.
 
-Version 0.17.42: [release notes](docs/releases/0.17.42.md). General no longer shows Information layout controls. Saved settings and direct dashboard layout editing remain supported.
+Version 0.17.43: [release notes](docs/releases/0.17.43.md). First Edit layout keeps the live default arrangement instead of a grid. Saved Custom layouts remain unchanged.
 
 - [dashboard](#dashboard)
   - [Quick start](#quick-start)
