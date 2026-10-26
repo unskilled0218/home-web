@@ -21,14 +21,15 @@
 - `npm run check`: passed on version `0.17.43`.
 - `npm test -- --test-concurrency=1`: passed all 666 tests, no failures, cancellations, or skips, in approximately 48 seconds. Syntax and full Node verification ran sequentially before browser attempts.
 - All `e2e/*.js` files passed separate `node --check` syntax checks. Playwright also collected the complete suite successfully.
-- Focused browser attempt: `npm run test:browser -- e2e/dashboard-layout.spec.js e2e/settings-scope.spec.js --max-failures=1` collected 62 cases, then stopped at the first missing-Chromium launch failure; 61 did not run. No application interaction was exercised.
-- Complete browser-suite attempt: `npm run test:browser -- --max-failures=1` collected 191 cases, then stopped at the first missing-Chromium launch failure; 190 did not run. The cap avoids repeating a confirmed prerequisite failure, not application failures.
-- Missing Chromium headless shell: `/home/container/.cache/ms-playwright/chromium_headless_shell-1243/chrome-headless-shell-linux64/chrome-headless-shell`. Firefox's configured executable is also absent at `/home/container/.cache/ms-playwright/firefox-1543/firefox/firefox`. The user must run `npx playwright install chromium firefox` before browser verification can proceed. No browser/system packages were installed.
+- Initial focused and complete browser attempts stopped at the first missing-Chromium launch failure with `--max-failures=1`. Those attempts exercised no application interactions. The user subsequently installed Chromium and Firefox; the prerequisite blocker is resolved. No browser/system packages were installed by the agent.
+- After installation, `npm run test:browser -- e2e/dashboard-layout.spec.js e2e/settings-scope.spec.js` passed all 62 focused cases, including the Firefox/Chromium canonical-layout case and the new Automatic geometry, numeric-validation, scrolling/fullscreen, and Local/Global save scenarios.
+- The first uncapped complete browser attempt reached 170 passing cases before the shell command's 240-second timeout interrupted execution. It was not treated as a complete pass; no application test failure was reported before interruption.
+- Final `npm run test:browser`, rerun with a 600-second command allowance: all 191 cases passed in approximately 4.5 minutes, including both explicit Firefox/Chromium cross-browser scenarios. No code or test changes were needed after installing the browsers.
 - `git diff --check`: passed. Release consistency and retained static-asset checks passed within the full Node suite.
 
 ## Limits
 
-- Browser geometry, native validation, fullscreen, and pointer behavior remain unverified at runtime because the required executables are missing. Unit/handler seams and syntax/collection success do not establish a browser pass.
+- Browser verification is now complete for the configured Chromium suite and its dedicated Firefox cross-browser scenarios. This does not claim that every scenario was run separately under Firefox.
 - The live default arrangement is preserved while Automatic is pristine. Explicit Custom materialization still applies the existing minimum size and bounded canvas rules, so short/offscreen content may be constrained at that transition. Measured rectangles and comparison provenance are never persisted.
 - Inactive Automatic profiles cannot be measured from the active DOM and retain their deterministic preview. Returning to active Automatic restores live-flow capture.
 - Unrelated integration-draft discard and Calendar auto-close warnings remain unchanged. No merge, push, deployment, or release publication was performed.
