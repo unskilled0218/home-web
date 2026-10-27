@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createDashboardLayoutView, measureLayoutSurface } from '../public/dashboard-layout-view.js';
 import { defaultWidgetLayout, initialWidgetProfile, WIDGET_ELEMENTS } from '../public/dashboard-layout.js';
+import { dashboardDisplay, applyDashboardDisplay } from '../public/dashboard-display.js';
+import { normalizeDashboardPreferences } from '../public/dashboard-helpers.js';
 
 function fixture() {
   const nodes = new Map(); const listeners = new Map(); const frames = new Map(); const observers = []; let sequence = 0;
@@ -51,6 +53,22 @@ test('layout measurement ignores content, tools, status and captions and uses th
   f.window.innerWidth = 80; f.window.innerHeight = 50;
   assert.equal(measureLayoutSurface(f.document, f.window).height, 50);
   f.window.innerHeight = 0; assert.equal(measureLayoutSurface(f.document, f.window).height, 0);
+});
+
+test('caption visibility survives Automatic/Custom reparenting and image toggles preserve saved geometry', () => {
+  const f = fixture(); f.nodes.set('photos', { hidden: false });
+  const view = createDashboardLayoutView(f); const caption = f.nodes.get('photo-caption'); caption.textContent = 'current.png';
+  const layout = { ...defaultWidgetLayout(), desktop: initialWidgetProfile('desktop') }; const before = structuredClone(layout);
+  try {
+    for (const imageVisible of [false, true, false]) for (const mobile of [false, true]) {
+      const settings = normalizeDashboardPreferences({ imageVisible, widgetLayout: layout });
+      const display = dashboardDisplay(settings, { mobile, caption: true });
+      applyDashboardDisplay(f.document, display); view.update({ layout, mobile, scale: 1, display });
+      assert.equal(caption.hidden, !imageVisible); assert.equal(f.nodes.get('photos').hidden, !imageVisible);
+      assert.equal(caption.parent, mobile ? f.nodes.get('information') : f.document.body);
+      assert.deepEqual(layout, before); assert.equal(f.nodes.get('clock').hidden, false);
+    }
+  } finally { view.dispose(); }
 });
 
 test('explicit Automatic overrides retain live nodes and exact measurements, then restore latest Custom state', () => {

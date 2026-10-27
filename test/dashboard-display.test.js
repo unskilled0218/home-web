@@ -61,3 +61,28 @@ test('repeated caption DOM application retains supplied settings and only touche
   }
   assert.deepEqual(settings, before);
 });
+
+test('hidden images suppress captions and caption-only tracks across mobile and fullscreen without changing widgets', () => {
+  for (const mobile of [false, true]) for (const fullscreen of [false, true]) for (const caption of [false, true]) {
+    const settings = normalizeDashboardPreferences({ imageInfo: true });
+    const shown = dashboardDisplay(settings, { mobile, fullscreen, caption });
+    const hidden = dashboardDisplay({ ...settings, imageVisible: false }, { mobile, fullscreen, caption });
+    assert.equal(hidden.imageVisible, false); assert.equal(hidden.captionVisible, false);
+    for (const name of sections) assert.equal(hidden[`${name}Visible`], shown[`${name}Visible`], name);
+    const captionOnly = dashboardDisplay(normalizeDashboardPreferences({ ...allHidden, imageVisible: false }), { mobile, fullscreen, caption });
+    assert.equal(captionOnly.information, false); assert.equal(captionOnly.content, false); assert.equal(captionOnly.columns, ''); assert.equal(captionOnly.backgroundOnly, true);
+  }
+});
+
+test('image DOM visibility stays hidden through caption callbacks and restores current presentation without mutating preferences', () => {
+  const nodes = new Map();
+  const document = { getElementById(id) { if (!nodes.has(id)) nodes.set(id, { style: { setProperty() {} } }); return nodes.get(id); }, body: { classList: { toggle() {} } } };
+  const settings = normalizeDashboardPreferences({ ...allHidden, imageVisible: false, imageInfo: true }); const before = structuredClone(settings);
+  for (const caption of [true, false, true]) {
+    applyDashboardDisplay(document, dashboardDisplay(settings, { caption }));
+    assert.equal(nodes.get('photos').hidden, true); assert.equal(nodes.get('photo-caption').hidden, true); assert.equal(nodes.get('information').hidden, true);
+  }
+  applyDashboardDisplay(document, dashboardDisplay({ ...settings, imageVisible: true }, { caption: true }));
+  assert.equal(nodes.get('photos').hidden, false); assert.equal(nodes.get('photo-caption').hidden, false); assert.equal(nodes.get('information').hidden, false);
+  assert.deepEqual(settings, before);
+});

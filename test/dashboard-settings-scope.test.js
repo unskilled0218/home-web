@@ -24,6 +24,24 @@ function setup(t, { values = new Map(), fetchImpl, broken = false, initialSnapsh
 }
 const save = (env, id, patch, options) => env.client.saveCategory(id, patch, env.client.getCategoryState(id).saveToken, options);
 
+for (const followGlobalPhotos of [true, false]) test(`image visibility saves stay Local with followGlobalPhotos=${followGlobalPhotos} and scope switches restore each store`, async t => {
+  const old = normalizeDashboardPreferences({ color: '#123456', seconds: false }); delete old.imageVisible;
+  const record = { schema: 1, revision: 7, preferences: old, weatherLocation: { latitude: 51, longitude: 0, label: 'London' }, followGlobalPhotos };
+  const values = new Map([[LOCAL_SETTINGS_KEY, JSON.stringify(record)]]); const env = setup(t, { values }); await env.client.start();
+  assert.equal(env.client.getState().snapshot.preferences.imageVisible, true); assert.equal(values.get(LOCAL_SETTINGS_KEY), JSON.stringify(record));
+  await save(env, 'images', { imageVisible: false });
+  const savedLocal = values.get(LOCAL_SETTINGS_KEY);
+  assert.deepEqual(JSON.parse(savedLocal), { ...record, revision: 8, preferences: { ...old, imageVisible: false } }); assert.equal(env.writes().length, 0);
+  const fresh = setup(t, { values }); await fresh.client.start(); assert.equal(fresh.client.getState().snapshot.preferences.imageVisible, false);
+  await env.client.changeScope('images', 'global'); assert.equal(env.client.getState().snapshot.preferences.imageVisible, true);
+  const beforeGlobal = env.client.getTransferState().snapshot.preferences;
+  await save(env, 'images', { imageVisible: false });
+  assert.deepEqual(JSON.parse(env.writes()[0].options.body).preferences, { ...beforeGlobal, imageVisible: false }); assert.equal(values.get(LOCAL_SETTINGS_KEY), savedLocal);
+  await save(env, 'images', { imageVisible: true }); await env.client.changeScope('images', 'local');
+  assert.equal(env.client.getState().snapshot.preferences.imageVisible, false); assert.equal(env.client.getState().followGlobalPhotos, followGlobalPhotos);
+  assert.deepEqual(env.client.getState().weatherLocation, record.weatherLocation);
+});
+
 test('old Local scale records preserve preferences/location/follow choices through offline save and storage-event rereads', async t => {
   const preferences = normalizeDashboardPreferences({ color: '#123456', seconds: false, bookmarkLinkSelections: [] }); const old = { ...preferences };
   const keys = ['bookmarksScale', 'mobileBookmarksScale', 'homeAssistantScale', 'mobileHomeAssistantScale', 'wolScale', 'mobileWolScale']; for (const key of keys) delete old[key];

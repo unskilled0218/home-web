@@ -100,6 +100,19 @@ test('home preserves forecast, calendar, and photo settings markup', async (cont
   assert.match(dashboardHtml, /id="calendar-events"/); assert.match(dashboardHtml, /id="calendar-password"[^>]*type="password"[^>]*autocomplete="current-password"/);
   assert.doesNotMatch(dashboardHtml, /refresh-calendar|>Refresh<|calendar-heading/);
   assert.match(dashboardHtml, /Baikal server URL/); assert.match(dashboardHtml, /name="serverUrl"[^>]*placeholder="https:\/\/baikal\.example\.test"/); assert.doesNotMatch(dashboardHtml, /dav\.php\/calendars/);
+  assert.match(dashboardHtml, /<label class="toggle"><input name="imageVisible" form="preferences" type="checkbox" aria-describedby="image-visibility-help">Show image<\/label>/);
+});
+
+test('image visibility defaults on and legacy browser settings retain explicit off without writing', () => {
+  assert.equal(normalizeSettings().imageVisible, true);
+  for (const value of [null, 'false', 0, undefined]) assert.equal(normalizeSettings({ imageVisible: value }).imageVisible, true);
+  let writes = 0;
+  for (const imageVisible of [true, false]) {
+    const saved = { imageVisible, color: '#123456', imageInfo: true };
+    const result = loadSettings({ getItem: () => JSON.stringify(saved), setItem: () => writes++ });
+    assert.equal(result.imageVisible, imageVisible); assert.equal(result.color, saved.color); assert.equal(result.imageInfo, true);
+  }
+  assert.equal(writes, 0);
 });
 
 test('Settings links eight accessible tabs to panels with General initially selected', async (context) => {

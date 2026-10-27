@@ -26,6 +26,16 @@ test('category map schemas reject missing/unknown modes, unsafe revisions, and e
   const missing = structuredClone(record); delete missing.scopes.weather; assert.throws(() => validateCategoryScopes(missing));
 });
 
+test('image visibility belongs only to Images and follows category scope without changing other values', () => {
+  const local = normalizeDashboardPreferences({ imageVisible: false, color: '#123456' });
+  const global = normalizeDashboardPreferences({ color: '#abcdef' });
+  assert.deepEqual(Object.entries(SETTINGS_CATEGORIES).filter(([, category]) => category.keys.includes('imageVisible')).map(([id]) => id), ['images']);
+  assert.deepEqual(patchCategory('images', global, { imageVisible: false }), { ...global, imageVisible: false });
+  assert.equal(composeCategoryPreferences({ ...categoryScopes(), time: 'global' }, local, global).imageVisible, false);
+  assert.equal(composeCategoryPreferences({ ...categoryScopes(), images: 'global' }, local, global).imageVisible, true);
+  assert.throws(() => patchCategory('time', local, { imageVisible: true }), /category preference/);
+});
+
 test('category drafts retain dirty baselines, opaque tokens and independent sessions until reload', () => {
   const drafts = createCategoryDrafts(); const state = { confirmed: true, source: 'opaque source', saveToken: 'opaque token', snapshot: { preferences: normalizeDashboardPreferences() } };
   drafts.load('time', state); drafts.load('weather', state); drafts.dirty('time');

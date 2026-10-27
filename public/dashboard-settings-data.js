@@ -1,4 +1,4 @@
-import { validateDashboardPreferences, decodeWidgetScalePreferences } from './dashboard-helpers.js';
+import { validateDashboardPreferences, decodeAdditivePreferences } from './dashboard-helpers.js';
 import { validateWeatherLocation } from './weather-data.js';
 import { CATEGORY_IDS } from './dashboard-settings-categories.js';
 
@@ -31,11 +31,11 @@ export function validateLocalSettings(value) {
 export function decodeStoredLocalSettings(value) {
   // Check the original byte limit before adding missing defaults, then validate the complete record.
   if (jsonBytes(value) > MAX_SETTINGS_TRANSFER_BYTES) throw new Error('Invalid local settings.');
-  return validateLocalSettings({ ...value, preferences: decodeWidgetScalePreferences(value?.preferences) });
+  return validateLocalSettings({ ...value, preferences: decodeAdditivePreferences(value?.preferences) });
 }
 export function validateSettingsTransfer(value) {
   if (!exactFields(value, ['format', 'version', 'preferences', 'weatherLocation']) || value.format !== 'home-web.global-settings' || value.version !== 1 || jsonBytes(value) > MAX_SETTINGS_TRANSFER_BYTES || jsonBytes(value.preferences) > 65536) throw new Error('Invalid global settings file.');
-  return { format: value.format, version: 1, preferences: decodeWidgetScalePreferences(value.preferences), weatherLocation: nullableWeatherLocation(value.weatherLocation) };
+  return { format: value.format, version: 1, preferences: decodeAdditivePreferences(value.preferences), weatherLocation: nullableWeatherLocation(value.weatherLocation) };
 }
 
 export function validateConfigurationMetadata(value) {

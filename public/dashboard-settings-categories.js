@@ -8,7 +8,7 @@ export const SETTINGS_CATEGORIES = Object.freeze({
   bookmarks: { label: 'Bookmarks', keys: ['bookmarksVisible', 'bookmarksScale', 'mobileBookmarksVisible', 'mobileBookmarksScale', 'hideBookmarksFullscreen', 'mobileBookmarksMode', 'bookmarkLinkSelections'] },
   'home-assistant': { label: 'Home Assistant', keys: ['homeAssistantVisible', 'homeAssistantScale', 'mobileHomeAssistantVisible', 'mobileHomeAssistantScale', 'hideHomeAssistantFullscreen', 'homeAssistantDeviceSelections'] },
   wol: { label: 'Wake-on-LAN', keys: ['wolVisible', 'wolScale', 'mobileWolVisible', 'mobileWolScale', 'hideWolFullscreen'] },
-  images: { label: 'Images', keys: ['order', 'interval', 'duration', 'animation', 'opacity', 'background', 'color', 'blur', 'imageInfo'] }
+  images: { label: 'Images', keys: ['imageVisible', 'order', 'interval', 'duration', 'animation', 'opacity', 'background', 'color', 'blur', 'imageInfo'] }
 });
 export const CATEGORY_IDS = Object.freeze(Object.keys(SETTINGS_CATEGORIES));
 export function settingsCategory(id) {

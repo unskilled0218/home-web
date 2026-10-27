@@ -2,7 +2,7 @@
 
 A self-hosted photo dashboard with a clock, weather forecasts, an optional Baikal calendar, and Linkwarden bookmarks. Designed for a trusted local network.
 
-Version 0.17.45: [release notes](docs/releases/0.17.45.md). General no longer has a Local/Global selector. Global transfers work independently; saved layout ownership stays unchanged.
+Version 0.17.46: [release notes](docs/releases/0.17.46.md). Images now has a saved **Show image** option. Hide photos, blurred backdrops, and filenames without hiding widgets or stopping playback.
 
 - [dashboard](#dashboard)
   - [Quick start](#quick-start)

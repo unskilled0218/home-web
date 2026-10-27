@@ -23,7 +23,7 @@ Fresh profiles default every category to Local. Without a new category map, a va
 - Bookmarks: Desktop/Mobile visibility and scales, fullscreen hiding, selected links, and the retained mobile display compatibility preference. Linkwarden credentials remain shared.
 - Home Assistant: Desktop/Mobile visibility and scales, fullscreen hiding, and selected devices. Its connection remains shared.
 - Wake-on-LAN: Desktop/Mobile visibility and scales, and fullscreen hiding. Managed devices and wake history remain shared.
-- Images: order, interval, transitions, filename display, opacity, background, color, and blur. Local Images also retains its separate **Show the same image as Global** option.
+- Images: **Show image**, order, interval, transitions, filename display, opacity, background, color, and blur. Local Images also retains its separate **Show the same image as Global** option.
 
 Visibility and fullscreen controls now live in each widget's own panel, not General. Both Desktop/Mobile profiles can be edited from any screen; the mobile breakpoint remains 600px inclusive.
 
@@ -48,6 +48,8 @@ Corrupt scope-map data keeps the last confirmed choices for preview, or Local pr
 Weather Local keeps its city in browser storage and queries `/api/weather/local`, a bounded volatile server cache without changing Global location/cache records. Weather Global uses the persisted installation location and startup/hourly provider retrieval. Time scope can change display/provider timezone without changing Weather's city or owning store. Units reproject successful data without another provider retrieval. No Local city means no Local query.
 
 Global Images follows the server slideshow. Local Images follows that same selection by default, even if every category is Local, without polling Global preferences. Disable **Show the same image as Global** and save Images for independent Local playback of a stable subset of up to 100 eligible images. The follow choice defaults on for old records without it and preserves explicit off values. Local presentation remains independent; Local order/interval are retained but disabled while following.
+
+**Show image** defaults on and follows the selected Images scope, not the playback-follow choice. Turn it off and save Images to hide foreground photos, blurred backdrops, and filename captions while leaving the solid background color and widgets. Playback and image requests continue while hidden. Local hiding does not affect Global or other browser profiles, even when following Global selection; Global hiding reaches only browsers using Global Images. Stored records and confirmed caches missing `imageVisible` gain `true` on read without writes or revision changes; explicit `false` survives upgrades.
 
 Only Images source changes or an Images follow toggle replace the photo player; changing Time/Weather/General scope does not reset it. Replacement clears the old frame until a new image decodes. Transient failures within an unchanged source retain the last-good image; confirmed disabled/empty sources clear it. Shared selection is not frame-perfect synchronized transitions. Hidden pages pause browser work and resume the current source. See [NFS backgrounds](nfs-backgrounds.md).
 

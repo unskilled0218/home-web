@@ -11,6 +11,22 @@ import { normalizeDashboardPreferences } from '../public/dashboard-helpers.js';
 
 const bundle = (extra = {}) => ({ format: 'home-web.global-settings', version: 1, preferences: normalizeDashboardPreferences({ color: '#123456' }), weatherLocation: { latitude: 51, longitude: 0, label: 'London' }, ...extra });
 
+test('old transfers default absent image visibility and current exports retain explicit false and true', () => {
+  const store = createStore(':memory:');
+  try {
+    const old = bundle(); delete old.preferences.imageVisible;
+    store.importDashboardSettings(old, 0, 0); assert.deepEqual(store.exportDashboardSettings().settings, bundle());
+    for (const imageVisible of [false, true]) {
+      const current = store.exportDashboardSettings(); const settings = bundle({ preferences: { ...current.settings.preferences, imageVisible } });
+      store.importDashboardSettings(settings, current.preferencesRevision, current.weatherRevision);
+      assert.deepEqual(store.exportDashboardSettings().settings, settings);
+    }
+    const before = store.exportDashboardSettings();
+    for (const imageVisible of [null, 'false', 0]) assert.throws(() => store.importDashboardSettings({ ...old, preferences: { ...old.preferences, imageVisible } }, before.preferencesRevision, before.weatherRevision));
+    assert.deepEqual(store.exportDashboardSettings(), before);
+  } finally { store.close(); }
+});
+
 test('previous complete transfers default absent widget scales and export all explicit scale values', () => {
   const store = createStore(':memory:');
   try {

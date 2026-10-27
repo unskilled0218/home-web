@@ -65,6 +65,23 @@ test('six widget scales upgrade database reads without writes and persist explic
   const reopened = createStore(env.filename); try { assert.deepEqual(reopened.getDashboardPreferences().preferences, next); } finally { reopened.close(); }
 });
 
+test('image visibility upgrades database reads without writes and persists false with strict API validation', async t => {
+  const env = await setup(t); const db = new DatabaseSync(env.filename); t.after(() => db.close());
+  const preferences = normalizeDashboardPreferences({ color: '#123456', imageInfo: true, seconds: false });
+  const old = { ...preferences }; delete old.imageVisible; const bytes = JSON.stringify(old);
+  db.prepare('INSERT INTO dashboard_preferences (id, configuration, revision) VALUES (1, ?, 7)').run(bytes);
+  const read = await (await env.api()).json(); assert.equal(read.revision, 7); assert.deepEqual(read.preferences, preferences);
+  assert.equal(db.prepare('SELECT configuration FROM dashboard_preferences').get().configuration, bytes);
+  for (const invalid of [old, ...[null, 'false', 0].map(imageVisible => ({ ...preferences, imageVisible }))]) {
+    assert.equal((await env.api('/api/dashboard/settings', 'PUT', { revision: 7, preferences: invalid })).status, 400);
+  }
+  const next = { ...read.preferences, imageVisible: false };
+  const saved = await (await env.api('/api/dashboard/settings', 'PUT', { revision: 7, preferences: next })).json();
+  assert.equal(saved.revision, 8); assert.deepEqual(saved.preferences, next);
+  assert.equal((await env.api('/api/dashboard/settings', 'PUT', { revision: 7, preferences })).status, 409);
+  const reopened = createStore(env.filename); try { assert.deepEqual(reopened.getDashboardPreferences().preferences, next); } finally { reopened.close(); }
+});
+
 test('fullscreen and forecast fields upgrade stored reads only and persist explicit choices', async (t) => {
   const env = await setup(t);
   const keys = ['hideTimeFullscreen', 'hideWeatherFullscreen', 'hideCalendarFullscreen', 'hideHomeAssistantFullscreen', 'hideWolFullscreen', 'weatherHourlyVisible', 'weatherDailyVisible'];
