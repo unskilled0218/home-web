@@ -5,7 +5,7 @@ services:
     stdin_open: true
     tty: true
     network_mode: host
-    working_dir: /home/container/workdir/home-web
+    working_dir: /home/container/workdir
     volumes:
       - ./:/home/container/workdir
       - /var/run/docker.sock:/var/run/docker.sock
@@ -22,8 +22,8 @@ services:
         bind:
           create_host_path: false
       - type: bind
-        source: ${HOME}/.config/git/token
-        target: /home/container/.config/git/token
+        source: ${HOME}/.config/token
+        target: /home/container/.config/token
         read_only: true
         bind:
           create_host_path: false
