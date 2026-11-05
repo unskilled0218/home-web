@@ -66,7 +66,7 @@ test('hidden images suppress captions and caption-only tracks across mobile and 
   for (const mobile of [false, true]) for (const fullscreen of [false, true]) for (const caption of [false, true]) {
     const settings = normalizeDashboardPreferences({ imageInfo: true });
     const shown = dashboardDisplay(settings, { mobile, fullscreen, caption });
-    const hidden = dashboardDisplay({ ...settings, imageVisible: false }, { mobile, fullscreen, caption });
+    const hidden = dashboardDisplay({ ...settings, imageVisible: false, mobileImageVisible: false }, { mobile, fullscreen, caption });
     assert.equal(hidden.imageVisible, false); assert.equal(hidden.captionVisible, false);
     for (const name of sections) assert.equal(hidden[`${name}Visible`], shown[`${name}Visible`], name);
     const captionOnly = dashboardDisplay(normalizeDashboardPreferences({ ...allHidden, imageVisible: false }), { mobile, fullscreen, caption });
@@ -85,4 +85,17 @@ test('image DOM visibility stays hidden through caption callbacks and restores c
   applyDashboardDisplay(document, dashboardDisplay({ ...settings, imageVisible: true }, { caption: true }));
   assert.equal(nodes.get('photos').hidden, false); assert.equal(nodes.get('photo-caption').hidden, false); assert.equal(nodes.get('information').hidden, false);
   assert.deepEqual(settings, before);
+});
+
+test('independent image profiles and fullscreen override project captions without mutating settings', () => {
+  for (const imageVisible of [false, true]) for (const mobileImageVisible of [false, true]) for (const hideImageFullscreen of [false, true]) {
+    const settings = normalizeDashboardPreferences({ ...allHidden, imageVisible, mobileImageVisible, hideImageFullscreen }); const before = structuredClone(settings);
+    for (const mobile of [false, true]) for (const fullscreen of [false, true, false]) {
+      const expected = (mobile ? mobileImageVisible : imageVisible) && !(fullscreen && hideImageFullscreen);
+      const view = dashboardDisplay(settings, { mobile, fullscreen, caption: true });
+      assert.equal(view.imageVisible, expected, JSON.stringify({ mobile, fullscreen, imageVisible, mobileImageVisible, hideImageFullscreen }));
+      assert.equal(view.captionVisible, expected); assert.equal(view.content, expected); assert.equal(view.information, expected);
+      assert.equal(view.backgroundOnly, true); assert.deepEqual(settings, before);
+    }
+  }
 });

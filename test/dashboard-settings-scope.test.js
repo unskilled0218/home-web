@@ -29,16 +29,18 @@ for (const followGlobalPhotos of [true, false]) test(`image visibility saves sta
   const record = { schema: 1, revision: 7, preferences: old, weatherLocation: { latitude: 51, longitude: 0, label: 'London' }, followGlobalPhotos };
   const values = new Map([[LOCAL_SETTINGS_KEY, JSON.stringify(record)]]); const env = setup(t, { values }); await env.client.start();
   assert.equal(env.client.getState().snapshot.preferences.imageVisible, true); assert.equal(values.get(LOCAL_SETTINGS_KEY), JSON.stringify(record));
-  await save(env, 'images', { imageVisible: false });
+  const imagePatch = { imageVisible: false, mobileImageVisible: true, hideImageFullscreen: true };
+  await save(env, 'images', imagePatch);
   const savedLocal = values.get(LOCAL_SETTINGS_KEY);
-  assert.deepEqual(JSON.parse(savedLocal), { ...record, revision: 8, preferences: { ...old, imageVisible: false } }); assert.equal(env.writes().length, 0);
+  assert.deepEqual(JSON.parse(savedLocal), { ...record, revision: 8, preferences: { ...old, ...imagePatch } }); assert.equal(env.writes().length, 0);
   const fresh = setup(t, { values }); await fresh.client.start(); assert.equal(fresh.client.getState().snapshot.preferences.imageVisible, false);
   await env.client.changeScope('images', 'global'); assert.equal(env.client.getState().snapshot.preferences.imageVisible, true);
   const beforeGlobal = env.client.getTransferState().snapshot.preferences;
-  await save(env, 'images', { imageVisible: false });
-  assert.deepEqual(JSON.parse(env.writes()[0].options.body).preferences, { ...beforeGlobal, imageVisible: false }); assert.equal(values.get(LOCAL_SETTINGS_KEY), savedLocal);
+  await save(env, 'images', imagePatch);
+  assert.deepEqual(JSON.parse(env.writes()[0].options.body).preferences, { ...beforeGlobal, ...imagePatch }); assert.equal(values.get(LOCAL_SETTINGS_KEY), savedLocal);
   await save(env, 'images', { imageVisible: true }); await env.client.changeScope('images', 'local');
   assert.equal(env.client.getState().snapshot.preferences.imageVisible, false); assert.equal(env.client.getState().followGlobalPhotos, followGlobalPhotos);
+  for (const [key, value] of Object.entries(imagePatch)) assert.equal(env.client.getState().snapshot.preferences[key], value);
   assert.deepEqual(env.client.getState().weatherLocation, record.weatherLocation);
 });
 

@@ -41,7 +41,7 @@ Ask the operator to prepare missing tools, builders, or emulation. The script do
 
 Tokens need repository/package permissions and access to the repository's packages unit. Never put token values in Git, `.env`, arguments, history, or logs.
 
-Keep `VERSION`, npm manifest/lock versions, README, notes path, and `# Release v<version>` synchronized. Never reuse a published version. Current notes: [0.17.46](releases/0.17.46.md).
+Keep `VERSION`, npm manifest/lock versions, README, notes path, and `# Release v<version>` synchronized. Never reuse a published version. Current notes: [0.17.47](releases/0.17.47.md).
 
 Serialize all repository, image, and package writers, including other checkouts, UI actions, and in-flight requests. The checkout lock is not distributed exclusion.
 

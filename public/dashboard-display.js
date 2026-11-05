@@ -3,12 +3,12 @@ import { resolveDisplayPreferences } from './dashboard-helpers.js';
 // Pure projection shared by lifecycle updates and DOM-only photo-caption callbacks.
 export function dashboardDisplay(settings, { mobile = false, fullscreen = false, caption = false } = {}) {
   const display = resolveDisplayPreferences(settings, mobile);
-  for (const name of ['time', 'weather', 'calendar', 'bookmarks', 'homeAssistant', 'wol']) {
+  for (const name of ['time', 'weather', 'calendar', 'bookmarks', 'homeAssistant', 'wol', 'image']) {
     const hide = `hide${name[0].toUpperCase()}${name.slice(1)}Fullscreen`;
     display[`${name}Visible`] &&= !(fullscreen && settings[hide]);
   }
   const bookmarksVisible = display.bookmarksVisible;
-  const imageVisible = settings.imageVisible;
+  const imageVisible = display.imageVisible;
   const captionVisible = imageVisible && caption;
   const information = display.timeVisible || display.weatherVisible || display.calendarVisible || captionVisible;
   const devices = display.homeAssistantVisible || display.wolVisible;

@@ -44,7 +44,7 @@ Local Weather keeps its city in this browser and uses a temporary server cache. 
 
 Local Images follows Global's slideshow by default while retaining Local presentation. Disable **Show the same image as Global** and save for independent playback from up to 100 eligible files. Following disables Local order/interval controls without deleting their values.
 
-**Show image** follows Images scope independently of playback source. Turning it off hides photos, blur, and filenames, not widgets or playback requests. Changing an unrelated category does not restart photos. See [NFS photos](nfs-backgrounds.md).
+**Show image**, **Show image on mobile**, and **Hide image in fullscreen** follow Images scope independently of playback source. Mobile applies up to and including 600px; fullscreen hiding overrides the active profile until fullscreen ends. Hiding images hides photos, blur, and filenames, not widgets or playback requests. Changing an unrelated category does not restart photos. See [NFS photos](nfs-backgrounds.md).
 
 ## Storage and recovery
 

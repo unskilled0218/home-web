@@ -60,11 +60,12 @@ test('caption visibility survives Automatic/Custom reparenting and image toggles
   const view = createDashboardLayoutView(f); const caption = f.nodes.get('photo-caption'); caption.textContent = 'current.png';
   const layout = { ...defaultWidgetLayout(), desktop: initialWidgetProfile('desktop') }; const before = structuredClone(layout);
   try {
-    for (const imageVisible of [false, true, false]) for (const mobile of [false, true]) {
-      const settings = normalizeDashboardPreferences({ imageVisible, widgetLayout: layout });
-      const display = dashboardDisplay(settings, { mobile, caption: true });
+    for (const imageVisible of [false, true, false]) for (const mobile of [false, true]) for (const fullscreen of [false, true, false]) {
+      const settings = normalizeDashboardPreferences({ imageVisible, mobileImageVisible: !imageVisible, hideImageFullscreen: true, widgetLayout: layout });
+      const display = dashboardDisplay(settings, { mobile, fullscreen, caption: true });
       applyDashboardDisplay(f.document, display); view.update({ layout, mobile, scale: 1, display });
-      assert.equal(caption.hidden, !imageVisible); assert.equal(f.nodes.get('photos').hidden, !imageVisible);
+      const visible = (mobile ? !imageVisible : imageVisible) && !fullscreen;
+      assert.equal(caption.hidden, !visible); assert.equal(f.nodes.get('photos').hidden, !visible);
       assert.equal(caption.parent, mobile ? f.nodes.get('information') : f.document.body);
       assert.deepEqual(layout, before); assert.equal(f.nodes.get('clock').hidden, false);
     }

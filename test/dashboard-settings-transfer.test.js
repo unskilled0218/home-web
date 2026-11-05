@@ -27,6 +27,25 @@ test('old transfers default absent image visibility and current exports retain e
   } finally { store.close(); }
 });
 
+test('old hidden-image transfers preserve mobile hiding and current transfers retain independent profiles', () => {
+  const store = createStore(':memory:');
+  try {
+    const old = bundle({ preferences: normalizeDashboardPreferences({ imageVisible: false }) }); delete old.preferences.mobileImageVisible; delete old.preferences.hideImageFullscreen;
+    store.importDashboardSettings(old, 0, 0);
+    assert.deepEqual(store.exportDashboardSettings().settings.preferences, { ...old.preferences, mobileImageVisible: false, hideImageFullscreen: false });
+    for (const mobileImageVisible of [true, false]) for (const hideImageFullscreen of [true, false]) {
+      const before = store.exportDashboardSettings(); const settings = { ...old, preferences: { ...old.preferences, mobileImageVisible, hideImageFullscreen } };
+      store.importDashboardSettings(settings, before.preferencesRevision, before.weatherRevision);
+      assert.deepEqual(store.exportDashboardSettings().settings, settings);
+    }
+    const before = store.exportDashboardSettings();
+    for (const key of ['mobileImageVisible', 'hideImageFullscreen']) for (const bad of [null, 'false', 0]) {
+      assert.throws(() => store.importDashboardSettings({ ...old, preferences: { ...old.preferences, [key]: bad } }, before.preferencesRevision, before.weatherRevision));
+      assert.deepEqual(store.exportDashboardSettings(), before);
+    }
+  } finally { store.close(); }
+});
+
 test('previous complete transfers default absent widget scales and export all explicit scale values', () => {
   const store = createStore(':memory:');
   try {

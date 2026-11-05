@@ -65,17 +65,17 @@ test('six widget scales upgrade database reads without writes and persist explic
   const reopened = createStore(env.filename); try { assert.deepEqual(reopened.getDashboardPreferences().preferences, next); } finally { reopened.close(); }
 });
 
-test('image visibility upgrades database reads without writes and persists false with strict API validation', async t => {
+test('image visibility upgrades hidden database profiles without writes and persists independent choices with strict API validation', async t => {
   const env = await setup(t); const db = new DatabaseSync(env.filename); t.after(() => db.close());
-  const preferences = normalizeDashboardPreferences({ color: '#123456', imageInfo: true, seconds: false });
-  const old = { ...preferences }; delete old.imageVisible; const bytes = JSON.stringify(old);
+  const preferences = normalizeDashboardPreferences({ color: '#123456', imageInfo: true, seconds: false, imageVisible: false });
+  const old = { ...preferences }; delete old.mobileImageVisible; delete old.hideImageFullscreen; const bytes = JSON.stringify(old);
   db.prepare('INSERT INTO dashboard_preferences (id, configuration, revision) VALUES (1, ?, 7)').run(bytes);
   const read = await (await env.api()).json(); assert.equal(read.revision, 7); assert.deepEqual(read.preferences, preferences);
   assert.equal(db.prepare('SELECT configuration FROM dashboard_preferences').get().configuration, bytes);
-  for (const invalid of [old, ...[null, 'false', 0].map(imageVisible => ({ ...preferences, imageVisible }))]) {
+  for (const invalid of [old, ...['imageVisible', 'mobileImageVisible', 'hideImageFullscreen'].flatMap(key => [null, 'false', 0].map(value => ({ ...preferences, [key]: value })))]) {
     assert.equal((await env.api('/api/dashboard/settings', 'PUT', { revision: 7, preferences: invalid })).status, 400);
   }
-  const next = { ...read.preferences, imageVisible: false };
+  const next = { ...read.preferences, imageVisible: false, mobileImageVisible: true, hideImageFullscreen: true };
   const saved = await (await env.api('/api/dashboard/settings', 'PUT', { revision: 7, preferences: next })).json();
   assert.equal(saved.revision, 8); assert.deepEqual(saved.preferences, next);
   assert.equal((await env.api('/api/dashboard/settings', 'PUT', { revision: 7, preferences })).status, 409);

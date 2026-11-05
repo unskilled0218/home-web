@@ -101,6 +101,9 @@ test('home preserves forecast, calendar, and photo settings markup', async (cont
   assert.doesNotMatch(dashboardHtml, /refresh-calendar|>Refresh<|calendar-heading/);
   assert.match(dashboardHtml, /Baikal server URL/); assert.match(dashboardHtml, /name="serverUrl"[^>]*placeholder="https:\/\/baikal\.example\.test"/); assert.doesNotMatch(dashboardHtml, /dav\.php\/calendars/);
   assert.match(dashboardHtml, /<label class="toggle"><input name="imageVisible" form="preferences" type="checkbox" aria-describedby="image-visibility-help">Show image<\/label>/);
+  for (const [name, label] of [['mobileImageVisible', 'Show image on mobile'], ['hideImageFullscreen', 'Hide image in fullscreen']]) {
+    assert.match(dashboardHtml, new RegExp(`name="${name}" form="preferences" type="checkbox" aria-describedby="image-visibility-help">${label}`));
+  }
 });
 
 test('image visibility defaults on and legacy browser settings retain explicit off without writing', () => {
@@ -110,7 +113,7 @@ test('image visibility defaults on and legacy browser settings retain explicit o
   for (const imageVisible of [true, false]) {
     const saved = { imageVisible, color: '#123456', imageInfo: true };
     const result = loadSettings({ getItem: () => JSON.stringify(saved), setItem: () => writes++ });
-    assert.equal(result.imageVisible, imageVisible); assert.equal(result.color, saved.color); assert.equal(result.imageInfo, true);
+    assert.equal(result.imageVisible, imageVisible); assert.equal(result.mobileImageVisible, imageVisible); assert.equal(result.hideImageFullscreen, false); assert.equal(result.color, saved.color); assert.equal(result.imageInfo, true);
   }
   assert.equal(writes, 0);
 });
@@ -257,8 +260,8 @@ test('mobile fields use strict booleans and finite clamped scales matching the f
 test('display projection selects independent profiles without mutating saved preferences', () => {
   const value = normalizeSettings({ position: 'right', scale: 2, timeVisible: false, timeScale: 1.5, weatherVisible: true, weatherScale: 0.5, calendarVisible: false, calendarScale: 1.8, mobileTimeVisible: true, mobileTimeScale: 0.7, mobileWeatherVisible: false, mobileWeatherScale: 1.3, mobileCalendarVisible: true, mobileCalendarScale: 2 });
   const before = structuredClone(value);
-  assert.deepEqual(resolveDisplayPreferences(value, true), { position: 'left', scale: 1, timeVisible: true, timeScale: 0.7, weatherVisible: false, weatherScale: 1.3, calendarVisible: true, calendarScale: 2, bookmarksVisible: true, bookmarksScale: 1, homeAssistantVisible: true, homeAssistantScale: 1, wolVisible: true, wolScale: 1 });
-  assert.deepEqual(resolveDisplayPreferences(value, false), { position: 'right', scale: 2, timeVisible: false, timeScale: 1.5, weatherVisible: true, weatherScale: 0.5, calendarVisible: false, calendarScale: 1.8, bookmarksVisible: true, bookmarksScale: 1, homeAssistantVisible: true, homeAssistantScale: 1, wolVisible: true, wolScale: 1 });
+  assert.deepEqual(resolveDisplayPreferences(value, true), { imageVisible: true, position: 'left', scale: 1, timeVisible: true, timeScale: 0.7, weatherVisible: false, weatherScale: 1.3, calendarVisible: true, calendarScale: 2, bookmarksVisible: true, bookmarksScale: 1, homeAssistantVisible: true, homeAssistantScale: 1, wolVisible: true, wolScale: 1 });
+  assert.deepEqual(resolveDisplayPreferences(value, false), { imageVisible: true, position: 'right', scale: 2, timeVisible: false, timeScale: 1.5, weatherVisible: true, weatherScale: 0.5, calendarVisible: false, calendarScale: 1.8, bookmarksVisible: true, bookmarksScale: 1, homeAssistantVisible: true, homeAssistantScale: 1, wolVisible: true, wolScale: 1 });
   assert.deepEqual(value, before, 'projection cannot overwrite either profile');
   assert.equal(MOBILE_MEDIA_QUERY, '(max-width: 600px)');
 });

@@ -85,7 +85,7 @@ Local Images follows Global by default with its own presentation settings. Disab
 
 Temporary scan or display failures retain last-good state marked stale. Confirmed empty or disabled sources clear photos. Failed decoding retries within five seconds after settlement, with a ten-second deadline per attempt. Changing source clears the previous frame until the replacement loads.
 
-**Show image** hides photos, blur, and filenames without stopping playback or requests. Hidden browser pages pause their own work. Image bytes stream on demand; metadata limits do not guarantee total server or browser memory usage.
+**Show image** controls desktop visibility; **Show image on mobile** controls widths up to and including 600px. **Hide image in fullscreen** overrides either profile until fullscreen ends. Save in Images to apply. Hiding photos also hides blur and filenames without stopping playback or requests. Hidden browser pages pause their own work. Image bytes stream on demand; metadata limits do not guarantee total server or browser memory usage.
 
 ## Troubleshooting
 

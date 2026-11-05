@@ -9,6 +9,40 @@ const local = { schema: 1, revision: 7, preferences, weatherLocation: { latitude
 const transfer = { format: 'home-web.global-settings', version: 1, preferences, weatherLocation: local.weatherLocation };
 const withoutImageVisibility = () => { const old = { ...preferences }; delete old.imageVisible; return old; };
 
+test('old image profiles inherit desktop visibility only when mobile is absent across every upgrade path', () => {
+  for (const imageVisible of [false, true]) {
+    const old = { ...preferences, imageVisible }; delete old.mobileImageVisible; delete old.hideImageFullscreen;
+    const expected = { ...preferences, imageVisible, mobileImageVisible: imageVisible, hideImageFullscreen: false };
+    const bytes = JSON.stringify(old);
+    assert.deepEqual(normalizeDashboardPreferences(old), expected);
+    assert.deepEqual(legacyDashboardPreferences(old), expected);
+    assert.deepEqual(decodeStoredDashboardPreferences(old), expected);
+    assert.deepEqual(decodeStoredLocalSettings({ ...local, preferences: old }).preferences, expected);
+    assert.deepEqual(validateSettingsTransfer({ ...transfer, preferences: old }).preferences, expected);
+    assert.deepEqual(decodeStoredDashboardPreferences({ ...old, hideImageFullscreen: true }), { ...expected, hideImageFullscreen: true });
+    assert.deepEqual(decodeStoredDashboardPreferences({ ...old, mobileImageVisible: !imageVisible }), { ...expected, mobileImageVisible: !imageVisible });
+    const client = createSettingsSync({ storage: { getItem: key => key === SHARED_SETTINGS_KEY ? JSON.stringify({ schema: 1, initialized: true, revision: 7, preferences: old }) : null, setItem: () => assert.fail('cache read must not write') }, onSnapshot() {}, fetchImpl: async () => { throw Error('offline'); } });
+    try { assert.deepEqual(client.getState().snapshot.preferences, expected); assert.equal(client.getState().snapshot.revision, 7); } finally { client.dispose(); }
+    assert.equal(JSON.stringify(old), bytes);
+    assert.throws(() => validateDashboardPreferences(old));
+    for (const mobileImageVisible of [false, true]) for (const hideImageFullscreen of [false, true]) {
+      const explicit = { ...old, mobileImageVisible, hideImageFullscreen };
+      assert.deepEqual(decodeStoredDashboardPreferences(explicit), explicit);
+      assert.deepEqual(decodeStoredLocalSettings({ ...local, preferences: explicit }).preferences, explicit);
+      assert.deepEqual(validateSettingsTransfer({ ...transfer, preferences: explicit }).preferences, explicit);
+    }
+    for (const key of ['mobileImageVisible', 'hideImageFullscreen']) for (const bad of [null, undefined, 'false', 0]) {
+      const invalid = { ...old, [key]: bad };
+      assert.throws(() => decodeStoredDashboardPreferences(invalid), key);
+      assert.throws(() => decodeStoredLocalSettings({ ...local, preferences: invalid }), key);
+      assert.throws(() => validateSettingsTransfer({ ...transfer, preferences: invalid }), key);
+    }
+  }
+  const oldest = withoutImageVisibility(); delete oldest.mobileImageVisible; delete oldest.hideImageFullscreen;
+  assert.deepEqual(decodeStoredDashboardPreferences(oldest), preferences);
+  assert.deepEqual(validateSettingsTransfer({ ...transfer, preferences: oldest }).preferences, preferences);
+});
+
 test('image visibility upgrades only absent stored/import fields and preserves either explicit boolean', () => {
   const old = withoutImageVisibility(); const bytes = JSON.stringify(old);
   assert.deepEqual(decodeStoredDashboardPreferences(old), preferences);

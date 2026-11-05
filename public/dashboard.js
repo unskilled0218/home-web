@@ -283,7 +283,7 @@ const settingsSync = createSettingsScope({ storage,
     else if (changed(['timezone', 'dateStyle', 'hour12', 'seconds'])) startClock();
     if (!presentationChanged && changed(['bookmarksScale', 'mobileBookmarksScale', 'homeAssistantScale', 'mobileHomeAssistantScale', 'wolScale', 'mobileWolScale'])) { applyWidgetScales(); applyVisibilityLayout(); }
     if (first || changed(['mobileBookmarksMode', 'hideBookmarksFullscreen', 'hideTimeFullscreen', 'hideWeatherFullscreen', 'hideCalendarFullscreen', 'hideHomeAssistantFullscreen', 'hideWolFullscreen', 'bookmarksVisible', 'mobileBookmarksVisible', 'homeAssistantVisible', 'mobileHomeAssistantVisible', 'wolVisible', 'mobileWolVisible'])) applyBookmarkPresentation();
-    if (changed(['widgetLayout', 'imageVisible'])) applyVisibilityLayout();
+    if (changed(['widgetLayout', 'imageVisible', 'mobileImageVisible', 'hideImageFullscreen'])) applyVisibilityLayout();
     if (first || changed(['homeAssistantDeviceSelections'])) deviceIntegrations.configure(settings.homeAssistantDeviceSelections);
     if (first || changed(['bookmarkLinkSelections'])) bookmarks.configure(settings.bookmarkLinkSelections);
     document.body.style.backgroundColor = settings.color;

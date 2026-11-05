@@ -15,7 +15,8 @@ async function seed(page, preferences, followGlobalPhotos = true, mode = 'local'
 }
 async function openImages(page) { await page.locator('#open-settings').click(); await categoryTab(page, 'images'); }
 async function visibility(page, visible) {
-  await openImages(page); await page.getByRole('checkbox', { name: 'Show image', exact: true }).setChecked(visible);
+  const mobile = await page.evaluate(() => matchMedia('(max-width: 600px)').matches);
+  await openImages(page); await page.getByRole('checkbox', { name: mobile ? 'Show image on mobile' : 'Show image', exact: true }).setChecked(visible);
   await saveCategory(page); await page.locator('#close-settings').click();
 }
 async function hidden(page) {
@@ -73,6 +74,63 @@ for (const playback of ['local-following', 'local-independent', 'global']) test(
   } finally { await page.goto('about:blank'); await env.close(); }
 });
 
+for (const playback of ['local-following', 'local-independent', 'global']) test(`${playback} retains independent image profiles and fullscreen overrides through save, resize, rotation, and reload`, async ({ page }) => {
+  const env = await settingsEnvironment({ photoCount: 1 });
+  try {
+    const preferences = normalizeDashboardPreferences({ imageInfo: true, background: 'blur', color: '#123456' });
+    await seed(page, preferences, playback !== 'local-independent', playback === 'global' ? 'global' : 'local');
+    await page.clock.install(); await page.goto(env.base); await expect(image(page)).toBeVisible();
+    await page.clock.pauseAt(await page.evaluate(() => Date.now() + 100));
+    await openImages(page);
+    const mobile = page.getByRole('checkbox', { name: 'Show image on mobile', exact: true });
+    const fullscreen = page.getByRole('checkbox', { name: 'Hide image in fullscreen', exact: true });
+    await mobile.uncheck(); await fullscreen.check();
+    await categoryTab(page, 'time'); await categoryTab(page, 'images');
+    await expect(mobile).not.toBeChecked(); await expect(fullscreen).toBeChecked();
+    await page.locator('#close-settings').click(); await openImages(page);
+    await expect(mobile).toBeChecked(); await expect(fullscreen).not.toBeChecked();
+    const selection = env.slideshow.snapshot();
+    await page.evaluate(() => { window.retainedPhoto = document.querySelector('#photos .photo-layer'); });
+    await mobile.uncheck(); await fullscreen.check(); await saveCategory(page); await page.locator('#close-settings').click();
+    expect(env.slideshow.snapshot()).toEqual(selection);
+    expect(await page.evaluate(() => window.retainedPhoto === document.querySelector('#photos .photo-layer'))).toBe(true);
+    for (const width of [600, 601]) {
+      await page.setViewportSize({ width, height: 900 });
+      if (width === 600) await hidden(page); else await expect(image(page)).toBeVisible();
+      await page.locator('#fullscreen').click(); await expect(page.locator('#fullscreen')).toHaveText('Exit fullscreen'); await hidden(page);
+      await expect(page.locator('#open-settings')).toBeVisible();
+      await page.evaluate(() => document.exitFullscreen()); await expect(page.locator('#fullscreen')).toHaveText('Enter fullscreen');
+      if (width === 600) await hidden(page); else await expect(image(page)).toBeVisible();
+    }
+    await page.setViewportSize({ width: 600, height: 900 });
+    if (playback === 'local-independent') await page.clock.runFor(60000);
+    else { await env.clock.advance(60000); await page.clock.runFor(5000); }
+    await hidden(page); await page.reload(); await expect(page.locator('#photos .photo-layer')).toHaveCount(1); await hidden(page);
+    await openImages(page); await expect(mobile).not.toBeChecked(); await expect(fullscreen).toBeChecked();
+    // Reverse the profiles and remove the override; mobile becomes visible while desktop remains hidden.
+    await page.getByRole('checkbox', { name: 'Show image', exact: true }).uncheck();
+    await mobile.check(); await fullscreen.uncheck(); await saveCategory(page); await page.locator('#close-settings').click();
+    await expect(image(page)).toBeVisible();
+    await page.locator('#fullscreen').click(); await expect(page.locator('#fullscreen')).toHaveText('Exit fullscreen'); await expect(image(page)).toBeVisible();
+    await page.evaluate(() => document.exitFullscreen()); await page.setViewportSize({ width: 601, height: 900 }); await hidden(page);
+  } finally { await page.goto('about:blank'); await env.close(); }
+});
+
+test('an old hidden Local image record stays hidden on desktop and mobile without rewriting storage', async ({ page }) => {
+  const env = await settingsEnvironment({ photoCount: 1 });
+  try {
+    const old = normalizeDashboardPreferences({ imageVisible: false, imageInfo: true, background: 'blur' }); delete old.mobileImageVisible; delete old.hideImageFullscreen;
+    await seed(page, old); await page.goto(env.base); await expect(page.locator('#photos .photo-layer')).toHaveCount(1);
+    const bytes = await page.evaluate(() => localStorage.getItem('dashboard.local-settings.v1'));
+    for (const width of [601, 600]) { await page.setViewportSize({ width, height: 900 }); await hidden(page); }
+    await openImages(page);
+    await expect(page.getByRole('checkbox', { name: 'Show image', exact: true })).not.toBeChecked();
+    await expect(page.getByRole('checkbox', { name: 'Show image on mobile', exact: true })).not.toBeChecked();
+    await expect(page.getByRole('checkbox', { name: 'Hide image in fullscreen', exact: true })).not.toBeChecked();
+    expect(await page.evaluate(() => localStorage.getItem('dashboard.local-settings.v1'))).toBe(bytes);
+  } finally { await page.goto('about:blank'); await env.close(); }
+});
+
 test('Local image hiding stays private while Global changes reach only Global Images browsers', async ({ browser }) => {
   const env = await settingsEnvironment(); const clients = [];
   try {
@@ -89,6 +147,17 @@ test('Local image hiding stays private while Global changes reach only Global Im
     await hidden(a.page); await hidden(b.page);
     await visibility(a.page, true); await b.page.clock.runFor(5000); await shown(b.page, env.slideshow.snapshot().current);
     await expect(image(local.page)).toBeVisible();
+    await openImages(a.page); await a.page.locator('[name="mobileImageVisible"]').uncheck(); await a.page.locator('[name="hideImageFullscreen"]').check();
+    await saveCategory(a.page); await a.page.locator('#close-settings').click(); await b.page.clock.runFor(5000);
+    for (const client of clients) await client.page.setViewportSize({ width: 600, height: 900 });
+    await hidden(a.page); await hidden(b.page); await expect(image(local.page)).toBeVisible();
+    for (const client of clients) await client.page.setViewportSize({ width: 601, height: 900 });
+    for (const client of [a, b]) {
+      await expect(image(client.page)).toBeVisible();
+      await client.page.locator('#fullscreen').click(); await expect(client.page.locator('#fullscreen')).toHaveText('Exit fullscreen'); await hidden(client.page);
+      await client.page.evaluate(() => document.exitFullscreen()); await expect(image(client.page)).toBeVisible();
+    }
+    await local.page.locator('#fullscreen').click(); await expect(local.page.locator('#fullscreen')).toHaveText('Exit fullscreen'); await expect(image(local.page)).toBeVisible();
   } finally { for (const client of clients) await client.close(); await env.close(); }
 });
 

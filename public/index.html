@@ -183,7 +183,10 @@
           </section>
           <section id="settings-panel-images" role="tabpanel" aria-labelledby="settings-tab-images" tabindex="0" hidden>
             <h3>Images</h3><p class="settings-description">Give your photos the right pace and backdrop.</p>
-            <label class="toggle"><input name="imageVisible" form="preferences" type="checkbox" aria-describedby="image-visibility-help">Show image</label><p id="image-visibility-help">Hiding images also hides the blurred backdrop and filename, leaving your background color and widgets. Playback continues. Save to apply.</p>
+            <fieldset><legend>Desktop display</legend><label class="toggle"><input name="imageVisible" form="preferences" type="checkbox" aria-describedby="image-visibility-help">Show image</label></fieldset>
+            <fieldset><legend>Mobile display</legend><label class="toggle"><input name="mobileImageVisible" form="preferences" type="checkbox" aria-describedby="image-visibility-help">Show image on mobile</label></fieldset>
+            <label class="toggle"><input name="hideImageFullscreen" form="preferences" type="checkbox" aria-describedby="image-visibility-help">Hide image in fullscreen</label>
+            <p id="image-visibility-help">Mobile applies up to and including 600px. Fullscreen hiding overrides either profile until fullscreen ends. Hiding images also hides the blurred backdrop and filename, leaving your background color and widgets. Playback continues. Save to apply.</p>
             <fieldset><legend>Slideshow</legend>
               <div id="local-photo-controls"><label class="toggle"><input id="follow-global-photos" name="followGlobalPhotos" form="preferences" type="checkbox" checked aria-describedby="photo-following-help">Show the same image as Global</label><p id="photo-following-help">Global controls image selection and rotation. Your presentation stays Local. Turn this off to use your saved Local order and interval. Save to apply.</p></div>
               <label>Order<select name="order" form="preferences"><option value="random">Shuffled</option><option value="name">Name</option><option value="date">Modification date</option></select></label>

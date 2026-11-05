@@ -29,7 +29,11 @@ test('category map schemas reject missing/unknown modes, unsafe revisions, and e
 test('image visibility belongs only to Images and follows category scope without changing other values', () => {
   const local = normalizeDashboardPreferences({ imageVisible: false, color: '#123456' });
   const global = normalizeDashboardPreferences({ color: '#abcdef' });
-  assert.deepEqual(Object.entries(SETTINGS_CATEGORIES).filter(([, category]) => category.keys.includes('imageVisible')).map(([id]) => id), ['images']);
+  for (const key of ['imageVisible', 'mobileImageVisible', 'hideImageFullscreen']) {
+    assert.deepEqual(Object.entries(SETTINGS_CATEGORIES).filter(([, category]) => category.keys.includes(key)).map(([id]) => id), ['images']);
+    assert.throws(() => patchCategory('time', local, { [key]: true }), /category preference/);
+    assert.equal(composeCategoryPreferences({ ...categoryScopes(), images: 'global' }, local, global)[key], global[key]);
+  }
   assert.deepEqual(patchCategory('images', global, { imageVisible: false }), { ...global, imageVisible: false });
   assert.equal(composeCategoryPreferences({ ...categoryScopes(), time: 'global' }, local, global).imageVisible, false);
   assert.equal(composeCategoryPreferences({ ...categoryScopes(), images: 'global' }, local, global).imageVisible, true);

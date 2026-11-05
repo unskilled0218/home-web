@@ -49,7 +49,7 @@ export function normalizeSettings(input = {}, fallbackZone = Intl.DateTimeFormat
     homeAssistantDeviceSelections: normalizeDeviceSelections(value.homeAssistantDeviceSelections),
     bookmarkLinkSelections: normalizeBookmarkSelections(value.bookmarkLinkSelections),
     location: normalizeLocation(value.location), temperature: choice(value.temperature, ['celsius', 'fahrenheit'], 'celsius'), wind: choice(value.wind, ['kmh', 'mph', 'ms', 'kn'], 'kmh'), precipitation: choice(value.precipitation, ['mm', 'inch'], 'mm'),
-    imageVisible: boolean(value.imageVisible, true), order: choice(value.order, ['name', 'date', 'random'], 'random'), interval, duration: number(value.duration, 0, Math.min(10, interval - 1), 3), animation: choice(value.animation, ['none', 'fade', 'slide'], 'fade'),
+    imageVisible: boolean(value.imageVisible, true), mobileImageVisible: boolean(value.mobileImageVisible, boolean(value.imageVisible, true)), hideImageFullscreen: boolean(value.hideImageFullscreen, false), order: choice(value.order, ['name', 'date', 'random'], 'random'), interval, duration: number(value.duration, 0, Math.min(10, interval - 1), 3), animation: choice(value.animation, ['none', 'fade', 'slide'], 'fade'),
     opacity: number(value.opacity, 0, 1, 1), background: choice(value.background, ['color', 'blur'], 'color'), color: /^#[0-9a-f]{6}$/i.test(value.color) ? value.color : '#000000', blur: number(value.blur, 0, 100, 100), imageInfo: boolean(value.imageInfo, false)
   };
 }
@@ -73,14 +73,18 @@ export function validateDashboardPreferences(value) {
   return canonical;
 }
 export function decodeStoredDashboardPreferences(value) {
-  if (value && typeof value === 'object' && !Array.isArray(value)) return validateDashboardPreferences({ ...additivePreferenceDefaults, homeAssistantDeviceSelections: [], bookmarkLinkSelections: null, bookmarksVisible: true, homeAssistantVisible: true, wolVisible: true, mobileBookmarksVisible: true, mobileHomeAssistantVisible: true, mobileWolVisible: true, hideTimeFullscreen: false, hideWeatherFullscreen: false, hideCalendarFullscreen: false, hideHomeAssistantFullscreen: false, hideWolFullscreen: false, weatherHourlyVisible: true, weatherDailyVisible: true, ...value, widgetLayout: Object.hasOwn(value, 'widgetLayout') ? decodeStoredWidgetLayout(value.widgetLayout) : defaultWidgetLayout() });
+  if (value && typeof value === 'object' && !Array.isArray(value)) return validateDashboardPreferences({ homeAssistantDeviceSelections: [], bookmarkLinkSelections: null, bookmarksVisible: true, homeAssistantVisible: true, wolVisible: true, mobileBookmarksVisible: true, mobileHomeAssistantVisible: true, mobileWolVisible: true, hideTimeFullscreen: false, hideWeatherFullscreen: false, hideCalendarFullscreen: false, hideHomeAssistantFullscreen: false, hideWolFullscreen: false, weatherHourlyVisible: true, weatherDailyVisible: true, ...additivePreferences(value), widgetLayout: Object.hasOwn(value, 'widgetLayout') ? decodeStoredWidgetLayout(value.widgetLayout) : defaultWidgetLayout() });
   return validateDashboardPreferences(value);
 }
 
-const additivePreferenceDefaults = Object.freeze({ bookmarksScale: 1, mobileBookmarksScale: 1, homeAssistantScale: 1, mobileHomeAssistantScale: 1, wolScale: 1, mobileWolScale: 1, imageVisible: true });
+const additivePreferenceDefaults = Object.freeze({ bookmarksScale: 1, mobileBookmarksScale: 1, homeAssistantScale: 1, mobileHomeAssistantScale: 1, wolScale: 1, mobileWolScale: 1, imageVisible: true, hideImageFullscreen: false });
+function additivePreferences(value) {
+  // Inherit only an absent mobile choice; present invalid fields must still fail validation.
+  return { ...additivePreferenceDefaults, mobileImageVisible: boolean(value.imageVisible, true), ...value };
+}
 // Local records and transfers upgrade only these additive fields, not unrelated required data.
 export function decodeAdditivePreferences(value) {
-  return validateDashboardPreferences(value && typeof value === 'object' && !Array.isArray(value) ? { ...additivePreferenceDefaults, ...value } : value);
+  return validateDashboardPreferences(value && typeof value === 'object' && !Array.isArray(value) ? additivePreferences(value) : value);
 }
 export function legacyDashboardPreferences(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -104,6 +108,7 @@ export function validateDashboardSnapshot(value) {
 // Projection changes presentation without replacing either saved profile.
 export function resolveDisplayPreferences(settings, mobile) {
   return {
+    imageVisible: mobile ? settings.mobileImageVisible : settings.imageVisible,
     position: mobile ? 'left' : settings.position,
     scale: mobile ? 1 : settings.scale,
     timeVisible: mobile ? settings.mobileTimeVisible : settings.timeVisible,

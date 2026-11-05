@@ -36,7 +36,9 @@ Enable an NFS source using the [photo setup guide](nfs-backgrounds.md). JPEG, PN
 
 Global Images uses the server slideshow. Local Images follows it by default, with independent display preferences. Turn off **Show the same image as Global** and save for independent Local playback from up to 100 eligible files. The Global slideshow can use the full eligible inventory.
 
-**Show image** hides photos, blurred backdrops, and filenames when turned off. Widgets and the solid background remain. Playback and image requests continue while hidden; hidden browser pages pause their own work.
+Images has **Show image** for desktop, **Show image on mobile** up to and including 600px, and **Hide image in fullscreen** to override either profile until fullscreen ends. Save to apply. Each follows Images scope. Older records inherit their existing image visibility on mobile; fullscreen hiding defaults off.
+
+Hiding images hides photos, blurred backdrops, and filenames. Widgets and the solid background remain. Playback and image requests continue while hidden; hidden browser pages pause their own work.
 
 The browser prepares only the immediate next image. Temporary failures retain the last good image; a confirmed disabled or empty source clears it. Shared selection does not mean frame-perfect transitions.
 

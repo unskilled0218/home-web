@@ -4,7 +4,7 @@ A self-hosted dashboard with photos, a clock, weather, calendars, bookmarks, Hom
 
 Use only on a trusted LAN. The dashboard has no user accounts or authentication.
 
-Version 0.17.46: [release notes](docs/releases/0.17.46.md).
+Version 0.17.47: [release notes](docs/releases/0.17.47.md).
 
 - [dashboard](#dashboard)
   - [Quick start](#quick-start)
@@ -27,7 +27,7 @@ Open [http://127.0.0.1:3000](http://127.0.0.1:3000). The clock works without ext
 
 Open **Settings** to choose widgets and connect services. Widget settings can stay **Local** to this browser or use **Global** shared values. New browsers start Local.
 
-Use **Edit layout** to move and resize widgets. In **Images**, turn off **Show image** to hide photos without hiding widgets.
+Use **Edit layout** to move and resize widgets. **Images** has separate desktop/mobile visibility and fullscreen hiding, without hiding widgets.
 
 ## Documentation
 

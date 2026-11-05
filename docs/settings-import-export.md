@@ -40,6 +40,6 @@ This shows the structure only. `preferences` must be a complete valid preference
 
 Files include Desktop/Mobile layouts and selected bookmark/device identities. They exclude credentials, managed devices, wake history, NFS paths, browser choices, and caches. Identities from another installation may remain unresolved; imports do not create matching services or devices.
 
-The maximum file size is 128 KiB; inner preferences are limited to 65,536 bytes. Unknown fields, unsupported versions, and invalid values are rejected before writes. Older complete version-1 exports may omit newer widget scales or image visibility; missing values default to scale 1 and images shown.
+The maximum file size is 128 KiB; inner preferences are limited to 65,536 bytes. Unknown fields, unsupported versions, and invalid values are rejected before writes. Older complete version-1 exports may omit newer widget scales or image visibility; missing scales default to 1 and missing desktop image visibility defaults on. Missing mobile image visibility inherits desktop visibility; missing fullscreen image hiding defaults off. Explicit choices are preserved.
 
 This is a settings transfer, not a server backup. See [operations](operations.md) and [settings scope](settings-scope.md).
