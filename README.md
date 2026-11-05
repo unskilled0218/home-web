@@ -4,7 +4,7 @@ A self-hosted dashboard with photos, a clock, weather, calendars, bookmarks, Hom
 
 Use only on a trusted LAN. The dashboard has no user accounts or authentication.
 
-Version 0.17.48: [release notes](docs/releases/0.17.48.md).
+Version 0.17.49: [release notes](docs/releases/0.17.49.md).
 
 - [dashboard](#dashboard)
   - [Quick start](#quick-start)

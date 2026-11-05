@@ -80,7 +80,7 @@ test('VERSION owns npm metadata, release notes, and the home-web release target'
   assert.equal(lock.version, version, 'lockfile version drift');
   assert.equal(lock.packages[''].version, version, 'lockfile root package version drift');
   const config = JSON.parse(read('scripts/release.json'));
-  assert.deepEqual(config, { schema: 1, gitea: 'https://git.lan', repository: 'dev/home-web', image: 'git.lan/dev/home-web', username: 'dev', token_file: '~/.config/git/token', notes: `docs/releases/${version}.md`, platforms: ['linux/amd64', 'linux/arm64'] });
+  assert.deepEqual(config, { schema: 1, gitea: 'https://git.lan', repository: 'dev/home-web', image: 'git.lan/dev/home-web', username: 'dev', token_file: '~/.config/token/git', notes: `docs/releases/${version}.md`, platforms: ['linux/amd64', 'linux/arm64'] });
   assert.ok(read(config.notes).startsWith(`# Release v${version}\n`));
   for (const state of ['.template-operation.lock', '.release-template/', '.template-transaction/']) assert.ok(read('.gitignore').split('\n').includes(state), `${state} must be ignored`);
 });

@@ -37,11 +37,13 @@ bash scripts/release.sh --validate
 
 Ask the operator to prepare missing tools, builders, or emulation. The script does not bootstrap builders, install privileged support, provision credentials, push source, or bump versions. Browser tests are a separate developer check.
 
-`scripts/release.json` selects `https://git.lan`, repository `dev/home-web`, image `git.lan/dev/home-web`, login `dev`, and token path `~/.config/git/token`. The token file must be owned, readable, non-symlink, and mode 0600 or 0400. `GIT_TOKEN` overrides its path, not its value; `GIT_USERNAME` overrides login.
+`scripts/release.json` selects `https://git.lan`, repository `dev/home-web`, image `git.lan/dev/home-web`, login `dev`, and token path `~/.config/token/git`. The token file must be owned, readable, non-symlink, and mode 0600 or 0400. `GIT_TOKEN` overrides its path, not its value; `GIT_USERNAME` overrides login.
+
+Provision the token at the new location outside the repository before publishing. The release script does not move credentials or fall back to `~/.config/git/token`. To keep using that location explicitly while migrating, set `GIT_TOKEN="$HOME/.config/git/token"` for the release command. An explicitly selected missing or invalid token file fails rather than falling back to another location. Independent SSH/Git authentication is unchanged.
 
 Tokens need repository/package permissions and access to the repository's packages unit. Never put token values in Git, `.env`, arguments, history, or logs.
 
-Keep `VERSION`, npm manifest/lock versions, README, notes path, and `# Release v<version>` synchronized. Never reuse a published version. Current notes: [0.17.48](releases/0.17.48.md).
+Keep `VERSION`, npm manifest/lock versions, README, notes path, and `# Release v<version>` synchronized. Never reuse a published version. Current notes: [0.17.49](releases/0.17.49.md).
 
 Serialize all repository, image, and package writers, including other checkouts, UI actions, and in-flight requests. The checkout lock is not distributed exclusion.
 

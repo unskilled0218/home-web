@@ -710,6 +710,105 @@ class BashPublicationTests(unittest.TestCase):
     self.assertNotEqual(self.release().returncode, 0)
     self.assert_no_writes()
 
+  def use_default_token_path(self):
+    # Keep the production tilde path: auth must expand it against the isolated fixture HOME.
+    token_file = json.loads((ROOT / "scripts/release.json").read_text())["token_file"]
+    self.assertEqual(token_file, "~/.config/token/git")
+    path = self.root / "scripts/release.json"
+    config = json.loads(path.read_text())
+    config["token_file"] = token_file
+    path.write_text(json.dumps(config))
+    self.commit()
+    token = self.base / ".config/token/git"
+    token.parent.mkdir(parents=True, exist_ok=True)
+    return token
+
+  def test_default_token_path_expands_isolated_home_and_authenticates(self):
+    token = self.use_default_token_path()
+    token.write_text("SENTINEL_PRIVATE_TOKEN\n")
+    token.chmod(0o600)
+    self.assertNotIn("GIT_TOKEN", self.environment)
+    result = self.release()
+    self.assertEqual(result.returncode, 0, result.stderr)
+    self.assert_verification_order()
+    self.assertIn("login", self.events())
+
+  def test_explicit_token_override_wins_over_invalid_default(self):
+    token = self.use_default_token_path()
+    token.write_text("invalid default token\n")
+    token.chmod(0o600)
+    self.environment["GIT_TOKEN"] = str(self.token)
+    result = self.release()
+    self.assertEqual(result.returncode, 0, result.stderr)
+    self.assert_verification_order()
+
+  def test_explicit_custom_configured_token_path_remains_supported(self):
+    config = json.loads((self.root / "scripts/release.json").read_text())
+    self.assertEqual(config["token_file"], str(self.token))
+    result = self.release()
+    self.assertEqual(result.returncode, 0, result.stderr)
+    self.assert_verification_order()
+
+  def test_legacy_only_token_does_not_satisfy_new_default(self):
+    token = self.use_default_token_path()
+    legacy = self.base / ".config/git/token"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text("SENTINEL_PRIVATE_TOKEN\n")
+    legacy.chmod(0o600)
+    self.assertFalse(token.exists())
+    result = self.release()
+    self.assertNotEqual(result.returncode, 0)
+    self.assert_verification_order(auth=False)
+    self.assertEqual(self.events().count("auth"), 1)
+    self.assertLess(max(index for index, event in enumerate(self.events()) if event == "builder"), self.events().index("auth"))
+    self.assertNotIn("login", self.events())
+    self.assert_no_writes()
+
+  def test_invalid_explicit_token_override_never_falls_back_to_valid_default_or_legacy(self):
+    token = self.use_default_token_path()
+    token.write_text("SENTINEL_PRIVATE_TOKEN\n")
+    token.chmod(0o600)
+    legacy = self.base / ".config/git/token"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text("SENTINEL_PRIVATE_TOKEN\n")
+    legacy.chmod(0o600)
+    unsafe = self.base / "unsafe-override"
+    unsafe.write_text("SENTINEL_PRIVATE_TOKEN\n")
+    unsafe.chmod(0o644)
+    for override in (self.base / "missing-override", unsafe):
+      with self.subTest(override=override.name):
+        self.environment["GIT_TOKEN"] = str(override)
+        start = len(self.events())
+        self.assertNotEqual(self.release().returncode, 0)
+        self.assertIn("auth", self.events()[start:])
+        self.assertNotIn("login", self.events())
+        self.assert_no_writes()
+
+  def test_new_default_rejects_unsafe_permissions_and_symlinks(self):
+    token = self.use_default_token_path()
+    token.write_text("SENTINEL_PRIVATE_TOKEN\n")
+    token.chmod(0o644)
+    self.assertNotEqual(self.release().returncode, 0)
+    self.assertIn("auth", self.events())
+    self.assert_no_writes()
+    token.unlink()
+    token.symlink_to(self.token)
+    start = len(self.events())
+    self.assertNotEqual(self.release().returncode, 0)
+    self.assertIn("auth", self.events()[start:])
+    self.assertNotIn("login", self.events())
+    self.assert_no_writes()
+
+  def test_help_and_validate_never_require_the_new_default_or_override(self):
+    token = self.use_default_token_path()
+    self.environment["GIT_TOKEN"] = str(self.base / "missing-override")
+    for option in ("--help", "--validate"):
+      with self.subTest(option=option):
+        result = self.release(option)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.events(), [])
+        self.assertFalse(token.exists())
+
   def test_invalid_config_and_local_validation_do_not_read_token(self):
     self.token.unlink()
     result = self.release("--validate")
