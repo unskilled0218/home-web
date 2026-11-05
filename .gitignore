@@ -15,3 +15,4 @@ test-results/
 .release-template/
 .template-transaction/
 __pycache__/
+command.md
