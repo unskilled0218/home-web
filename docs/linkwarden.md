@@ -1,53 +1,60 @@
 # Linkwarden bookmarks
 
-The photo dashboard displays only the Linkwarden bookmark links chosen in **Settings → Bookmarks → Dashboard bookmark links**. Browse folders there, check individual links, and choose **Save Bookmarks settings**. The picker remains independent of the filtered dashboard, so unselected links are still available to choose. Choices follow the Bookmarks category: Local persists in this browser profile, while Global synchronizes with other Global Bookmarks categories. Unsaved choices do not change the dashboard. Connection credentials remain shared; Connect/Disconnect requires Bookmarks Global.
+- [Linkwarden bookmarks](#linkwarden-bookmarks)
+  - [Connect](#connect)
+  - [Choose links](#choose-links)
+  - [Refresh and limits](#refresh-and-limits)
+  - [Private certificates](#private-certificates)
+  - [API](#api)
 
-Upgrading from all-link display does not automatically select the full account. A never-configured selection shows **Choose links in Settings → Bookmarks**; an explicitly saved empty selection shows **No bookmark links selected**. **Clear** clears the selection draft, including unavailable choices, and takes effect only after **Save Bookmarks settings**. One **Reload folder** button sits immediately to the left of Clear; it retries currently disclosed picker folders and saved selected-folder hints through the shared bounded queue, without clearing or saving checkbox drafts. Folder branches no longer have individual reload buttons. Linkwarden Connect/Disconnect and bookmark selection saves remain separate actions. A dirty selection draft survives catalog updates and remote preference changes; a stale save reports a conflict. **Reload Local Bookmarks settings** or **Reload Global Bookmarks settings** explicitly discards that draft without clearing credential inputs, while closing and reopening Settings restores confirmed preference choices.
+## Connect
 
-Selected links appear as a flat list on the dashboard, without parent folder names or expandable groups. Existing server-saved connections load automatically. Desktop reserves a right-hand column for selected links; the information views remain in their own column, including when their position is set to the right. Long lists scroll vertically within the sidebar.
+Open **Settings → Bookmarks**, choose Global, and enter the Linkwarden URL, username, and a least-privilege access token. Choose **Connect Linkwarden**.
 
-On screens up to 600px wide, the same flat selected-link list follows the time, weather, and calendar views. Settings shows a nested folder tree with each folder's direct link checkboxes beneath its header and child folders nested below. Roots start open, child folders start closed, and opening a child does not open its grandchildren. Folder headers support click, Tab, Enter, and Space. Picker disclosure remains session state; it never hides a selected dashboard link. Unavailable selected choices remain separately removable below the tree. The old mobile Compact/Expanded preference is preserved for compatibility but no longer changes the flat dashboard or appears as a display control.
+The server validates and saves the shared connection, encrypting the token in SQLite. First startup creates the integration key automatically. Back up the database and key together; see [local setup](local-setup.md#encryption-key).
 
-Dashboard links and **Open Linkwarden** open a new tab in the current browser using native anchors with `target="_blank"` and `rel="noopener noreferrer"`. The destination cannot access the dashboard through `window.opener`. Keyboard Enter and normal context-menu actions remain available. A website cannot reliably choose another installed browser; use a copied link manually if needed. Unsafe schemes, note/image/archive records without HTTP(S) URLs, and unselected links are not rendered as dashboard bookmarks.
+Leave the token blank only to reuse a readable saved token with the same URL and username. Re-authentication requires a token. Failed replacements keep the working connection. Disconnect deletes the saved connection and token. Connection actions save separately from bookmark choices.
 
-**Bookmarks → Display** independently controls desktop/mobile overlay visibility and defaults to enabled. It preserves saved choices and connection credentials and leaves the Settings picker available. **Hide bookmarks in fullscreen** defaults to disabled and further hides an enabled bookmark region during fullscreen. Exiting fullscreen restores the list only when the active profile still enables Bookmarks. Absent regions reserve no sidebar track. If fullscreen leaves no dashboard sections visible, Settings and Exit fullscreen remain reachable. These choices follow Bookmarks scope; each browser applies its own viewport/fullscreen context. Folder disclosure remains session state, and existing selected/loaded content refresh owners remain unchanged.
+## Choose links
 
-The five-second global configuration poll discovers connections, disconnections, and re-authentication changes in other browsers, including previously unconfigured pages. It reads local server metadata only; actual tree/folder content keeps its five-minute refresh owner. Pending local connection actions defer only Linkwarden metadata, so unrelated global preferences continue synchronizing. Old metadata cannot lift a known same-source access block or overwrite an owned newer connection.
+1. Open **Dashboard bookmark links**.
+2. Expand folders and check individual links, up to 256.
+3. Choose **Save Bookmarks settings**.
 
-The server needs a persistent encryption key before connecting. The example environment configures the same server-only key file for direct and Compose runs:
+Selections follow Bookmarks Local/Global scope. The dashboard shows only selected links, as a flat list. Links open a new tab without access to the dashboard's opener.
 
-```sh
-cp .env.example .env
-npm ci
-npm start
+**Clear** empties the draft; save to apply it. **Reload folder** retries disclosed folders and selected-folder hints without discarding checkbox edits. Closing Settings discards unsaved selection changes.
+
+Missing links stay saved and removable. If a selected link moves, **Use this folder** updates its discovery hint in the draft; save to keep the repair. Link identities depend on source, account, and bookmark ID, not names, URLs, or tokens.
+
+Use the category's Desktop/Mobile visibility, scale, and fullscreen options to change presentation without disconnecting Linkwarden.
+
+## Refresh and limits
+
+Connection changes are detected about every five seconds. Catalog and loaded content refresh every five minutes while the page is visible, with up to four folder requests at once. Children load on demand; the dashboard does not fetch the whole account unnecessarily.
+
+Temporary failures retain successful links with a stale label. Access denial removes protected content but keeps choices removable. Reconnect after fixing access. Failed or conflicting preference saves keep the draft; reload explicitly to discard it.
+
+Limits are 256 collections, 16 folder levels, and 2,000 records or 2 MiB per collection. The browser retains at most 10,000 links or 8 MiB, prioritizing confirmed selections. Limit notices identify incomplete results. Use **Open Linkwarden** for content beyond dashboard limits.
+
+## Private certificates
+
+Place the public CA bundle at `certs/linkwarden-ca.pem`, then set this in `.env` and restart:
+
+```dotenv
+LINKWARDEN_CA_FILE=./certs/linkwarden-ca.pem
 ```
 
-Alternatively, generate a key once and provide that same value through the process environment on every run:
+Trust affects Linkwarden only. Hostname checks remain enabled. Empty or unreadable CA files stop startup. Never include private keys or disable TLS checks.
 
-```sh
-openssl rand -base64 32
-```
+## API
 
-Set that output as `LINKWARDEN_CONFIG_ENCRYPTION_KEY` and restart the service. In **Settings → Bookmarks**, enter Linkwarden URL, username, and a least-privilege access token, then choose **Connect Linkwarden**. A successful connection validates collections and encrypts the token in `data/wol.db`; a failed replacement preserves the previous connection and usable tree. Connect and Disconnect operate independently of **Save preferences**. Opening Settings never reveals the saved token. Leave it blank only to retain a readable saved token with unchanged URL and username; re-authentication requires an explicit token. Disconnect deletes the saved configuration and token, and removes the old tree. These actions do not modify Home Assistant or Wake-on-LAN.
+- `GET /api/linkwarden`: Saved status.
+- `PUT /api/linkwarden`: Connect with `url`, `username`, and `accessToken`.
+- `DELETE /api/linkwarden`: Disconnect.
+- `GET /api/linkwarden/collections`: Folder tree and opaque request tokens.
+- `GET /api/bookmarks?collection=<collectionToken>`: Direct folder records; add `&refresh=1` to refresh.
 
-The browser refreshes connection status, the folder catalog, and due selected/loaded folders every five minutes while the document is visible, with at most four active folder requests. Saved folder hints load selected content independently of Settings disclosure. With no choices and Settings closed, the controller does not fetch every folder. Opening the Bookmarks Settings tab loads picker roots; child folders load on demand. Picker and dashboard share one request/cache owner. Existing loaded content can refresh even when closed or hidden in fullscreen; switching presentation reuses fresh data. Transient folder failures retain successful links with a stale label and preserve choices. **Retry link** or the picker's **Reload folder** retries through the same queue. Authentication failure or access denial removes affected protected content, including picker labels, but keeps opaque choices removable. A readable saved credential status alone does not clear a known re-authentication block; reconnect after correcting access.
-
-Choose at most 256 unique links. Bookmark identity depends on the Linkwarden source, username, and provider bookmark ID, not its name, URL, token, or collection. Same-account re-authentication and refreshed collection tokens preserve choices; another source/account cannot select a different link with a reused numeric ID. Missing links remain saved until removed. A folder is only a discovery hint: lazy browsing cannot prove that a link missing from an old folder was deleted account-wide. If a selected link appears in another folder, the picker keeps one checked row and offers **Use this folder**. That action repairs only its discovery hint in the draft; Save preferences persists it. Mere discovery/polling does not repair or remove choices. A saved repair is used on the next cold load.
-
-The dashboard supports at most 256 collections and 16 folder levels, reporting an explicit error above those hierarchy limits. Each collection result retains up to 2,000 bookmarks and 2 MiB of serialized data, with a visible limit notice when truncated. The browser retains at most 10,000 links and 8 MiB of normalized bookmark data. Confirmed selected records receive admission priority over unselected catalog content, including when a remote selection arrives after browsing has filled the cache. Unselected content is evicted from no-longer-demanded folders first, then other unselected content as needed; choices and checkbox drafts are not removed. Evicted/partial folders show a reload/limit notice, not a false complete empty state. Eviction does not automatically refetch all discarded catalog data. Provider truncation or genuinely over-budget selected content is reported as unresolved rather than bypassing limits. **Open Linkwarden** provides access beyond the dashboard budget. The server cache uses least-recently-used eviction at 64 collections or 32 MiB, with 60-second freshness per collection. Provider requests have eight-second body-inclusive deadlines and a twenty-second total pagination deadline.
-
-API clients can use `PUT /api/linkwarden` with `url`, `username`, and `accessToken`, `GET /api/linkwarden` for status, `GET /api/linkwarden/collections` for the tree, and `GET /api/bookmarks?collection=<collectionToken>` for one folder's direct records. Status/tree/bookmark responses carry an opaque `configurationId`; tree nodes carry a stable `selectionId` and a short-lived request `collectionToken`, without exposing numeric collection request IDs. Folder results also carry `collectionSelectionId`, and safe bookmark records retain numeric `id` plus a durable `selectionId` (`b_` followed by a 43-character digest). Persistent identities do not authorize folder requests. Expired/evicted tokens return 400 with `COLLECTION_SELECTION_EXPIRED`; a source changed during retrieval returns 409 with `LINKWARDEN_CONFIGURATION_CHANGED`. The dashboard renews tokens through one shared recovery pass per refresh cycle. Add `&refresh=1` for an explicit server refresh; normal dashboard reads use cached freshness. `DELETE /api/linkwarden` disconnects the saved source. Successful configuration mutations are serialized and invalidate old work, while rejected provisional credentials leave the saved account's cache intact.
-
-The shared `bookmarkLinkSelections` preference is `null` for setup, or an array of `{ selectionId, collectionSelectionId }` records; `[]` means intentionally empty. Saved folder hints use the actual 43-character SHA-256 identity format, not arbitrary-length temporary tokens. The preference row, revision-checked API, and local shared cache use the existing settings owner. Older stored records decode without read-time writes or revision changes. The next explicit save persists canonical data; outdated clients omitting this field must reload rather than silently erase it.
-
-The Linkwarden service must be reachable from the dashboard host. HTTPS certificate chains and hostnames are verified by default. If Linkwarden uses a private CA, save only the public CA bundle and configure it for these requests:
-
-```sh
-mkdir -p certs
-cp /path/to/private-ca.pem certs/linkwarden-ca.pem
-printf '\nLINKWARDEN_CA_FILE=./certs/linkwarden-ca.pem\n' >> .env
-```
-
-`LINKWARDEN_CA_FILE` extends trust only for Linkwarden, just as `HOME_ASSISTANT_CA_FILE` and `CALDAV_CA_FILE` scope their clients. Hostname verification remains enabled. Unreadable/empty CA files stop startup. The shared integration key is automatically generated beside SQLite when missing on a clean installation; new owned parents use `0700`, and the file uses `0600`. An explicit secret wins without creating a file. Invalid keys and missing keys with saved credentials stop startup rather than rotating. Back up database/key together; moving their paths is an operator migration. Existing saved URL, username, and encrypted-token data remains intact.
+Persistent selection identities do not authorize requests. Expired request tokens return HTTP 400 with `COLLECTION_SELECTION_EXPIRED`; connection changes during retrieval return HTTP 409 with `LINKWARDEN_CONFIGURATION_CHANGED`.
 
 [Back to README](../README.md)

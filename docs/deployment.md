@@ -1,55 +1,68 @@
-# Container deployment
+# Docker deployment
 
-- [Container deployment](#container-deployment)
+- [Docker deployment](#docker-deployment)
+  - [Start](#start)
+  - [Network access](#network-access)
+  - [Persistent data](#persistent-data)
+  - [Upgrade and rollback](#upgrade-and-rollback)
 
-Release images are available from the private Gitea registry as `git.lan/dev/home-web`. Maintainers use `bash scripts/release.sh` for automatic verification and publication after setup; see [release operations](releases.md). The image contains Node 24 and the application source, runs as root, and installs nothing at startup. Compose uses host networking because UDP broadcast packets need to leave through the LAN interface. Log in, create the persistent directories, pull the current image, and start it with the host's private address:
+## Start
+
+Images are published to the private registry at `git.lan/dev/home-web`. For a new installation:
 
 ```sh
 docker login git.lan
 mkdir -p data certs
 cp .env.example .env
-docker compose pull
-docker compose up -d
 ```
 
-Before starting, edit `.env` and set `HOST` to the Docker host's private address. Compose forwards ordinary settings through `env_file: .env`; its explicit path settings override that file: SQLite is `/app/data/wol.db` and photos are `/photos`. Key-file overrides must be container-visible persistent paths. Shell values drive Compose interpolation, but do not automatically override ordinary env-file application values; use a Compose override file or `docker compose run -e` when needed. Compose requires `.env`; do not overwrite an existing configured file with the example.
-
-Only `./data` is writable application storage. First startup creates/reuses SQLite and `linkwarden-config-encryption.key` there; new files are normally root-owned on the host. The key is random, restricted, atomically published, and never written into `.env` or logged. Existing keys are not replaced; missing key material with saved credentials fails startup until restored. Back up database and key together. Production dependencies install with `npm ci --omit=dev` at image build time, never server startup; development/browser packages and secrets are excluded. Container recreation retains the mounted data/key and uses source/dependencies from the selected image.
-
-For private DNS, list the exact hostname used in the browser:
-
-Save these values in `.env`, then run `docker compose up -d`:
+Edit `.env` before starting. Set `HOST` to the Docker host's private address:
 
 ```dotenv
 HOST=192.168.1.10
 DASHBOARD_ALLOWED_HOSTS=home.lan
 ```
 
-`DASHBOARD_ALLOWED_HOSTS` is a comma-separated list of hostnames or IP addresses without schemes, ports, paths, or wildcards. Every API request must use either the configured `HOST` address or one of these names. If a reverse proxy is used, keep it LAN-only, preserve the browser-facing Host header, and list that hostname. Do not allow arbitrary Host values or trust forwarded-host headers because that would reintroduce DNS-rebinding access. A wildcard bind such as `0.0.0.0` or `::` requires at least one explicit allowed host.
-
-Restrict port 3000 at the host firewall to the trusted LAN. Host networking behaves differently on Docker Desktop; run the service directly on the LAN host there.
-
-To retain an existing externally managed key, set `LINKWARDEN_CONFIG_ENCRYPTION_KEY` in Compose's `.env` file before the first startup. The legacy variable name is retained for compatibility, but the key encrypts Linkwarden, Home Assistant, and CalDAV credentials. An explicit key takes precedence and the automatic key file is not created. Keep using the same value after every restart.
-
-Compose mounts `./certs` read-only at `/app/certs`, so paths such as `./certs/linkwarden-ca.pem` resolve inside the image because its working directory is `/app`. Keep certificate bundles out of version control; `certs/` is ignored. For a CA stored elsewhere, add a read-only bind mount in a Compose override and set the relevant CA variable to its container path.
-
-Run the image without Compose by supplying the same host networking, persistent paths, and host checks:
+Then pull and start:
 
 ```sh
-docker run -d \
-  --name home-web \
-  --restart unless-stopped \
-  --network host \
-  --volume "$PWD/data:/app/data" \
-  --volume "$PWD/certs:/app/certs:ro" \
-  --env-file .env \
-  --env DATABASE_PATH=/app/data/wol.db \
-  --env LINKWARDEN_CONFIG_ENCRYPTION_KEY_FILE=/app/data/linkwarden-config-encryption.key \
-  git.lan/dev/home-web:latest
+docker compose pull
+docker compose up -d
 ```
 
-For an upgrade, back up `data/`, record the currently deployed image digest, run `docker compose pull`, and recreate the service. Compose defaults to the mutable `latest` alias; future releases also retain staging tags as evidence, not deployment recommendations. Pin a known digest as `HOME_WEB_IMAGE=git.lan/dev/home-web@sha256:<digest>` in `.env` when a stable rollback target is required. Rolling back an image does not reverse data migrations, so retain the matching backup until the new release is verified.
+Do not overwrite an existing `.env`. Compose requires it. The image contains Node 24 and production dependencies; nothing installs at startup. It runs as root and uses host networking for UDP broadcasts. Docker Desktop users should run directly on a LAN host instead.
 
-See [NFS backgrounds](nfs-backgrounds.md) for the optional photo mount and [Publishing releases](releases.md) for image publication.
+## Network access
+
+Open `http://192.168.1.10:3000`, or the allowed private hostname. Restrict port 3000 to the trusted LAN; the dashboard has no authentication.
+
+`DASHBOARD_ALLOWED_HOSTS` accepts comma-separated hostnames/IPs without schemes, ports, paths, or wildcards. The configured `HOST` address is allowed automatically. Wildcard binds require explicit allowed hosts.
+
+Keep reverse proxies LAN-only. Preserve the browser-facing Host header and list that hostname. Do not accept arbitrary Host values or trust forwarded-host headers.
+
+## Persistent data
+
+- `./data` mounts at `/app/data` and contains SQLite and the integration key. New files are normally root-owned.
+- `./certs` mounts read-only at `/app/certs` for private CA bundles.
+- `${NFS_HOST_MOUNT_PATH:-./photos}` mounts read-only at `/photos`. Photos remain disabled until configured; see [NFS photos](nfs-backgrounds.md).
+
+Back up the database and encryption key together. Missing key material with saved credentials stops startup; restore the original key. An explicit `LINKWARDEN_CONFIG_ENCRYPTION_KEY` takes precedence over the file and must stay unchanged across restarts.
+
+Compose fixes SQLite to `/app/data/wol.db` and the photo path to `/photos`. Key-file overrides must point to persistent paths visible inside the container. Shell values affect Compose interpolation, not every application setting in `env_file`; use a Compose override or `docker compose run -e` when needed.
+
+## Upgrade and rollback
+
+1. Back up the database and key consistently; see [operations](operations.md#backups).
+2. Record the deployed image digest.
+3. Run `docker compose pull` and `docker compose up -d`.
+4. Verify the dashboard before removing the matching backup.
+
+Compose defaults to mutable `latest`. To pin a known image, set this in `.env`:
+
+```dotenv
+HOME_WEB_IMAGE=git.lan/dev/home-web@sha256:<digest>
+```
+
+An image rollback does not undo database migrations. Retain the matching data backup. Staging tags are release evidence, not deployment recommendations. See [publishing releases](releases.md).
 
 [Back to README](../README.md)

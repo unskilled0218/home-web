@@ -1,17 +1,46 @@
 # Wake-on-LAN
 
-**Settings → Wake-on-LAN** lists and manages devices saved on this server for all browsers. Enter a name (at most 80 characters), MAC address, and directed subnet broadcast address, plus an optional IPv4 address and group (at most 80 characters). Use **Add device** to save a new record or **Edit** and **Save device** to update an existing one. **Cancel edit** discards the editor draft. Empty optional fields clear saved IP/group values. The server canonicalizes MAC addresses and rejects duplicate MAC addresses and invalid IPv4 addresses. Failed saves retain the draft.
+- [Wake-on-LAN](#wake-on-lan)
+  - [Add a computer](#add-a-computer)
+  - [Wake a computer](#wake-a-computer)
+  - [Edit and sync](#edit-and-sync)
+  - [API](#api)
 
-Device management requires the Wake-on-LAN category to be Global. Its visibility/fullscreen preferences save separately with **Save Wake-on-LAN settings** to that category's Local or Global store. Other category scopes do not grant device-management UI access. Devices/history stay server-owned in either mode, and normal dashboard Wake buttons retain their separate explicit behavior. See [settings scope](settings-scope.md).
+## Add a computer
 
-Use the target PC's directed subnet broadcast address, for example `192.168.1.255` for a PC at `192.168.1.42` on a `255.255.255.0` network. These actions are independent of **Save preferences**, preserve existing devices and wake history during reads/edits, and survive reloads and server restarts. **Delete** requires confirmation and deletes both the device and its associated wake audit records, matching the existing API behavior.
+Open **Settings → Wake-on-LAN** and choose Global. Enter:
 
-Saved devices refresh when Settings opens and poll every five seconds while the page is visible, plus request latency. Closing Settings keeps dashboard polling active; hiding the page suspends reads and resuming refreshes them. Polls preserve dirty editor fields and focus. Remote edits show a warning; cancel and select Edit again to reload, or explicitly save the draft. Remote deletion preserves your draft rather than creating a replacement record. Writes use existing last-successful-write semantics without revision conflict protection. A failed refresh retains the last confirmed list; a save timeout has an uncertain outcome, so check saved devices before retrying.
+- Name, up to 80 characters.
+- MAC address.
+- Directed subnet broadcast address.
+- Optional IPv4 address and group, up to 80 characters for the group.
 
-The lower half of the middle dashboard column lists all saved devices. Each row contains only the device name and a **Wake** button. Network details and management controls stay in Settings. Wake requests occur only after an explicit click or keyboard activation; there are no automatic wakes or automatic mutation retries. Each device button is disabled while its request is pending, without blocking wakes for other devices. Section-level feedback reports sent packets, the server's cooldown message, removal, and delivery failures. A timeout or network error has an uncertain outcome; check the computer before retrying. Successful packet dispatch does not prove that the target computer booted. Background refresh errors do not reclassify an accepted wake as failed.
+Choose **Add device**. For `192.168.1.42` on a `255.255.255.0` subnet, the broadcast is `192.168.1.255`. Duplicate MAC addresses and invalid IPv4 addresses are rejected.
 
-The Settings tab itself does not send wake packets. API clients can list devices with `GET /api/devices`, add them with `POST /api/devices`, and update or delete them through `/api/devices/<id>`. A device uses `name`, `macAddress`, `broadcastAddress`, and optional `ipAddress` and `group`. Use `POST /api/devices/<id>/wake` to request a wake packet. Existing cooldown, UDP delivery, and audit behavior also apply to dashboard buttons.
+Devices and wake history are shared server records. Visibility, scale, and fullscreen preferences save separately with **Save Wake-on-LAN settings** and follow Local/Global scope.
 
-See the [Operational checklist](operations.md) for network setup, packet delivery, and troubleshooting.
+## Wake a computer
+
+Choose **Wake** beside its name on the dashboard. Requests occur only after explicit activation; there are no automatic wakes or retries. Each pending button is disabled independently.
+
+Successful dispatch means packets were sent, not that the computer booted. After a timeout or network error, check the computer before retrying. See [operations](operations.md#wake-delivery) for BIOS, network, and packet checks.
+
+## Edit and sync
+
+Choose **Edit**, change fields, then **Save device**. Empty optional fields clear their saved values. **Cancel edit** discards the draft. **Delete** requires confirmation and removes both the device and its wake audit records.
+
+Visible pages refresh devices about every five seconds. Polls preserve edits. If another browser changes a device, cancel and edit again to reload, or explicitly save your draft. Writes use last-successful-write semantics, not revision conflicts.
+
+Failed saves keep the draft. After a timeout, check saved devices before retrying; the server may have committed.
+
+## API
+
+- `GET /api/devices`: List devices.
+- `POST /api/devices`: Add a device.
+- `PUT /api/devices/<id>`: Update a device.
+- `DELETE /api/devices/<id>`: Delete a device and its audit records.
+- `POST /api/devices/<id>/wake`: Send a wake packet.
+
+Device fields are `name`, `macAddress`, `broadcastAddress`, and optional `ipAddress` and `group`. Dashboard and API wakes share cooldown and audit rules.
 
 [Back to README](../README.md)

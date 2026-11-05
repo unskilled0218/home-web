@@ -1,8 +1,10 @@
 # dashboard
 
-A self-hosted photo dashboard with a clock, weather forecasts, an optional Baikal calendar, and Linkwarden bookmarks. Designed for a trusted local network.
+A self-hosted dashboard with photos, a clock, weather, calendars, bookmarks, Home Assistant readings, and Wake-on-LAN buttons.
 
-Version 0.17.46: [release notes](docs/releases/0.17.46.md). Images now has a saved **Show image** option. Hide photos, blurred backdrops, and filenames without hiding widgets or stopping playback.
+Use only on a trusted LAN. The dashboard has no user accounts or authentication.
+
+Version 0.17.46: [release notes](docs/releases/0.17.46.md).
 
 - [dashboard](#dashboard)
   - [Quick start](#quick-start)
@@ -11,7 +13,7 @@ Version 0.17.46: [release notes](docs/releases/0.17.46.md). Images now has a sav
 
 ## Quick start
 
-Requires Node.js 24 or later. Edit `.env` once; the integration encryption key is created automatically on first startup.
+Requires Node.js 24 or later. For a new installation:
 
 ```sh
 cp .env.example .env
@@ -19,26 +21,20 @@ npm ci
 npm start
 ```
 
-Open [http://127.0.0.1:3000](http://127.0.0.1:3000). A clock and dark background work immediately.
-
-Enable photo backgrounds with `NFS_MOUNT_MODE=on`; the default is `off`. A configured `NFS_SOURCE` manages a mount; an empty source uses an existing mount. Photo playback uses nonrepeating filename batches and prepares one upcoming image. See [NFS photo backgrounds](docs/nfs-backgrounds.md).
+Open [http://127.0.0.1:3000](http://127.0.0.1:3000). The clock works without extra setup. Photos and integrations are optional.
 
 ## Settings
 
-Use the **General**, **Time**, **Weather**, **Calendar**, **Bookmarks**, **Home Assistant**, **Wake-on-LAN**, and **Images** tabs to customize the dashboard. The seven widget tabs offer Local/Global choices; new browsers default to Local. General provides Global transfers and recovery without a scope selector. Arrange widgets with **Edit layout**; existing layout ownership is preserved. See [settings scope](docs/settings-scope.md), [global import/export](docs/settings-import-export.md), and [dashboard preferences](docs/dashboard.md). **Clear results** keeps the selected weather location.
+Open **Settings** to choose widgets and connect services. Widget settings can stay **Local** to this browser or use **Global** shared values. New browsers start Local.
 
-Weather shows current US AQI in both scopes. Server requests retain bounded dual-stack deadlines and honor Node's explicitly enabled environment proxy settings, including live `NO_PROXY` changes and `*.domain` bypass rules; see [weather behavior](docs/dashboard.md).
+Use **Edit layout** to move and resize widgets. In **Images**, turn off **Show image** to hide photos without hiding widgets.
 
 ## Documentation
 
-Run documented commands from the repository root.
+Run commands from the repository root.
 
-- [Local setup and LAN access](docs/local-setup.md)
-- [Dashboard features and preferences](docs/dashboard.md)
-- [NFS photo backgrounds](docs/nfs-backgrounds.md)
-- [Baikal calendar setup](docs/calendar.md)
-- [Docker deployment](docs/deployment.md)
-- [Operations and backups](docs/operations.md)
-- [Tests](docs/testing.md) and [publishing releases](docs/releases.md)
-
-Select [Home Assistant devices](docs/home-assistant.md) to show read-only readings and use [Wake-on-LAN](docs/wake-on-lan.md) dashboard buttons to wake saved computers.
+- Setup: [Local and LAN](docs/local-setup.md), [Docker](docs/deployment.md).
+- Display: [Dashboard](docs/dashboard.md), [Widget layout](docs/dashboard-layout.md), [NFS photos](docs/nfs-backgrounds.md).
+- Settings: [Local and Global](docs/settings-scope.md), [Import and export](docs/settings-import-export.md).
+- Integrations: [Baikal calendar](docs/calendar.md), [Linkwarden](docs/linkwarden.md), [Home Assistant](docs/home-assistant.md), [Wake-on-LAN](docs/wake-on-lan.md).
+- Maintenance: [Operations and backups](docs/operations.md), [Tests](docs/testing.md), [Publishing releases](docs/releases.md).

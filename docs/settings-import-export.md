@@ -1,23 +1,31 @@
-# Global settings import and export
+# Global settings transfer
 
-- [Global settings import and export](#global-settings-import-and-export)
+- [Global settings transfer](#global-settings-transfer)
   - [Export](#export)
   - [Import](#import)
-  - [File contract](#file-contract)
+  - [File contents](#file-contents)
 
 ## Export
 
-Use Settings → General → Export global settings. The downloaded `dashboard-global-settings.json` contains current saved global preferences and the global weather location. Export is read-only and works independently of category choices, including on all-Local pages; it never substitutes Local values, unsaved form edits, or browser caches. It does not initialize a global preference row or retrieve provider data. General has no Local/Global selector.
+Choose **Settings → General → Export global settings**. The download is `dashboard-global-settings.json`.
+
+It contains saved Global preferences and the Global weather location, not Local values, unsaved edits, or browser caches. Export is read-only and works even when all categories are Local.
 
 ## Import
 
-Save/discard every category/layout draft and choose a JSON file in General. File selection validates the file and prepares fresh raw Global preference/weather revisions without applying settings. All-Local pages use a bounded one-shot read, not continuous Global preference polling; pages already synchronizing Global settings reuse their reader. Preparation never changes Local records or category choices. **Import global settings** explicitly replaces all Global category preferences and weather location in one SQLite transaction, not just General. Two captured raw Global revisions protect both components; an intervening Global preference or location change rejects the import without partial writes. The persisted category map and transfer token are rechecked before dispatch, independently of the stored General mode. Identical imports retain existing revisions. A `null` weather location clears the Global location/cache and retires old work.
+1. Save or discard all category and layout drafts.
+2. Select a JSON file in General. Selection validates it and reads fresh Global revisions; it does not apply changes.
+3. Choose **Import global settings** to replace all Global preferences and the Global weather location together.
 
-Import stays disabled until preparation succeeds and conflicting drafts/actions are resolved. If preparation fails or an import conflicts, the chosen file remains selected. Use **Reload** to fetch a fresh baseline after reviewing the error, then explicitly click Import again; background polls do not silently rebase the selected file. Superseded file reads/preparations cannot enable an old import. Successful imports update Global-backed categories and their shared photo/weather owners. Local preferences, saved layout ownership, the `followGlobalPhotos` choice, and every browser's saved category choices remain unchanged. Local Images followers continue tracking the shared slideshow, so imported Global order/interval changes can affect their displayed image without changing Local settings. Local Weather never adopts the imported city. A timed-out request can have an uncertain commit outcome: check current Global state before repeating it. Provider/service notification failures do not undo an already committed transaction.
+If preparation fails or another browser changes Global settings, review the error and choose **Reload**. Then explicitly import again. Background polling does not approve a stale import.
 
-## File contract
+Local preferences, scope choices, layout ownership, and Local photo-follow choices stay unchanged. Global-backed categories update. Local photo followers may display a different image; Local Weather never adopts the imported city.
 
-Version 1 has exactly these fields:
+A `null` weather location clears the Global location and cache. After a timeout, check Global state before retrying: the import may have committed.
+
+## File contents
+
+Version 1 uses these fields:
 
 ```json
 {
@@ -28,6 +36,10 @@ Version 1 has exactly these fields:
 }
 ```
 
-`preferences` must be a complete canonical dashboard preference object; the empty object above is a shape illustration, not a valid import. Earlier complete version-1 exports may omit the six desktop/mobile Bookmarks, Home Assistant, and Wake-on-LAN scales and `imageVisible`; imports default absent scales to 1 and absent image visibility to `true`. Present scales must be valid numbers from 0.5 to 2 in 0.1 steps; present `imageVisible` must be a boolean, preserving explicit `false`. Unrelated required fields cannot be omitted. Current exports include all six scales and image visibility. Importing visibility changes only Global Images presentation; Local Images retain their own visibility, even while following Global's slideshow. `weatherLocation` is `null` or a validated `{ latitude, longitude, label }` record. Files are capped at 128 KiB of UTF-8 JSON, and canonical inner preferences at 65,536 bytes. Unsupported versions, unknown fields, malformed values, and oversized files are rejected before writes.
+This shows the structure only. `preferences` must be a complete valid preference object; `{}` is not importable. `weatherLocation` is `null` or `{ latitude, longitude, label }`.
 
-Files include both Desktop/Mobile layout profiles and selected opaque bookmark/device identities. Identities from another installation can remain unresolved; importing does not substitute by name or create integrations/devices. Files do not contain browser scope/follow choices, revision counters, account credentials/configuration, managed devices, wake history, NFS paths, temporary image URLs, or provider/browser caches. This is a settings transfer, not a complete server backup. See [settings scope](settings-scope.md).
+Files include Desktop/Mobile layouts and selected bookmark/device identities. They exclude credentials, managed devices, wake history, NFS paths, browser choices, and caches. Identities from another installation may remain unresolved; imports do not create matching services or devices.
+
+The maximum file size is 128 KiB; inner preferences are limited to 65,536 bytes. Unknown fields, unsupported versions, and invalid values are rejected before writes. Older complete version-1 exports may omit newer widget scales or image visibility; missing values default to scale 1 and images shown.
+
+This is a settings transfer, not a server backup. See [operations](operations.md) and [settings scope](settings-scope.md).
