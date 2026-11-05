@@ -98,8 +98,9 @@ for (const playback of ['local-following', 'local-independent', 'global']) test(
       await page.setViewportSize({ width, height: 900 });
       if (width === 600) await hidden(page); else await expect(image(page)).toBeVisible();
       await page.locator('#fullscreen').click(); await expect(page.locator('#fullscreen')).toHaveText('Exit fullscreen'); await hidden(page);
-      await expect(page.locator('#open-settings')).toBeVisible();
+      await expect(page.locator('#open-settings')).toBeHidden();
       await page.evaluate(() => document.exitFullscreen()); await expect(page.locator('#fullscreen')).toHaveText('Enter fullscreen');
+      await expect(page.locator('#open-settings')).toBeVisible();
       if (width === 600) await hidden(page); else await expect(image(page)).toBeVisible();
     }
     await page.setViewportSize({ width: 600, height: 900 });

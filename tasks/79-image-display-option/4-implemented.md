@@ -22,13 +22,14 @@
 - Focused Node run covering nine settings/display/layout test files: 153 passed, zero failed. Log: `/tmp/opencode/79-focused.log`.
 - `npm test`: 712 tests, 687 passed, 25 failed. All failures are in unchanged weather-proxy scenarios. Log: `/tmp/opencode/79-unit-verified.log`.
 - Re-ran `test/weather-provider.test.js` from a temporary archive of pre-implementation commit `1f23863` with the same installed dependencies: 62 tests, 37 passed, the same 25 failed. This confirms those failures predate this implementation in this environment. Log: `/tmp/opencode/79-baseline-weather.log`.
-- `npm run test:browser -- e2e/image-visibility.spec.js e2e/background-display-options.spec.js e2e/dashboard-home.spec.js e2e/settings-scope.spec.js`: collected 93 cases, but all were blocked before browser execution because Playwright Chromium is absent. Log: `/tmp/opencode/79-browser.log`.
+- `npm run test:browser -- e2e/image-visibility.spec.js e2e/background-display-options.spec.js e2e/dashboard-home.spec.js e2e/settings-scope.spec.js`: 93 passed after the operator installed Chromium and its system dependencies. Log: `/tmp/opencode/79-browser-complete.log`. The image-only rerun also passed all 13 cases: `/tmp/opencode/79-browser-image-recheck.log`.
+- The first executable browser run passed 90 cases and exposed three incorrect new test expectations about Settings visibility. Corrected those assertions to preserve existing fullscreen behavior: tools hide when widgets are active and return on exit; the existing caption-only tests verify tools remain accessible when all widgets are hidden. No production behavior changed in this follow-up.
 - `bash scripts/release.sh --validate`: passed without credentials or remote operations.
 - `git diff --check`: passed.
 
 ## Limitations
 
-- Browser behavior remains unverified. Install Chromium with `npx playwright install chromium`, then rerun the browser command above. No system packages or browser binaries were installed.
+- Initial browser runs were blocked first by missing Chromium, then by missing `libnspr4.so`. The operator installed the browser and system dependencies; browser verification is now complete.
 - Full-suite weather-proxy failures report `ERR_INVALID_ARG_VALUE` / `fetch failed` in this environment. Their root cause was not changed or diagnosed beyond baseline reproduction.
 - `npm audit` reports one existing high-severity vulnerable dependency, `undici@8.11.2`, with multiple advisories. Dependency versions were not changed because remediation is outside this image-display task.
 - Preserved unrelated user changes to `todo.md` and the deletion of `tasks/78-selected-dashboard-images/1-goal.md`; neither belongs to this implementation commit.
