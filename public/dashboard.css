@@ -240,7 +240,6 @@ input[type=color] { min-height: 2.5rem; }
 #layout-frames { position: fixed; inset: 0; z-index: 30; isolation: isolate; pointer-events: none; }
 .layout-edit-frame { position: fixed; box-shadow: inset 0 0 0 1px #9dc5ff; pointer-events: auto; }
 .layout-edit-frame.selected { outline: 2px solid #d4e8ff; outline-offset: -2px; }
-.layout-hidden-widget { background: #2d446dcc; }
 .layout-edit-frame button { border: 0; border-radius: 0; padding: 2px; font-size: 12px; touch-action: none; background: transparent; }
 .layout-edit-frame [data-action=move] { display: block; width: 100%; height: 100%; cursor: move; text-align: left; vertical-align: top; overflow: hidden; overflow-wrap: anywhere; }
 .layout-edit-frame [data-action=resize] { position: absolute; right: 0; top: 0; width: min(48px, 100%); height: min(32px, 100%); cursor: nesw-resize; background: #304d71; }

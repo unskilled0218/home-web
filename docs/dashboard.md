@@ -26,7 +26,7 @@ Each widget tab has its own **Local/Global** choice. New browsers start Local. S
 
 Each widget has separate Desktop/Mobile visibility and scale settings, plus a fullscreen hiding option. Mobile applies at widths up to 600px. Both profiles can be edited on any screen.
 
-Automatic layout uses columns above 1000px and stacked sections below. Hidden sections leave no empty tracks. Use **Edit layout** or hold a widget background for 600ms to move, resize, and layer widgets. See [layout editing](dashboard-layout.md).
+Automatic layout uses columns above 1000px and stacked sections below. Hidden sections leave no empty tracks. Use **Edit layout** or hold a widget background for 600ms to move, resize, and layer enabled widgets. Visibility-disabled widgets are omitted from editor controls but keep their saved geometry. See [layout editing](dashboard-layout.md).
 
 **Enter fullscreen** depends on browser support. Escape exits. Fullscreen hiding changes display only; it does not disconnect services or stop photos. If all widgets are hidden, Settings and Exit fullscreen remain available.
 

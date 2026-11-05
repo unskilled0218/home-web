@@ -7,7 +7,7 @@ import { normalizeDashboardPreferences } from '../public/dashboard-helpers.js';
 import { WIDGET_ELEMENTS, initialWidgetProfile } from '../public/dashboard-layout.js';
 
 // Small DOM seam for real editor handlers; native input validity is covered in Playwright.
-function fixture() {
+function fixture(preferences = {}) {
   const nodes = new Map(); const document = { activeElement: null, fullscreenEnabled: true }; const frame = { reference: { width: 1000, height: 800 }, fit: { x: 0, y: 0, scale: 1 } };
   class Node extends EventTarget {
     constructor(tag = 'div', id) {
@@ -18,8 +18,8 @@ function fixture() {
       if (id) nodes.set(id, this);
     }
     addEventListener(type, fn, options) { if (options?.signal) setMaxListeners(0, options.signal); super.addEventListener(type, fn, options); }
-    append(...children) { for (const child of children) { child.parentElement = this; this.children.push(child); } }
-    replaceChildren() { this.children = []; }
+    append(...children) { for (const child of children) { if (child.parentElement) child.parentElement.children = child.parentElement.children.filter(node => node !== child); child.parentElement = this; this.children.push(child); } }
+    replaceChildren(...children) { for (const child of this.children) child.parentElement = null; this.children = []; this.append(...children); }
     setAttribute(key, value) { this.attributes[key] = value; }
     removeAttribute(key) { delete this.attributes[key]; }
     hasAttribute(key) { return key in this.attributes; }
@@ -50,6 +50,7 @@ function fixture() {
   }
   document.body = new Node('body'); document.activeElement = document.body; document.createElement = tag => new Node(tag); document.getElementById = id => nodes.get(id);
   const documentEvents = new Node(); document.addEventListener = (...args) => documentEvents.addEventListener(...args);
+  document.emit = (...args) => documentEvents.emit(...args);
   const window = new Node(); window.innerWidth = 1000; window.innerHeight = 800;
   for (const name of ['toolbar', 'frames', 'status', 'details', 'toggle', 'close', 'profile', 'widget', 'arrangement', 'layers', 'save', 'cancel', 'reload', 'reset', 'fullscreen', 'form']) new Node('div', `layout-${name}`);
   for (const key of ['x', 'y', 'w', 'h']) new Node('input', `layout-${key}`);
@@ -57,13 +58,13 @@ function fixture() {
   new Node('button', 'edit-layout'); new Node('button', 'open-settings');
   for (const element of Object.values(WIDGET_ELEMENTS)) new Node('section', element);
   let rectangle = { left: 10, top: 789.6, width: 200, height: 40.4 }; let override; const writes = [];
-  const state = { confirmed: true, source: 'general-local', saveToken: 'token-1', mode: 'local', snapshot: { revision: 1, preferences: normalizeDashboardPreferences() } };
+  const state = { confirmed: true, pending: false, source: 'general-local', saveToken: 'token-1', mode: 'local', snapshot: { revision: 1, preferences: normalizeDashboardPreferences(preferences) } };
   const view = { frame: () => frame, reference: () => frame.reference, lockReference() {}, releaseReference() {}, setOverride(value) { override = value; }, captureAutomatic: () => captureAutomaticLayout({ time: rectangle }, frame, 'desktop') };
   const editor = createDashboardLayoutEditor({ document, window, view, getState: () => state, canEnter: () => true, activeProfile: () => 'desktop', toggleFullscreen() {}, save: async (preferences, token) => { writes.push({ preferences, token }); state.snapshot.preferences = { ...state.snapshot.preferences, ...preferences }; } });
   const get = key => nodes.get(`layout-${key}`);
   const type = (key, value) => { const node = get(key); node.focus(); node.value = value; node.emit('input'); };
   async function change(key) { if (get('details').hidden) get('toggle').emit('click'); get(key).emit('change'); nodes.get('layout-widget').focus(); await Promise.resolve(); }
-  return { editor, state, writes, get, type, change, window, view, get override() { return override; }, resize(value) { rectangle = { ...rectangle, ...value }; editor.refreshSurface(); } };
+  return { editor, state, writes, get, type, change, window, document, nodes, view, get override() { return override; }, resize(value) { rectangle = { ...rectangle, ...value }; editor.refreshSurface(); } };
 }
 
 test('editor keeps short/negative Automatic observations valid and unchanged input exits without writing', async t => {
@@ -103,4 +104,64 @@ test('zero-distance and canceled first gestures restore live Automatic while sav
   f.get('frames').emit('pointercancel', { pointerId: 1 }); assert.equal(f.override.profile, null); f.get('cancel').emit('click');
   const custom = initialWidgetProfile('desktop', 'right'); f.state.snapshot.preferences.widgetLayout.desktop = custom; f.editor.enter();
   assert.deepEqual(f.override.profile, custom); f.resize({ height: 500 }); assert.deepEqual(f.override.profile, custom);
+});
+
+const allHidden = Object.fromEntries(['time', 'weather', 'calendar', 'bookmarks', 'homeAssistant', 'wol'].map(name => [`${name}Visible`, false]));
+const options = f => f.get('widget').children.map(node => node.value);
+const rows = f => f.get('layers').children.map(node => node.dataset.layerRow);
+
+test('Custom editor removes disabled widgets from every surface and uses the selected inactive profile', t => {
+  const f = fixture({ timeVisible: false, mobileWeatherVisible: false, widgetLayout: { version: 2, desktop: initialWidgetProfile('desktop'), mobile: initialWidgetProfile('mobile') } }); t.after(() => f.editor.dispose());
+  f.editor.enter();
+  assert.equal(f.get('widget').value, 'calendar'); assert.equal(options(f).includes('time'), false); assert.deepEqual(rows(f), options(f));
+  assert.equal(f.get('frames').querySelector('[data-widget=time]').hidden, true);
+  const before = structuredClone(f.state.snapshot.preferences.widgetLayout);
+  f.get('profile').value = 'mobile'; f.get('profile').emit('change');
+  assert.equal(options(f).includes('time'), true); assert.equal(options(f).includes('weather'), false);
+  assert.equal(f.get('frames').querySelector('[data-widget=time]').hidden, false);
+  f.get('form').emit('submit'); assert.equal(f.editor.active, false); assert.deepEqual(f.writes, []); assert.deepEqual(f.state.snapshot.preferences.widgetLayout, before);
+});
+
+test('all-hidden editor has no selection or editable controls, preserves no-op saves, and can switch profiles', t => {
+  const f = fixture(allHidden); t.after(() => f.editor.dispose()); f.editor.enter();
+  assert.deepEqual(options(f), []); assert.deepEqual(rows(f), []); assert.equal(f.get('widget').value, ''); assert.equal(f.get('widget').disabled, true);
+  assert.match(f.get('status').textContent, /No widgets are enabled/);
+  for (const key of ['x', 'y', 'w', 'h']) { assert.equal(f.get(key).value, ''); assert.equal(f.get(key).disabled, true); }
+  assert.equal(f.get('cancel').disabled, false); assert.equal(f.get('profile').disabled, false); assert.equal(f.get('save').disabled, false);
+  f.get('profile').value = 'mobile'; f.get('profile').emit('change'); assert.equal(options(f).length, 6);
+  f.get('profile').value = 'desktop'; f.get('profile').emit('change'); f.get('form').emit('submit');
+  assert.equal(f.editor.active, false); assert.deepEqual(f.writes, []);
+});
+
+test('remote hiding discards selected raw text and stale queued changes without rebasing completed drafts', async t => {
+  const f = fixture(); t.after(() => f.editor.dispose()); f.editor.enter();
+  f.type('w', '400'); await f.change('w'); const completed = structuredClone(f.override.profile);
+  f.type('w', '450'); f.get('w').emit('change');
+  f.state.snapshot.preferences.timeVisible = false; f.state.saveToken = 'token-2'; f.editor.observe(); await Promise.resolve();
+  assert.equal(f.get('widget').value, 'calendar'); assert.equal(options(f).includes('time'), false);
+  assert.equal(f.document.activeElement, f.get('widget')); assert.deepEqual(f.override.profile, completed);
+  f.get('form').emit('submit'); await Promise.resolve();
+  assert.equal(f.writes[0].token, 'token-1'); assert.deepEqual(f.writes[0].preferences.widgetLayout.desktop, completed);
+});
+
+test('hiding a captured widget restores its draft and prevents detached controls from editing it', t => {
+  const f = fixture(); t.after(() => f.editor.dispose()); f.editor.enter();
+  const box = f.get('frames').querySelector('[data-widget=time]'); const move = box.querySelector('[data-action=move]');
+  const layer = f.get('layers').querySelector('[data-layer-row=time]').querySelector('[data-layer=forward]');
+  f.get('frames').emit('pointerdown', { target: move, pointerId: 1, button: 0, clientX: 10, clientY: 20 });
+  f.get('frames').emit('pointermove', { pointerId: 1, clientX: 40, clientY: 20 }); assert.ok(f.override.profile);
+  f.state.snapshot.preferences.timeVisible = false; f.editor.observe();
+  assert.equal(move.hasPointerCapture(1), false); assert.equal(box.hidden, true); assert.equal(f.override.profile, null);
+  f.get('frames').emit('pointerup', { pointerId: 1 }); f.get('layers').emit('click', { target: layer });
+  assert.equal(f.override.profile, null); assert.equal(f.editor.enter('time'), false);
+  f.get('form').emit('submit'); assert.deepEqual(f.writes, []);
+});
+
+test('fullscreen eligibility restores hidden selections without consulting live widget DOM flags', t => {
+  const f = fixture({ hideTimeFullscreen: true }); t.after(() => f.editor.dispose()); f.editor.enter();
+  f.nodes.get('clock').hidden = true; f.editor.observe(); assert.equal(options(f).includes('time'), true);
+  f.document.fullscreenElement = f.document.body; f.document.emit('fullscreenchange'); f.editor.refreshSurface();
+  assert.equal(options(f).includes('time'), false); assert.equal(f.get('widget').value, 'calendar');
+  f.document.fullscreenElement = null; f.document.emit('fullscreenchange'); f.editor.refreshSurface();
+  assert.equal(options(f).includes('time'), true); assert.equal(f.get('widget').value, 'calendar'); f.get('cancel').emit('click'); assert.deepEqual(f.writes, []);
 });

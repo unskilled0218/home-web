@@ -73,12 +73,17 @@ export function editWidget(profile, id, pixels, surface) {
   return { items: profile.items.map(item => item.id === id ? next : item) };
 }
 
-export function changeWidgetLayer(profile, id, action) {
-  const index = profile.items.findIndex(item => item.id === id);
-  if (index < 0 || !['forward', 'backward', 'front', 'back'].includes(action)) throw new Error('Invalid widget layer action.');
-  const target = { forward: Math.min(5, index + 1), backward: Math.max(0, index - 1), front: 5, back: 0 }[action];
+export function changeWidgetLayer(profile, id, action, eligibleIds = profile.items.map(item => item.id)) {
+  if (!profile.items.some(item => item.id === id) || !['forward', 'backward', 'front', 'back'].includes(action)) throw new Error('Invalid widget layer action.');
+  const eligible = new Set(eligibleIds);
+  const visible = profile.items.filter(item => eligible.has(item.id));
+  const index = visible.findIndex(item => item.id === id);
+  if (index < 0) return profile;
+  const target = { forward: Math.min(visible.length - 1, index + 1), backward: Math.max(0, index - 1), front: visible.length - 1, back: 0 }[action];
   if (target === index) return profile;
-  const items = [...profile.items]; const [item] = items.splice(index, 1); items.splice(target, 0, item);
+  const [item] = visible.splice(index, 1); visible.splice(target, 0, item);
+  // Only visible slots change; hidden widgets retain their exact saved layers and rectangles.
+  let slot = 0; const items = profile.items.map(item => eligible.has(item.id) ? visible[slot++] : item);
   return { items };
 }
 

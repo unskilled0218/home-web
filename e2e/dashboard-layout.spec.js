@@ -11,6 +11,7 @@ import { encryptApiKey } from '../src/linkwarden-crypto.js';
 import { normalizeForecast } from '../public/weather-data.js';
 import { rawForecast } from '../test/fixtures/weather.js';
 import { mockSlideshow } from './photo-fixtures.js';
+import { categoryScopes } from '../public/dashboard-settings-categories.js';
 
 async function environment(preferences = {}, services = {}) {
   const directory = mkdtempSync('/tmp/opencode/dashboard-layout-'); const filename = `${directory}/app.db`;
@@ -84,13 +85,100 @@ test('Automatic numeric observations remain valid no-ops outside Custom bounds a
   } finally { await page.goto('about:blank'); await env.close(); }
 });
 
-test('all-hidden Automatic editing keeps hidden widgets in the toolbar without creating a layout', async ({ page }) => {
+test('all-hidden Automatic editing has empty controls without creating a layout', async ({ page }) => {
   const env = await environment({ timeVisible: false, weatherVisible: false, calendarVisible: false, bookmarksVisible: false, homeAssistantVisible: false, wolVisible: false });
   try {
     await ready(page, env); const before = env.store.getDashboardPreferences(); await open(page);
-    await expect(page.locator('.layout-edit-frame:visible')).toHaveCount(0); await expect(page.locator('[data-layer-row]')).toHaveCount(6);
-    await page.locator('#layout-widget').selectOption('wol'); await save(page); expect(env.store.getDashboardPreferences()).toEqual(before);
+    await expect(page.locator('.layout-edit-frame:visible')).toHaveCount(0); await expect(page.locator('[data-layer-row]')).toHaveCount(0);
+    await expect(page.locator('#layout-widget option')).toHaveCount(0); await expect(page.locator('#layout-widget')).toBeDisabled();
+    await expect(page.locator('#layout-w')).toBeDisabled(); await expect(page.locator('#layout-status')).toContainText('No widgets are enabled');
+    await save(page); expect(env.store.getDashboardPreferences()).toEqual(before);
   } finally { await page.goto('about:blank'); await env.close(); }
+});
+
+for (const custom of [false, true]) test(`${custom ? 'Custom' : 'Automatic'} eligibility follows the selected profile through breakpoints, fullscreen, and an empty state`, async ({ page }) => {
+  const env = await environment({ timeVisible: false, mobileWeatherVisible: false, hideCalendarFullscreen: true, ...(custom ? { widgetLayout: layout() } : {}) });
+  try {
+    await page.setViewportSize({ width: 601, height: 900 }); await ready(page, env); const before = env.store.getDashboardPreferences(); await open(page);
+    await expect(page.locator('#layout-widget')).toHaveValue('calendar'); await expect(page.locator('#layout-widget option[value=time]')).toHaveCount(0);
+    await page.locator('#layout-profile').selectOption('mobile');
+    await expect(page.locator('#layout-widget option[value=time]')).toHaveCount(1); await expect(page.locator('#layout-widget option[value=weather]')).toHaveCount(0);
+    for (const width of [600, 601]) { await page.setViewportSize({ width, height: 900 }); await expect(page.locator('#layout-profile')).toHaveValue('mobile'); await expect(page.locator('#layout-widget option[value=time]')).toHaveCount(1); }
+    await page.locator('#layout-fullscreen').click(); await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(true);
+    await expect(page.locator('#layout-widget option[value=calendar]')).toHaveCount(0); await expect(page.locator('[data-layer-row=calendar]')).toHaveCount(0);
+    await expect(page.locator('#layout-widget')).toHaveValue('time');
+    await page.locator('#layout-fullscreen').click(); await expect.poll(() => page.evaluate(() => Boolean(document.fullscreenElement))).toBe(false);
+    await expect(page.locator('#layout-widget option[value=calendar]')).toHaveCount(1); await save(page); expect(env.store.getDashboardPreferences()).toEqual(before);
+    const hidden = Object.fromEntries(['time', 'weather', 'calendar', 'bookmarks', 'homeAssistant', 'wol'].map(name => [`${name}Visible`, false]));
+    env.store.saveDashboardPreferences({ ...before.preferences, ...hidden }, before.revision); await ready(page, env); const emptyBefore = env.store.getDashboardPreferences(); await open(page);
+    await expect(page.locator('#layout-widget option')).toHaveCount(0); await expect(page.locator('[data-layer-row]')).toHaveCount(0); await expect(page.locator('.layout-edit-frame:visible')).toHaveCount(0);
+    await expect(page.locator('#layout-x')).toHaveValue(''); await expect(page.locator('#layout-w')).toBeDisabled(); await expect(page.locator('#layout-status')).toContainText('No widgets are enabled');
+    await page.locator('#layout-profile').selectOption('mobile'); await expect(page.locator('#layout-widget')).toBeEnabled();
+    await page.locator('#layout-profile').selectOption('desktop'); await page.locator('#layout-cancel').click(); expect(env.store.getDashboardPreferences()).toEqual(emptyBefore);
+  } finally { await page.goto('about:blank'); await env.close(); }
+});
+
+test('visible layer moves skip disabled widgets without changing hidden slots, geometry, or the other profile', async ({ page }) => {
+  const env = await environment({ widgetLayout: layout(), weatherVisible: false, homeAssistantVisible: false, wolVisible: false });
+  try {
+    await ready(page, env); const original = storedLayout(env); await open(page);
+    await expect(page.locator('#layout-widget option')).toHaveCount(3); await expect(page.locator('[data-layer-row]')).toHaveCount(3);
+    await expect(page.locator('[data-layer-row=calendar] [data-layer=backward]')).toBeDisabled();
+    await expect(page.locator('[data-layer-row=bookmarks] [data-layer=forward]')).toBeDisabled();
+    await page.locator('[data-layer-row=time] [data-layer=forward]').click(); await expect(page.locator('#layout-widget')).toHaveValue('time'); await save(page);
+    const saved = storedLayout(env); expect(saved.desktop.items).toHaveLength(6); expect(saved.mobile).toEqual(original.mobile);
+    expect(saved.desktop.items[1]).toEqual(original.desktop.items[5]); expect(saved.desktop.items[5]).toEqual(original.desktop.items[1]);
+    for (const slot of [0, 2, 3, 4]) expect(saved.desktop.items[slot]).toEqual(original.desktop.items[slot]);
+    const current = env.store.getDashboardPreferences(); env.store.saveDashboardPreferences({ ...current.preferences, weatherVisible: true, homeAssistantVisible: true, wolVisible: true }, current.revision);
+    await ready(page, env); await open(page); await expect(page.locator('#layout-widget option')).toHaveCount(6); await save(page); expect(storedLayout(env)).toEqual(saved);
+  } finally { await page.goto('about:blank'); await env.close(); }
+});
+
+for (const mode of ['local', 'global']) test(`${mode} layout preserves hidden geometry with independently scoped visibility and re-enabling`, async ({ page }) => {
+  const globalPreferences = normalizeDashboardPreferences({ widgetLayout: layout(), timeVisible: mode === 'global' });
+  const localPreferences = normalizeDashboardPreferences({ widgetLayout: layout(), timeVisible: mode === 'local' });
+  const env = await environment(globalPreferences); const scopes = categoryScopes('global'); scopes.general = mode; scopes.time = mode === 'local' ? 'global' : 'local';
+  try {
+    await page.addInitScript(record => {
+      if (!localStorage.getItem('dashboard.local-settings.v1')) {
+        localStorage.setItem('dashboard.local-settings.v1', JSON.stringify(record.local));
+        localStorage.setItem('dashboard.category-scopes.v1', JSON.stringify(record.scopes));
+      }
+    }, { local: { schema: 1, revision: 1, preferences: localPreferences, weatherLocation: null, followGlobalPhotos: true }, scopes: { schema: 1, revision: 1, scopes } });
+    await page.goto(env.base); await expect(page.locator('#settings-status')).toContainText(`General settings use ${mode === 'local' ? 'Local' : 'Global'}`);
+    const globalBefore = env.store.getDashboardPreferences(); const localBefore = await page.evaluate(() => JSON.parse(localStorage.getItem('dashboard.local-settings.v1')));
+    await open(page); await expect(page.locator('#layout-widget option[value=time]')).toHaveCount(0); await pixel(page, 'w', 177); await save(page);
+    const saved = mode === 'local' ? await page.evaluate(() => JSON.parse(localStorage.getItem('dashboard.local-settings.v1')).preferences.widgetLayout) : storedLayout(env);
+    expect(saved.desktop.items.find(item => item.id === 'time')).toEqual(globalPreferences.widgetLayout.desktop.items.find(item => item.id === 'time'));
+    if (mode === 'local') {
+      expect(env.store.getDashboardPreferences()).toEqual(globalBefore);
+      const current = env.store.getDashboardPreferences(); env.store.saveDashboardPreferences({ ...current.preferences, timeVisible: true }, current.revision);
+    } else {
+      expect(await page.evaluate(() => JSON.parse(localStorage.getItem('dashboard.local-settings.v1')))).toEqual(localBefore);
+      await page.evaluate(() => { const value = JSON.parse(localStorage.getItem('dashboard.local-settings.v1')); value.preferences.timeVisible = true; value.revision++; localStorage.setItem('dashboard.local-settings.v1', JSON.stringify(value)); });
+    }
+    await page.reload(); await open(page); await expect(page.locator('#layout-widget option[value=time]')).toHaveCount(1); await save(page);
+    expect(mode === 'local' ? await page.evaluate(() => JSON.parse(localStorage.getItem('dashboard.local-settings.v1')).preferences.widgetLayout) : storedLayout(env)).toEqual(saved);
+  } finally { await page.goto('about:blank'); await env.close(); }
+});
+
+test('remote visibility hides selected raw input and captured gestures without saving or rebasing drafts', async ({ page, browser }) => {
+  const env = await environment({ widgetLayout: layout() }); const other = await browser.newPage();
+  try {
+    await page.clock.install(); await ready(page, env); await ready(other, env); await open(page);
+    await pixel(page, 'w', 177); const original = env.store.getDashboardPreferences(); await page.locator('#layout-w').fill('188');
+    await other.locator('#open-settings').click(); await setPreferenceFlags(other, { timeVisible: false });
+    await page.clock.runFor(5000); await expect(page.locator('#layout-widget option[value=time]')).toHaveCount(0);
+    await expect(page.locator('#layout-widget')).toHaveValue('calendar'); await expect(page.locator('#layout-widget')).toBeFocused();
+    await page.locator('#layout-save').click(); await expect(page.locator('#layout-status')).toContainText('changed');
+    expect(storedLayout(env)).toEqual(original.preferences.widgetLayout); await page.locator('#layout-reload').click();
+    // A captured drag must roll back when the currently selected widget disappears remotely.
+    await page.locator('#layout-close').click(); const handle = page.locator('[data-widget=calendar] [data-action=move]'); const box = await handle.boundingBox();
+    await page.mouse.move(box.x + 3, box.y + 3); await page.mouse.down(); await page.mouse.move(box.x + 30, box.y + 3);
+    await setPreferenceFlags(other, { calendarVisible: false }); await page.clock.runFor(5000);
+    await expect(page.locator('[data-widget=calendar]')).toBeHidden(); await page.mouse.up();
+    await page.locator('#layout-cancel').click(); expect(storedLayout(env)).toEqual(original.preferences.widgetLayout);
+  } finally { await other.close(); await page.goto('about:blank'); await env.close(); }
 });
 
 test('Automatic frames track document scrolling and fullscreen without persisting a Custom profile', async ({ page }) => {
@@ -347,12 +435,14 @@ test('touch toolbar and per-widget layer taps preserve Automatic no-ops and requ
   } finally { await context.close(); await env.close(); }
 });
 
-test('hidden, fully covered and zero-canvas widgets retain independent panel layer access', async ({ page }) => {
+test('disabled widgets have no controls while covered and zero-canvas enabled widgets retain panel access', async ({ page }) => {
   const widgetLayout = layout(); widgetLayout.desktop.items = widgetLayout.desktop.items.map(item => ({ ...item, x: 0, y: 0, w: 1000000, h: 1000000 }));
   const env = await environment({ widgetLayout, timeVisible: false });
   try {
     await ready(page, env); await open(page); const before = env.store.getDashboardPreferences();
-    await expect(page.locator('[data-layer-row=time]')).toContainText('hidden'); await page.locator('[data-layer-row=time] [data-layer=forward]').click(); await expect(page.locator('#layout-widget')).toHaveValue('time'); await expect(page.locator('#clock')).toBeHidden();
+    await expect(page.locator('[data-layer-row=time]')).toHaveCount(0); await expect(page.locator('#layout-widget option[value=time]')).toHaveCount(0);
+    await expect(page.locator('[data-widget=time]')).toBeHidden(); await expect(page.locator('#clock')).toBeHidden();
+    await page.locator('[data-layer-row=calendar] [data-layer=forward]').click(); await expect(page.locator('#layout-widget')).toHaveValue('calendar');
     await page.locator('#layout-cancel').click();
     const screenSize = await page.evaluate(() => ({ width: screen.width, height: screen.height }));
     await page.evaluate(() => { document.documentElement.style.setProperty('--layout-safe-left', '2px'); Object.defineProperty(screen, 'width', { configurable: true, value: 1 }); Object.defineProperty(screen, 'height', { configurable: true, value: 2 }); window.dispatchEvent(new Event('resize')); }); await settleFrames(page);
@@ -474,11 +564,12 @@ test('unrelated Settings clean refresh and dirty conflicts preserve complete rem
   } finally { await page.goto('about:blank'); await env.close(); }
 });
 
-test('keyboard/fullscreen entry, hidden placeholders, inactive profile and breakpoint transitions retain ownership', async ({ page }) => {
+test('keyboard/fullscreen entry filters disabled widgets while inactive profile and breakpoint transitions retain ownership', async ({ page }) => {
   const env = await environment({ timeVisible: false, widgetLayout: layout() });
   try {
     await ready(page, env); const original = env.store.getDashboardPreferences(); await page.locator('#edit-layout').focus(); await page.keyboard.press('Enter');
-    await expect(page.locator('#layout-toggle')).toBeFocused(); await expect(page.locator('[data-widget=time] [data-action=move]')).toHaveText('Time (hidden)'); await expect(page.locator('#clock')).toBeHidden();
+    await expect(page.locator('#layout-toggle')).toBeFocused(); await expect(page.locator('[data-widget=time]')).toBeHidden(); await expect(page.locator('#clock')).toBeHidden();
+    await expect(page.locator('#layout-widget option[value=time]')).toHaveCount(0);
     for (let i = 0; i < 30; i++) { await page.keyboard.press('Tab'); expect(await page.evaluate(() => Boolean(document.activeElement.closest('#layout-toolbar, #layout-frames')) || document.activeElement === document.body)).toBe(true); }
     await details(page); await page.locator('#layout-profile').selectOption('mobile'); await expect(page.locator('#layout-status')).toContainText('inactive profile'); await pixel(page, 'w', 156);
     await page.setViewportSize({ width: 590, height: 800 }); await expect(page.locator('#layout-profile')).toHaveValue('mobile'); await expect(page.locator('#layout-w')).toHaveValue('156');
@@ -654,7 +745,8 @@ test('custom cards stay within each viewport without resize writes, including ti
     await page.setViewportSize({ width: 1200, height: 800 }); await page.locator('#open-settings').click();
     await setPreferenceFlags(page, Object.fromEntries(['time', 'weather', 'calendar', 'bookmarks', 'homeAssistant', 'wol'].map(name => [`${name}Visible`, false])));
     await page.locator('#close-settings').click(); await expect(page.locator('#widget-surface')).toBeHidden();
-    await open(page); await expect(page.locator('#layout-w')).toBeEnabled(); await expect(page.locator('#layout-frames')).toBeVisible();
+    await open(page); await expect(page.locator('#layout-w')).toBeDisabled(); await expect(page.locator('.layout-edit-frame:visible')).toHaveCount(0);
+    await expect(page.locator('#layout-widget option')).toHaveCount(0); await expect(page.locator('[data-layer-row]')).toHaveCount(0);
     await page.locator('#layout-cancel').click(); await page.locator('#fullscreen').click(); await expect(page.locator('#open-settings')).toBeVisible(); await expect(page.locator('#edit-layout')).toBeHidden(); await page.locator('#fullscreen').click();
   } finally { await page.goto('about:blank'); await env.close(); }
 });

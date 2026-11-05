@@ -4,6 +4,21 @@ import { normalizeWidgetLayout, defaultWidgetLayout, initialWidgetProfile, proje
 import { normalizeDashboardPreferences, validateDashboardPreferences, decodeStoredDashboardPreferences } from '../public/dashboard-helpers.js';
 
 const surface = { width: 800, height: 800 };
+
+test('filtered layer actions reorder only visible slots and preserve all canonical geometry', () => {
+  for (const action of ['forward', 'backward', 'front', 'back']) {
+    const profile = initialWidgetProfile('desktop'); const before = structuredClone(profile);
+    const visible = [profile.items[0], profile.items[2], profile.items[5]]; const id = visible[1].id;
+    const result = changeWidgetLayer(profile, id, action, visible.map(item => item.id));
+    const expected = ['forward', 'front'].includes(action) ? [visible[0], visible[2], visible[1]] : [visible[1], visible[0], visible[2]];
+    assert.deepEqual([result.items[0], result.items[2], result.items[5]], expected, action);
+    for (const slot of [1, 3, 4]) assert.deepEqual(result.items[slot], before.items[slot], `${action}: hidden slot ${slot}`);
+    assert.deepEqual(normalizeWidgetLayout({ version: 2, desktop: result, mobile: null }).desktop, result);
+    assert.deepEqual(profile, before);
+    assert.equal(changeWidgetLayer(profile, id, action, []), profile);
+    assert.equal(changeWidgetLayer(profile, id, action, [id]), profile);
+  }
+});
 function sample() {
   const profile = initialWidgetProfile('desktop');
   profile.items[0] = { id: 'calendar', x: 600000, y: 600000, w: 100000, h: 100000 };

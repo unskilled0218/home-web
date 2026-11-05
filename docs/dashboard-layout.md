@@ -25,13 +25,17 @@ Coordinates start at the reference canvas's bottom-left: X increases rightward a
 
 Unchanged Automatic measurements may be smaller or outside Custom bounds. Keeping them unchanged is allowed; real edits must satisfy Custom bounds.
 
-Escape cancels an active drag first, then closes an open toolbar. It does not exit editing. Toolbar entries survive closing and reopening it. Covered, hidden, or tiny widgets remain selectable there.
+Escape cancels an active drag first, then closes an open toolbar. It does not exit editing. Toolbar entries survive closing and reopening it. Covered or tiny enabled widgets remain selectable there.
+
+Widgets disabled in Settings have no editing frame, selector option, or layer row. Their saved rectangles and hidden layer slots remain intact. Re-enable them in Settings after leaving Edit layout to edit them again. Up/Down and front/back reorder only enabled widgets through their existing layer slots.
+
+If no widgets are enabled for the selected profile, widget controls are disabled. Profile choice, Cancel, and valid layout-level actions remain available. A widget becoming hidden cancels its drag and discards uncommitted numeric text without discarding completed drafts; remote changes can still require an explicit Reload before saving.
 
 Widget scales in Settings change content size, not Custom rectangles or layer order.
 
 ## Profiles and fullscreen
 
-Desktop and Mobile have separate layouts. Mobile applies up to 600px. Edit either profile on any screen; the selected profile stays pinned during editing.
+Desktop and Mobile have separate layouts. Mobile applies up to 600px. Edit either profile on any screen; the selected profile stays pinned during editing. Editor eligibility follows that selected profile's visibility settings, not the current viewport. Fullscreen hide preferences override either profile until fullscreen ends.
 
 Custom layouts use the full viewport inside device safe areas. Controls and captions overlay the canvas; widgets can move underneath them. The canvas shrinks uniformly to fit smaller windows without enlarging above its reference size.
 

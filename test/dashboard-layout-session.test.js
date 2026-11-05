@@ -64,3 +64,14 @@ test('explicit layer boundaries keep Automatic null, while a genuine targeted st
   session.layer('forward', template.items[0].id); assert.equal(session.changed(), true); assert.equal(session.draft.desktop, null);
   assert.deepEqual(session.draft.mobile.items, [template.items[1], template.items[0], ...template.items.slice(2)]);
 });
+
+test('visible-only layer boundaries preserve Automatic and genuine edits retain hidden slots and the other profile', () => {
+  const session = createLayoutSession(); session.load(state(), 'desktop'); const original = session.effective();
+  const ids = [original.items[1].id, original.items[4].id];
+  session.layer('backward', ids[0], ids); session.layer('forward', ids[1], ids); session.layer('front', original.items[0].id, ids);
+  assert.equal(session.changed(), false); assert.equal(session.draft.desktop, null);
+  session.layer('forward', ids[0], ids);
+  const saved = session.payload().preferences.widgetLayout; assert.equal(saved.desktop.items.length, 6); assert.equal(saved.mobile, null);
+  for (const index of [0, 2, 3, 5]) assert.deepEqual(saved.desktop.items[index], original.items[index]);
+  assert.deepEqual(saved.desktop.items[1], original.items[4]); assert.deepEqual(saved.desktop.items[4], original.items[1]);
+});
