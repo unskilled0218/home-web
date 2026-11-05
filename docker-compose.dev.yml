@@ -4,6 +4,10 @@ services:
     container_name: home-web
     stdin_open: true
     tty: true
+    environment:
+      PW_TEST_CONNECT_WS_ENDPOINT: ws://playwright:3000/
+    networks:
+      - development
     network_mode: host
     working_dir: /home/container/workdir
     volumes:
@@ -27,3 +31,8 @@ services:
         read_only: true
         bind:
           create_host_path: false
+
+networks:
+  development:
+    external: true
+    name: development
