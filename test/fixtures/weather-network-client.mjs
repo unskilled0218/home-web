@@ -73,7 +73,7 @@ if (process.env.WEATHER_NETWORK_CASE) {
       const response = await (transport?.fetch ?? fetch)(config.url, { signal: AbortSignal.timeout(2500) });
       const data = await response.json();
       send({ type: 'result', ok: true, data, connections, defaultUnchanged: defaultTimeout === net.getDefaultAutoSelectFamilyAttemptTimeout(), proxyEnabled: Boolean(http.globalAgent.options?.proxyEnv) });
-    } catch (error) { send({ type: 'result', ok: false, code: error.cause?.code ?? error.code, message: error.message }); }
+    } catch (error) { send({ type: 'result', ok: false, code: error.cause?.code ?? error.code, message: error.message, cause: error.cause?.stack }); }
     finally { await transport?.stop(); }
   } else {
     const { EnvHttpProxyAgent } = await import('undici');

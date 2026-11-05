@@ -44,14 +44,14 @@ test('weather proxy opt-in matches native startup policy without enabling ambien
     { name: 'command line disables NODE_OPTIONS opt-in', args: ['--no-use-env-proxy'], env: { NODE_OPTIONS: '--use-env-proxy' }, enabled: false }
   ];
   for (const scenario of cases) await t.test(scenario.name, async t => {
-    for (const native of [true, false]) {
+    for (const native of [true, false]) await t.test(native ? 'native' : 'weather', async t => {
       const before = network.requests.length;
       const client = weatherClient(t, { kind: 'fetch', native, url: network.httpUrl, denyTargetLookup: scenario.enabled }, { ca: network.cert, args: scenario.args, env: { HTTP_PROXY: network.httpProxy, HTTPS_PROXY: network.httpsProxy, ...scenario.env } });
       const result = await client.wait('result');
       assert.equal(result.ok, true, JSON.stringify(result)); assert.equal(result.data.current.us_aqi, 91);
       assert.equal(result.proxyEnabled, scenario.enabled); assert.equal(result.defaultUnchanged, true);
       assert.equal(network.requests.length - before, scenario.enabled ? 1 : 0, `${native ? 'native' : 'weather'} routing`);
-    }
+    });
   });
 });
 
@@ -63,13 +63,13 @@ test('HTTP and HTTPS proxy selection and lowercase precedence match native fetch
     { name: 'http_proxy overrides HTTP_PROXY', url: network.httpUrl, env: { http_proxy: network.httpsProxy }, proxy: 'https-proxy' },
     { name: 'https_proxy overrides HTTPS_PROXY', url: network.httpsUrl, env: { https_proxy: network.httpProxy }, proxy: 'http-proxy' }
   ]) await t.test(scenario.name, async t => {
-    for (const native of [true, false]) {
+    for (const native of [true, false]) await t.test(native ? 'native' : 'weather', async t => {
       const before = network.requests.length;
       const client = weatherClient(t, { kind: 'fetch', native, url: scenario.url, denyTargetLookup: true }, { ca: network.cert, env: { NODE_USE_ENV_PROXY: '1', HTTP_PROXY: network.httpProxy, HTTPS_PROXY: network.httpsProxy, ...scenario.env } });
       const result = await client.wait('result'); assert.equal(result.ok, true, JSON.stringify(result));
       assert.equal(network.requests.length, before + 1); assert.equal(network.requests.at(-1).id, scenario.proxy);
       if (!native) { assert.ok(result.connections.length); for (const connection of result.connections) { assert.equal(connection.autoSelectFamily, true); assert.equal(connection.attemptTimeout, 2000); } }
-    }
+    });
   });
 });
 
@@ -83,12 +83,12 @@ test('NO_PROXY bypass and lowercase precedence match native fetch', proxyRuntime
     { name: 'wildcard', value: '*' },
     { name: 'lowercase overrides uppercase', value: 'other.invalid', env: { no_proxy: 'weather.invalid' } }
   ]) await t.test(scenario.name, async t => {
-    for (const native of [true, false]) {
+    for (const native of [true, false]) await t.test(native ? 'native' : 'weather', async t => {
       const before = network.requests.length;
       const client = weatherClient(t, { kind: 'fetch', native, url: scenario.url ?? network.httpUrl }, { ca: network.cert, env: { NODE_USE_ENV_PROXY: '1', HTTP_PROXY: network.httpProxy, HTTPS_PROXY: network.httpsProxy, NO_PROXY: scenario.value, ...scenario.env } });
       const result = await client.wait('result'); assert.equal(result.ok, true, JSON.stringify(result));
       assert.equal(result.data.current.us_aqi, 91); assert.equal(network.requests.length - before, scenario.proxied ? 1 : 0);
-    }
+    });
   });
 });
 
@@ -99,15 +99,17 @@ test('HTTPS proxying preserves target certificate trust and hostname validation'
     { name: 'untrusted target', ok: false, codes: ['DEPTH_ZERO_SELF_SIGNED_CERT', 'SELF_SIGNED_CERT_IN_CHAIN'] },
     { name: 'wrong target hostname', ca: network.cert, url: network.httpsUrl.replace('weather.invalid', 'wrong.invalid'), ok: false, codes: ['ERR_TLS_CERT_ALTNAME_INVALID'] },
     { name: 'untrusted HTTPS proxy', url: network.httpUrl, proxy: network.httpsProxy, ok: false, codes: ['DEPTH_ZERO_SELF_SIGNED_CERT', 'SELF_SIGNED_CERT_IN_CHAIN'] },
-    { name: 'wrong HTTPS proxy hostname', ca: network.cert, url: network.httpUrl, proxy: network.httpsProxy.replace('127.0.0.1', 'wrong.invalid'), lookup: true, ok: false, codes: ['UND_ERR_PRX_TLS', 'ERR_TLS_CERT_ALTNAME_INVALID'] }
+    { name: 'wrong HTTPS proxy hostname', ca: network.cert, url: network.httpUrl, proxy: network.httpsProxy.replace('localhost', 'wrong.invalid'), lookup: true, ok: false, codes: ['UND_ERR_PRX_TLS', 'ERR_TLS_CERT_ALTNAME_INVALID'] }
   ]) await t.test(scenario.name, async t => {
-    const client = weatherClient(t, { kind: 'fetch', url: scenario.url ?? network.httpsUrl, denyTargetLookup: !scenario.lookup }, { ca: scenario.ca, env: { NODE_USE_ENV_PROXY: '1', HTTP_PROXY: scenario.proxy ?? network.httpProxy, HTTPS_PROXY: scenario.proxy ?? network.httpProxy } });
-    const result = await client.wait('result'); assert.equal(result.ok, scenario.ok, JSON.stringify(result));
-    if (!scenario.ok) assert.ok(scenario.codes.includes(result.code), JSON.stringify(result));
+    for (const native of [true, false]) await t.test(native ? 'native' : 'weather', async t => {
+      const client = weatherClient(t, { kind: 'fetch', native, url: scenario.url ?? network.httpsUrl, denyTargetLookup: !scenario.lookup }, { ca: scenario.ca, env: { NODE_USE_ENV_PROXY: '1', HTTP_PROXY: scenario.proxy ?? network.httpProxy, HTTPS_PROXY: scenario.proxy ?? network.httpProxy } });
+      const result = await client.wait('result'); assert.equal(result.ok, scenario.ok, JSON.stringify(result));
+      if (!scenario.ok) assert.ok(scenario.codes.includes(result.code), JSON.stringify(result));
+    });
   });
 });
 
-test('wildcard domains bypass their apex and subdomains like native fetch', proxyRuntime, async t => {
+test('weather wildcard domains include the apex; native comparisons use subdomains', proxyRuntime, async t => {
   const network = await weatherNetwork(t);
   for (const url of [network.httpUrl, network.httpsUrl]) {
     const { protocol, port } = new URL(url);
@@ -123,9 +125,12 @@ test('wildcard domains bypass their apex and subdomains like native fetch', prox
       { name: 'case insensitive', env: { NO_PROXY: '*.WEATHER.INVALID' } },
       ...(protocol === 'http:' ? [{ name: 'unrelated host', env: { NO_PROXY: '*.weather.invalid' }, url: url.replace('weather.invalid', 'wrong.invalid'), proxied: true }] : [])
     ]) await t.test(`${protocol} ${scenario.name}`, async t => {
-      for (const native of [true, false]) {
+      for (const native of [true, false]) await t.test(native ? 'native subdomain contract' : 'weather apex and subdomain contract', async t => {
+        // Native wildcard-apex semantics vary with bundled Undici. Subdomain routing is shared;
+        // weather must additionally preserve its explicit apex-bypass contract on every runtime.
+        const target = native ? (scenario.url ?? url).replace('://weather.invalid', '://sub.weather.invalid') : (scenario.url ?? url);
         const before = network.requests.length;
-        const client = weatherClient(t, { kind: 'fetch', native, url: scenario.url ?? url }, { ca: network.cert, env: { NODE_USE_ENV_PROXY: '1', HTTP_PROXY: network.httpProxy, HTTPS_PROXY: network.httpProxy, ...scenario.env } });
+        const client = weatherClient(t, { kind: 'fetch', native, url: target }, { ca: network.cert, env: { NODE_USE_ENV_PROXY: '1', HTTP_PROXY: network.httpProxy, HTTPS_PROXY: network.httpProxy, ...scenario.env } });
         const result = await client.wait('result'); assert.equal(result.ok, true, JSON.stringify(result));
         assert.equal(result.data.current.us_aqi, 91);
         assert.equal(network.requests.length - before, scenario.proxied ? 1 : 0, `${native ? 'native' : 'weather'} routing`);
@@ -133,18 +138,19 @@ test('wildcard domains bypass their apex and subdomains like native fetch', prox
           assert.equal(result.defaultUnchanged, true); assert.ok(result.connections.length);
           for (const connection of result.connections) { assert.equal(connection.autoSelectFamily, true); assert.equal(connection.attemptTimeout, 2000); }
         }
-      }
+      });
     });
   }
 });
 
-test('reused weather transports observe bypass edits like native fetch', proxyRuntime, async t => {
+test('reused transports observe bypass edits with weather apex and native subdomain routing', proxyRuntime, async t => {
   const network = await weatherNetwork(t);
   for (const url of [network.httpUrl, network.httpsUrl]) {
     for (const variable of ['NO_PROXY', 'no_proxy']) for (const rule of ['*.weather.invalid', 'weather.invalid']) {
       await t.test(`${new URL(url).protocol} ${variable} ${rule}`, async t => {
-        for (const native of [true, false]) {
-          const client = weatherClient(t, { kind: 'sequence', native, url }, { ca: network.cert, env: { NODE_USE_ENV_PROXY: '1', HTTP_PROXY: network.httpProxy, HTTPS_PROXY: network.httpProxy } });
+        for (const native of [true, false]) await t.test(native ? 'native subdomain contract' : 'weather apex contract', async t => {
+          const target = native ? url.replace('://weather.invalid', '://sub.weather.invalid') : url;
+          const client = weatherClient(t, { kind: 'sequence', native, url: target }, { ca: network.cert, env: { NODE_USE_ENV_PROXY: '1', HTTP_PROXY: network.httpProxy, HTTPS_PROXY: network.httpProxy } });
           await client.wait('sequence-ready');
           for (const [id, value] of ['other.invalid', rule, 'other.invalid'].entries()) {
             const before = network.proxyRequestCount;
@@ -153,12 +159,13 @@ test('reused weather transports observe bypass edits like native fetch', proxyRu
             assert.equal(result.data.current.us_aqi, 91);
             assert.equal(network.proxyRequestCount - before, id === 1 ? 0 : 1, `${native ? 'native' : 'weather'} step ${id}`);
           }
-        }
+        });
       });
     }
     await t.test(`${new URL(url).protocol} lowercase deletion and empty override`, async t => {
-      for (const native of [true, false]) {
-        const client = weatherClient(t, { kind: 'sequence', native, url }, { ca: network.cert, env: { NODE_USE_ENV_PROXY: '1', HTTP_PROXY: network.httpProxy, HTTPS_PROXY: network.httpProxy, NO_PROXY: '*.weather.invalid' } });
+      for (const native of [true, false]) await t.test(native ? 'native subdomain contract' : 'weather apex contract', async t => {
+        const target = native ? url.replace('://weather.invalid', '://sub.weather.invalid') : url;
+        const client = weatherClient(t, { kind: 'sequence', native, url: target }, { ca: network.cert, env: { NODE_USE_ENV_PROXY: '1', HTTP_PROXY: network.httpProxy, HTTPS_PROXY: network.httpProxy, NO_PROXY: '*.weather.invalid' } });
         await client.wait('sequence-ready');
         const steps = [{ no_proxy: 'other.invalid' }, { no_proxy: null }, { no_proxy: '' }, { no_proxy: null }, { NO_PROXY: null }];
         for (const [id, env] of steps.entries()) {
@@ -166,7 +173,7 @@ test('reused weather transports observe bypass edits like native fetch', proxyRu
           const result = await client.wait('step', id); assert.equal(result.ok, true, JSON.stringify(result)); assert.equal(result.data.current.us_aqi, 91);
           assert.equal(network.proxyRequestCount - before, [0, 2, 4].includes(id) ? 1 : 0, `${native ? 'native' : 'weather'} step ${id}`);
         }
-      }
+      });
     });
   }
 });

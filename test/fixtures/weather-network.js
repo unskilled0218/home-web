@@ -17,7 +17,7 @@ export async function weatherNetwork(t, { holdAir = false } = {}) {
   const directory = mkdtempSync(temporaryPrefix('weather-network-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const cert = path.join(directory, 'cert.pem'); const key = path.join(directory, 'key.pem');
-  execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', key, '-out', cert, '-days', '1', '-subj', '/CN=weather.invalid', '-addext', 'subjectAltName=DNS:weather.invalid,DNS:sub.weather.invalid,DNS:api.open-meteo.com,DNS:air-quality-api.open-meteo.com,IP:127.0.0.1'], { stdio: 'ignore' });
+  execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', key, '-out', cert, '-days', '1', '-subj', '/CN=weather.invalid', '-addext', 'subjectAltName=DNS:localhost,DNS:weather.invalid,DNS:sub.weather.invalid,DNS:api.open-meteo.com,DNS:air-quality-api.open-meteo.com,IP:127.0.0.1'], { stdio: 'ignore' });
   const tls = { key: readFileSync(key), cert: readFileSync(cert) };
   const servers = []; const sockets = new Set(); const proxySockets = new Set(); const targetSockets = new Set(); const events = new EventEmitter(); const requests = []; const held = []; const airStarted = deferred();
   const upstreamPorts = new Set(); let proxyRequestCount = 0;
@@ -68,7 +68,8 @@ export async function weatherNetwork(t, { holdAir = false } = {}) {
         client.once('close', () => upstream.destroy()); upstream.once('close', () => client.destroy());
       } catch { client.destroy(); }
     });
-    return `${secure ? 'https' : 'http'}://127.0.0.1:${await listen(server, true)}`;
+    // A DNS name provides valid TLS SNI on Node 26; lookup remains pinned to loopback in the child.
+    return `${secure ? 'https://localhost' : 'http://127.0.0.1'}:${await listen(server, true)}`;
   }
   const httpProxy = await proxy(); const httpsProxy = await proxy(true);
   return {

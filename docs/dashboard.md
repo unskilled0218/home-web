@@ -58,6 +58,8 @@ NODE_USE_ENV_PROXY=1 HTTPS_PROXY=http://proxy.lan:3128 npm start
 
 `HTTP_PROXY` or `HTTPS_PROXY` alone does not enable routing. Lowercase variables take precedence. `NO_PROXY` supports hosts, suffixes, ports, and wildcards; `*.example.com` includes the domain itself. Bypass changes are read per request. Invalid enabled proxy settings fail rather than silently going direct. TLS checks and bounded request deadlines remain enabled.
 
+The wildcard-apex behavior above is the weather transport's contract, not a guarantee about Node's native `fetch` across versions. Native comparisons in tests use the shared subdomain behavior; weather tests also enforce apex bypass. For HTTPS proxy URLs, use a DNS hostname covered by the proxy certificate: Node 26 rejects IP addresses passed as TLS server names by the tested Undici versions. Do not disable certificate or hostname verification to work around that error.
+
 ## Connected services
 
 - [Baikal](calendar.md): Read-only agenda.
