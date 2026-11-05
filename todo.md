@@ -1,5 +1,6 @@
 
-- option to display user selected images only
+- image selector
+  - git@git.lan:dev/pixiv-loader.git
 
 ---
 
