@@ -43,6 +43,50 @@ class VerificationTests(unittest.TestCase):
     with self.assertRaisesRegex(self.verify.DATA.Refusal, "byte limit"):
       self.verify.gate("overflow", [sys.executable, "-c", "import os;os.write(1,b'x'*16777217)"], self.base, env, 3)
 
+  def test_local_dispatches_complete_release_suite_once_with_fixed_budget(self):
+    work = self.base / "work"
+    work.mkdir()
+    def snapshot(root, commit, destination):
+      source = Path(destination)
+      shutil.copytree(ROOT / "scripts", source / "scripts")
+      notes = json.loads((ROOT / "scripts/release.json").read_text())["notes"]
+      for name in ("VERSION", "package.json", "package-lock.json", "README.md", "Dockerfile", ".dockerignore", notes):
+        target = source / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(ROOT / name, target)
+    with patch.object(self.verify.DATA, "snapshot", side_effect=snapshot) as export, \
+         patch.object(self.verify.DATA, "command", return_value=b"26.13.0"), \
+         patch.object(self.verify, "gate") as gate:
+      self.verify.local(ROOT, work, "candidate")
+    export.assert_called_once_with(str(ROOT), "candidate", str(work / "verification-source"))
+    expected = ["shell syntax " + path.name for path in sorted((ROOT / "scripts").glob("*.sh"))]
+    expected += ["locked development dependencies", "JavaScript syntax", "application tests", "release tests", "production packaging"]
+    self.assertEqual([call.args[0] for call in gate.call_args_list], expected)
+    release = [call for call in gate.call_args_list if call.args[0] == "release tests"]
+    self.assertEqual(len(release), 1)
+    self.assertEqual(release[0].args[1], ("python3", "-B", "-u", "-m", "unittest", "discover", "-s", "test/release-template", "-v"))
+    self.assertEqual(release[0].args[2], work / "verification-source")
+    self.assertEqual(release[0].args[3]["HOME"], str(work / "verification-home"))
+    self.assertEqual(release[0].args[4], 1800)
+    self.assertEqual(release[0].args[4], self.verify.RELEASE_TEST_TIMEOUT_SECONDS)
+
+  def test_gate_timeout_reaps_ready_descendant_and_preserves_unrelated_process(self):
+    marker = self.base / "ready"
+    sentinel = subprocess.Popen([sys.executable, "-c", "import time;time.sleep(30)"])
+    child = "import os,time;from pathlib import Path;Path(" + repr(str(marker)) + ").write_text(str(os.getpid()));time.sleep(30)"
+    # Wait for descendant readiness inside the command before keeping its parent alive.
+    code = "import subprocess,sys,time;from pathlib import Path;subprocess.Popen([sys.executable,'-c',sys.argv[1]],start_new_session=True);p=Path(sys.argv[2]);\nwhile not p.exists(): time.sleep(.01)\ntime.sleep(30)"
+    try:
+      with self.assertRaisesRegex(self.verify.DATA.Refusal, "Verification failed \\(release tests\\): Command timed out"):
+        self.verify.gate("release tests", [sys.executable, "-c", code, child, str(marker)], self.base,
+                         self.verify.verification_environment(self.base), 1)
+      self.assertTrue(marker.exists(), "The descendant must start before timeout cleanup is tested")
+      self.assertFalse(Path("/proc/" + marker.read_text()).exists())
+      self.assertIsNone(sentinel.poll())
+    finally:
+      sentinel.terminate()
+      sentinel.wait(timeout=3)
+
   def test_supervision_reaps_separate_session_and_double_fork_without_touching_sentinel(self):
     sentinel = subprocess.Popen([sys.executable, "-c", "import time;time.sleep(30)"])
     self.addCleanup(lambda: sentinel.poll() is None and sentinel.terminate())

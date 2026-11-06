@@ -28,6 +28,8 @@ def data_module():
 
 DATA = data_module()
 LABEL = "dev.home-web.release-smoke"
+RELEASE_TEST_COMMAND = ("python3", "-B", "-u", "-m", "unittest", "discover", "-s", "test/release-template", "-v")
+RELEASE_TEST_TIMEOUT_SECONDS = 1800
 
 
 def verification_environment(work):
@@ -86,7 +88,7 @@ def local(root, work, commit):
   gate("locked development dependencies", ["npm", "ci", "--ignore-scripts", "--fetch-retries=0", "--fetch-timeout=60000"], source, env, 300)
   gate("JavaScript syntax", ["npm", "run", "check"], source, env, 120)
   gate("application tests", ["npm", "test", "--", "--test-concurrency=1"], source, env, 1200)
-  gate("release tests", ["python3", "-B", "-u", "-m", "unittest", "discover", "-s", "test/release-template", "-v"], source, env, 1200)
+  gate("release tests", RELEASE_TEST_COMMAND, source, env, RELEASE_TEST_TIMEOUT_SECONDS)
   gate("production packaging", ["node", "scripts/check-production.js"], source, env, 180)
   message("Local verification passed; no publication credentials used")
 

@@ -994,12 +994,28 @@ class BashPublicationTests(unittest.TestCase):
     self.assert_no_writes()
 
   def test_ignored_worktree_secret_is_not_in_committed_snapshot(self):
-    with (self.root / ".gitignore").open("a") as output:
-      output.write("ignored-secret\n")
+    self.assert_ignored_worktree_secret_is_not_in_committed_snapshot(trailing_newline=False)
+
+  def test_ignored_worktree_secret_with_trailing_newline_is_not_in_committed_snapshot(self):
+    self.assert_ignored_worktree_secret_is_not_in_committed_snapshot(trailing_newline=True)
+
+  def assert_ignored_worktree_secret_is_not_in_committed_snapshot(self, trailing_newline):
+    ignore = self.root / ".gitignore"
+    original = ignore.read_bytes().rstrip(b"\n") + (b"\n" if trailing_newline else b"")
+    ignore.write_bytes(original)
+    with ignore.open("a") as output:
+      output.write("\nignored-secret\n")
+    self.assertTrue(ignore.read_bytes().startswith(original))
+    self.assertIn(original.splitlines()[-1], ignore.read_bytes().splitlines())
     self.commit()
     (self.root / "ignored-secret").write_text("SENTINEL_PRIVATE_TOKEN")
+    self.assertEqual(self.git("check-ignore", "ignored-secret"), "ignored-secret")
+    self.assertEqual(self.git("ls-files", "--", "ignored-secret"), "")
+    self.assertEqual(self.git("status", "--porcelain"), "")
     result = self.release()
     self.assertEqual(result.returncode, 0, result.stderr)
+    self.assertIn("build", self.events())
+    self.assertIn("release-post", self.events())
 
   def test_token_symlink_is_rejected(self):
     backing = self.base / "backing"

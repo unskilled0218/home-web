@@ -43,7 +43,7 @@ Provision the token at the new location outside the repository before publishing
 
 Tokens need repository/package permissions and access to the repository's packages unit. Never put token values in Git, `.env`, arguments, history, or logs.
 
-Keep `VERSION`, npm manifest/lock versions, README, notes path, and `# Release v<version>` synchronized. Never reuse a published version. Current notes: [0.17.50](releases/0.17.50.md).
+Keep `VERSION`, npm manifest/lock versions, README, notes path, and `# Release v<version>` synchronized. Never reuse a published version. Current notes: [0.17.51](releases/0.17.51.md).
 
 Serialize all repository, image, and package writers, including other checkouts, UI actions, and in-flight requests. The checkout lock is not distributed exclusion.
 
@@ -74,7 +74,7 @@ Runtime probes use `docker exec` and owned daemon-side named volumes. They do no
 
 Only then does it publish the annotated version tag, promote the verified digest to `latest` without rebuilding, create a notes-only release, and verify publication and package association.
 
-Missing evidence, timeout, output overflow, or failed checks stop publication. Main budgets are 60 seconds per builder inspection, 300 seconds for dependencies, 120 seconds for syntax, 1,200 seconds per suite, 180 seconds for packaging, and 300/120 seconds per platform for pull/readiness.
+Missing evidence, timeout, output overflow, or failed checks stop publication. Main budgets are 60 seconds per builder inspection, 300 seconds for dependencies, 120 seconds for syntax, 1,200 seconds for application tests, 1,800 seconds for release tests, 180 seconds for packaging, and 300/120 seconds per platform for pull/readiness. The release-suite budget allows headroom above measured runs of about 1,243 seconds; it remains a fixed deadline, not a test bypass. Slower hosts may still time out and require diagnosis. `--validate` does not run these suites.
 
 Temporary storage prefers `/tmp/opencode`. `RELEASE_TEMP_PARENT` may select an existing absolute, owned, writable, non-symlink directory outside the project. It changes storage only, not verification requirements.
 

@@ -5,6 +5,6 @@
   "image": "git.lan/dev/home-web",
   "username": "dev",
   "token_file": "~/.config/token/git",
-  "notes": "docs/releases/0.17.50.md",
+  "notes": "docs/releases/0.17.51.md",
   "platforms": ["linux/amd64", "linux/arm64"]
 }
