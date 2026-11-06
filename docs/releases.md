@@ -74,7 +74,7 @@ Runtime probes use `docker exec` and owned daemon-side named volumes. They do no
 
 Only then does it publish the annotated version tag, promote the verified digest to `latest` without rebuilding, create a notes-only release, and verify publication and package association.
 
-Missing evidence, timeout, output overflow, or failed checks stop publication. Main budgets are 60 seconds per builder inspection, 300 seconds for dependencies, 120 seconds for syntax, 1,200 seconds for application tests, 1,800 seconds for release tests, 180 seconds for packaging, and 300/120 seconds per platform for pull/readiness. The release-suite budget allows headroom above measured runs of about 1,243 seconds; it remains a fixed deadline, not a test bypass. Slower hosts may still time out and require diagnosis. `--validate` does not run these suites.
+Missing evidence, timeout, output overflow, or failed checks stop publication. Main budgets are 60 seconds per builder inspection, 300 seconds for dependencies, 120 seconds for syntax, 1,200 seconds for application tests, 1,800 seconds for release tests, 180 seconds for packaging, and 300/120 seconds per platform for pull/readiness. The release-suite budget allows headroom above a measured complete candidate run of about 1,264 seconds; it remains a fixed deadline, not a test bypass. Slower hosts may still time out and require diagnosis. `--validate` does not run these suites.
 
 Temporary storage prefers `/tmp/opencode`. `RELEASE_TEMP_PARENT` may select an existing absolute, owned, writable, non-symlink directory outside the project. It changes storage only, not verification requirements.
 
